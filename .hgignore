@@ -1,0 +1,7 @@
+.*\.orig
+.*\.rej
+.*~
+.*pyc
+build/.*
+dist/
+MANIFEST$
