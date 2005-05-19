@@ -13,6 +13,7 @@ from mercurial import mdiff
 
 def hex(node): return binascii.hexlify(node)
 def bin(node): return binascii.unhexlify(node)
+def short(node): return hex(node[:4])
 
 def compress(text):
     return zlib.compress(text)
@@ -28,26 +29,97 @@ def hash(text, p1, p2):
 nullid = "\0" * 20
 indexformat = ">4l20s20s20s"
 
+class lazyparser:
+    def __init__(self, data):
+        self.data = data
+        self.s = struct.calcsize(indexformat)
+        self.l = len(data)/self.s
+        self.index = [None] * self.l
+        self.map = {nullid: -1}
+
+        if 0:
+            n = 0
+            i = self.data
+            s = struct.calcsize(indexformat)
+            for f in xrange(0, len(i), s):
+                # offset, size, base, linkrev, p1, p2, nodeid
+                e = struct.unpack(indexformat, i[f:f + s])
+                self.map[e[6]] = n
+                self.index.append(e)
+                n += 1
+
+    def load(self, pos):
+        block = pos / 1000
+        i = block * 1000
+        end = min(self.l, i + 1000)
+        while i < end:
+            d = self.data[i * self.s: (i + 1) * self.s]
+            e = struct.unpack(indexformat, d)
+            self.index[i] = e
+            self.map[e[6]] = i
+            i += 1
+        
+class lazyindex:
+    def __init__(self, parser):
+        self.p = parser
+    def __len__(self):
+        return len(self.p.index)
+    def __getitem__(self, pos):
+        i = self.p.index[pos]
+        if not i:
+            self.p.load(pos)
+            return self.p.index[pos]
+        return i
+    def append(self, e):
+        self.p.index.append(e)
+        
+class lazymap:
+    def __init__(self, parser):
+        self.p = parser
+    def load(self, key):
+        n = self.p.data.find(key)
+        if n < 0: raise KeyError("node " + hex(key))
+        pos = n / self.p.s
+        self.p.load(pos)
+    def __contains__(self, key):
+        try:
+            self[key]
+            return True
+        except KeyError:
+            return False
+    def __iter__(self):
+        for i in xrange(self.p.l):
+            try:
+                yield self.p.index[i][6]
+            except:
+                self.p.load(i)
+                yield self.p.index[i][6]
+    def __getitem__(self, key):
+        try:
+            return self.p.map[key]
+        except KeyError:
+            try:
+                self.load(key)
+                return self.p.map[key]
+            except KeyError:
+                raise KeyError("node " + hex(key))
+    def __setitem__(self, key, val):
+        self.p.map[key] = val
+
 class revlog:
     def __init__(self, opener, indexfile, datafile):
         self.indexfile = indexfile
         self.datafile = datafile
-        self.index = []
         self.opener = opener
         self.cache = None
-        self.nodemap = {nullid: -1}
         # read the whole index for now, handle on-demand later
         try:
-            n = 0
             i = self.opener(self.indexfile).read()
-            s = struct.calcsize(indexformat)
-            for f in range(0, len(i), s):
-                # offset, size, base, linkrev, p1, p2, nodeid
-                e = struct.unpack(indexformat, i[f:f + s])
-                self.nodemap[e[6]] = n
-                self.index.append(e)
-                n += 1
-        except IOError: pass
+        except IOError:
+            i = ""
+        parser = lazyparser(i)
+        self.index = lazyindex(parser)
+        self.nodemap = lazymap(parser)
 
     def tip(self): return self.node(len(self.index) - 1)
     def count(self): return len(self.index)
@@ -78,17 +150,11 @@ class revlog:
                 
         return None
 
-    def revisions(self, list):
-        # this can be optimized to do spans, etc
-        # be stupid for now
-        for node in list:
-            yield self.revision(node)
-
     def diff(self, a, b):
         return mdiff.textdiff(a, b)
 
-    def patch(self, text, patch):
-        return mdiff.patch(text, patch)
+    def patches(self, t, pl):
+        return mdiff.patches(t, pl)
 
     def revision(self, node):
         if node == nullid: return ""
@@ -114,15 +180,18 @@ class revlog:
             last = self.length(base)
             text = decompress(data[:last])
 
+        bins = []
         for r in xrange(base + 1, rev + 1):
             s = self.length(r)
-            b = decompress(data[last:last + s])
-            text = self.patch(text, b)
+            bins.append(decompress(data[last:last + s]))
             last = last + s
+
+        text = mdiff.patches(text, bins)
 
         (p1, p2) = self.parents(node)
         if node != hash(text, p1, p2):
-            raise "integrity check failed on %s:%d" % (self.datafile, rev)
+            raise IOError("integrity check failed on %s:%d"
+                          % (self.datafile, rev))
 
         self.cache = (node, rev, text)
         return text  
@@ -142,7 +211,10 @@ class revlog:
             start = self.start(base)
             end = self.end(t)
             prev = self.revision(self.tip())
-            data = compress(self.diff(prev, text))
+            d = self.diff(prev, text)
+            if self.patches(prev, [d]) != text:
+                raise AssertionError("diff failed")
+            data = compress(d)
             dist = end - start + len(data)
 
         # full versions are inserted when the needed deltas
@@ -205,34 +277,9 @@ class revlog:
 
         return nullid
 
-    def mergedag(self, other, transaction, linkseq, accumulate = None):
-        """combine the nodes from other's DAG into ours"""
-        old = self.tip()
-        i = self.count()
-        l = []
-
-        # merge the other revision log into our DAG
-        for r in range(other.count()):
-            id = other.node(r)
-            if id not in self.nodemap:
-                (xn, yn) = other.parents(id)
-                l.append((id, xn, yn))
-                self.nodemap[id] = i
-                i += 1
-
-        # merge node date for new nodes
-        r = other.revisions([e[0] for e in l])
-        for e in l:
-            t = r.next()
-            if accumulate: accumulate(t)
-            self.addrevision(t, transaction, linkseq.next(), e[1], e[2])
-
-        # return the unmerged heads for later resolving
-        return (old, self.tip())
-
     def group(self, linkmap):
         # given a list of changeset revs, return a set of deltas and
-        # metadata corresponding to nodes the first delta is
+        # metadata corresponding to nodes. the first delta is
         # parent(nodes[0]) -> nodes[0] the receiver is guaranteed to
         # have this parent as it has all history before these
         # changesets. parent is parent[0]
@@ -301,14 +348,12 @@ class revlog:
 
         # helper to reconstruct intermediate versions
         def construct(text, base, rev):
-            for r in range(base + 1, rev + 1):
-                b = decompress(chunks[r])
-                text = self.patch(text, b)
-            return text
+            bins = [decompress(chunks[r]) for r in xrange(base + 1, rev + 1)]
+            return mdiff.patches(text, bins)
 
         # build deltas
         deltas = []
-        for d in range(0, len(revs) - 1):
+        for d in xrange(0, len(revs) - 1):
             a, b = revs[d], revs[d + 1]
             n = self.node(b)
             
@@ -349,6 +394,8 @@ class revlog:
 
         # retrieve the parent revision of the delta chain
         chain = data[24:44]
+        if not chain in self.nodemap:
+            raise "unknown base %s" % short(chain[:4])
 
         # track the base of the current delta log
         r = self.count()
@@ -374,6 +421,8 @@ class revlog:
             l, node, p1, p2, cs = struct.unpack(">l20s20s20s20s",
                                                 data[pos:pos+84])
             link = linkmapper(cs)
+            if node in self.nodemap:
+                raise "already have %s" % hex(node[:4])
             delta = data[pos + 84:pos + l]
             pos += l
 
@@ -391,7 +440,7 @@ class revlog:
                 dfh.flush()
                 ifh.flush()
                 text = self.revision(chain)
-                text = self.patch(text, delta)
+                text = self.patches(text, [delta])
                 chk = self.addrevision(text, transaction, link, p1, p2)
                 if chk != node:
                     raise "consistency error adding group"

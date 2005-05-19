@@ -10,6 +10,7 @@ import urllib
 from mercurial import byterange
 from mercurial.transaction import *
 from mercurial.revlog import *
+from difflib import SequenceMatcher
 
 class filelog(revlog):
     def __init__(self, opener, path):
@@ -29,41 +30,31 @@ class filelog(revlog):
     def add(self, text, transaction, link, p1=None, p2=None):
         return self.addrevision(text, transaction, link, p1, p2)
 
-    def resolvedag(self, old, new, transaction, link):
-        """resolve unmerged heads in our DAG"""
-        if old == new: return None
-        a = self.ancestor(old, new)
-        if old == a: return None
-        return self.merge3(old, new, a, transaction, link)
-
-    def merge3(self, my, other, base, transaction, link):
-        """perform a 3-way merge and append the result"""
-        def temp(prefix, node):
-            (fd, name) = tempfile.mkstemp(prefix)
-            f = os.fdopen(fd, "w")
-            f.write(self.revision(node))
-            f.close()
-            return name
-
-        a = temp("local", my)
-        b = temp("remote", other)
-        c = temp("parent", base)
-
-        cmd = os.environ["HGMERGE"]
-        r = os.system("%s %s %s %s" % (cmd, a, b, c))
-        if r:
-            raise "Merge failed, implement rollback!"
-
-        t = open(a).read()
-        os.unlink(a)
-        os.unlink(b)
-        os.unlink(c)
-        return self.addrevision(t, transaction, link, my, other)
-
-    def merge(self, other, transaction, linkseq, link):
-        """perform a merge and resolve resulting heads"""
-        (o, n) = self.mergedag(other, transaction, linkseq)
-        return self.resolvedag(o, n, transaction, link)
+    def annotate(self, node):
+        revs = []
+        while node != nullid:
+            revs.append(node)
+            node = self.parents(node)[0]
+        revs.reverse()
+        prev = []
+        annotate = []
+        for node in revs:
+            curr = self.read(node).splitlines(1)
+            linkrev = self.linkrev(node)
+            sm = SequenceMatcher(None, prev, curr)
+            offset = 0
+            for o, m, n, s, t in sm.get_opcodes():
+                if o in ('insert','replace'):
+                    annotate[m+offset:n+offset] = \
+                        [ (linkrev, l) for l in curr[s:t]]
+                    if o == 'insert':
+                        offset += m-n
+                elif o == 'delete':
+                    del annotate[m+offset:n+offset]
+                    offset -= m-n
+            assert len(annotate) == len(curr)
+            prev = curr
+        return annotate
 
 class manifest(revlog):
     def __init__(self, opener):
@@ -74,7 +65,7 @@ class manifest(revlog):
 
     def read(self, node):
         if self.mapcache and self.mapcache[0] == node:
-            return self.mapcache[1]
+            return self.mapcache[1].copy()
         text = self.revision(node)
         map = {}
         self.listcache = (text, text.splitlines(1))
@@ -87,7 +78,11 @@ class manifest(revlog):
     def diff(self, a, b):
         # this is sneaky, as we're not actually using a and b
         if self.listcache and len(self.listcache[0]) == len(a):
-            return mdiff.diff(self.listcache[1], self.addlist, 1)
+            d = mdiff.diff(self.listcache[1], self.addlist, 1)
+            if mdiff.patch(a, d) != b:
+                sys.stderr.write("*** sortdiff failed, falling back ***\n")
+                return mdiff.textdiff(a, b)
+            return d
         else:
             return mdiff.textdiff(a, b)
 
@@ -132,9 +127,6 @@ class changelog(revlog):
         l = [hex(manifest), user, date] + list + ["", desc]
         text = "\n".join(l)
         return self.addrevision(text, transaction, self.count(), p1, p2)
-
-    def merge3(self, my, other, base):
-        pass
 
 class dircache:
     def __init__(self, opener, ui):
@@ -306,123 +298,8 @@ class localrepository:
         return filelog(self.opener, f)
 
     def transaction(self):
-        return transaction(self.opener, self.join("journal"))
-
-    def merge(self, other):
-        tr = self.transaction()
-        changed = {}
-        new = {}
-        seqrev = self.changelog.count()
-        # some magic to allow fiddling in nested scope
-        nextrev = [seqrev]
-
-        # helpers for back-linking file revisions to local changeset
-        # revisions so we can immediately get to changeset from annotate
-        def accumulate(text):
-            # track which files are added in which changeset and the
-            # corresponding _local_ changeset revision
-            files = self.changelog.extract(text)[3]
-            for f in files:
-                changed.setdefault(f, []).append(nextrev[0])
-            nextrev[0] += 1
-
-        def seq(start):
-            while 1:
-                yield start
-                start += 1
-
-        def lseq(l):
-            for r in l:
-                yield r
-
-        # begin the import/merge of changesets
-        self.ui.status("merging new changesets\n")
-        (co, cn) = self.changelog.mergedag(other.changelog, tr,
-                                           seq(seqrev), accumulate)
-        resolverev = self.changelog.count()
-
-        # is there anything to do?
-        if co == cn:
-            tr.close()
-            return
-        
-        # do we need to resolve?
-        simple = (co == self.changelog.ancestor(co, cn))
-
-        # merge all files changed by the changesets,
-        # keeping track of the new tips
-        changelist = changed.keys()
-        changelist.sort()
-        for f in changelist:
-            sys.stdout.write(".")
-            sys.stdout.flush()
-            r = self.file(f)
-            node = r.merge(other.file(f), tr, lseq(changed[f]), resolverev)
-            if node:
-                new[f] = node
-        sys.stdout.write("\n")
-
-        # begin the merge of the manifest
-        self.ui.status("merging manifests\n")
-        (mm, mo) = self.manifest.mergedag(other.manifest, tr, seq(seqrev))
-
-        # For simple merges, we don't need to resolve manifests or changesets
-        if simple:
-            tr.close()
-            return
-
-        ma = self.manifest.ancestor(mm, mo)
-
-        # resolve the manifest to point to all the merged files
-        self.ui.status("resolving manifests\n")
-        mmap = self.manifest.read(mm) # mine
-        omap = self.manifest.read(mo) # other
-        amap = self.manifest.read(ma) # ancestor
-        nmap = {}
-
-        for f, mid in mmap.iteritems():
-            if f in omap:
-                if mid != omap[f]: 
-                    nmap[f] = new.get(f, mid) # use merged version
-                else:
-                    nmap[f] = new.get(f, mid) # they're the same
-                del omap[f]
-            elif f in amap:
-                if mid != amap[f]: 
-                    pass # we should prompt here
-                else:
-                    pass # other deleted it
-            else:
-                nmap[f] = new.get(f, mid) # we created it
-                
-        del mmap
-
-        for f, oid in omap.iteritems():
-            if f in amap:
-                if oid != amap[f]:
-                    pass # this is the nasty case, we should prompt
-                else:
-                    pass # probably safe
-            else:
-                nmap[f] = new.get(f, oid) # remote created it
-
-        del omap
-        del amap
-
-        node = self.manifest.add(nmap, tr, resolverev, mm, mo)
-
-        # Now all files and manifests are merged, we add the changed files
-        # and manifest id to the changelog
-        self.ui.status("committing merge changeset\n")
-        new = new.keys()
-        new.sort()
-        if co == cn: cn = -1
-
-        edittext = "\n"+"".join(["HG: changed %s\n" % f for f in new])
-        edittext = self.ui.edit(edittext)
-        n = self.changelog.add(node, new, edittext, tr, co, cn)
-
-        tr.close()
+        return transaction(self.opener, self.join("journal"),
+                           self.join("undo"))
 
     def commit(self, parent, update = None, text = ""):
         tr = self.transaction()
@@ -441,6 +318,7 @@ class localrepository:
         new = {}
         linkrev = self.changelog.count()
         for f in update:
+            self.ui.note(f + "\n")
             try:
                 t = file(f).read()
             except IOError:
@@ -488,6 +366,7 @@ class localrepository:
         l.sort()
         stats = []
         for f in l:
+            self.ui.note(f + "\n")
             r = self.file(f)
             t = r.revision(mmap[f])
             try:
@@ -611,43 +490,57 @@ class localrepository:
     def newer(self, nodes):
         m = {}
         nl = []
+        pm = {}
         cl = self.changelog
         t = l = cl.count()
+
+        # find the lowest numbered node
         for n in nodes:
             l = min(l, cl.rev(n))
-            for p in cl.parents(n):
-                m[p] = 1
+            m[n] = 1
 
         for i in xrange(l, t):
             n = cl.node(i)
+            if n in m: # explicitly listed
+                pm[n] = 1
+                nl.append(n)
+                continue
             for p in cl.parents(n):
-                if p in m and n not in m:
-                    m[n] = 1
+                if p in pm: # parent listed
+                    pm[n] = 1
                     nl.append(n)
+                    break
 
         return nl
 
     def getchangegroup(self, remote):
         tip = remote.branches([])[0]
+        self.ui.debug("remote tip branch is %s:%s\n" %
+                      (short(tip[0]), short(tip[1])))
         m = self.changelog.nodemap
         unknown = [tip]
         search = []
         fetch = []
 
         if tip[0] in m:
+            self.ui.note("nothing to do!\n")
             return None
 
         while unknown:
             n = unknown.pop(0)
             if n == nullid: break
             if n[1] and n[1] in m: # do we know the base?
+                self.ui.debug("found incomplete branch %s\n" % short(n[1]))
                 search.append(n) # schedule branch range for scanning
             else:
+                if n[2] in m and n[3] in m:
+                    if n[1] not in fetch:
+                        self.ui.debug("found new changeset %s\n" %
+                                      short(n[1]))
+                        fetch.append(n[1]) # earliest unknown
+                        continue
                 for b in remote.branches([n[2], n[3]]):
-                    if b[0] in m:
-                        if n[1] not in fetch:
-                            fetch.append(n[1]) # earliest unknown
-                    else:
+                    if b[0] not in m:
                         unknown.append(b)
   
         while search:
@@ -657,16 +550,23 @@ class localrepository:
             f = 1
             for i in l + [n[1]]:
                 if i in m:
-                    if f <= 4:
+                    if f <= 2:
+                        self.ui.debug("found new branch changeset %s\n" %
+                                          short(p))
                         fetch.append(p)
                     else:
+                        self.ui.debug("narrowed branch search to %s:%s\n"
+                                      % (short(p), short(i)))
                         search.append((p, i))
                     break
                 p, f = i, f * 2
 
         for f in fetch:
             if f in m:
-                raise "already have", hex(f[:4])
+                raise "already have", short(f[:4])
+
+        self.ui.note("adding new changesets starting at " +
+                     " ".join([short(f) for f in fetch]) + "\n")
 
         return remote.changegroup(fetch)
     
@@ -725,17 +625,21 @@ class localrepository:
         tr = self.transaction()
         simple = True
 
-        print "merging changesets"
+        self.ui.status("adding changesets\n")
         # pull off the changeset group
+        def report(x):
+            self.ui.debug("add changeset %s\n" % short(x))
+            return self.changelog.count()
+            
         csg = getchunk()
         co = self.changelog.tip()
-        cn = self.changelog.addgroup(csg, lambda x: self.changelog.count(), tr)
+        cn = self.changelog.addgroup(csg, report, tr)
 
-        print "merging manifests"
+        self.ui.status("adding manifests\n")
         # pull off the manifest group
         mfg = getchunk()
-        mo = self.manifest.tip()
-        mm = self.manifest.addgroup(mfg, lambda x: self.changelog.rev(x), tr)
+        mm = self.manifest.tip()
+        mo = self.manifest.addgroup(mfg, lambda x: self.changelog.rev(x), tr)
 
         # do we need a resolve?
         if self.changelog.ancestor(co, cn) != co:
@@ -743,57 +647,70 @@ class localrepository:
             resolverev = self.changelog.count()
 
         # process the files
-        print "merging files"
+        self.ui.status("adding files\n")
         new = {}
         while 1:
             f = getchunk(4)
             if not f: break
             fg = getchunk()
-
+            self.ui.debug("adding %s revisions\n" % f)
             fl = self.file(f)
             o = fl.tip()
             n = fl.addgroup(fg, lambda x: self.changelog.rev(x), tr)
             if not simple:
-                nn = fl.resolvedag(o, n, tr, resolverev)
-                if nn: new[f] = nn
+                if o == n: continue
+                # this file has changed between branches, so it must be
+                # represented in the merge changeset
+                new[f] = self.merge3(fl, f, o, n, tr, resolverev)
 
         # For simple merges, we don't need to resolve manifests or changesets
         if simple:
+            self.ui.debug("simple merge, skipping resolve\n")
             tr.close()
             return
 
         # resolve the manifest to point to all the merged files
         self.ui.status("resolving manifests\n")
         ma = self.manifest.ancestor(mm, mo)
-        mmap = self.manifest.read(mm) # mine
         omap = self.manifest.read(mo) # other
         amap = self.manifest.read(ma) # ancestor
+        mmap = self.manifest.read(mm) # mine
+        self.ui.debug("ancestor %s local %s other %s\n" %
+                      (short(ma), short(mm), short(mo)))
         nmap = {}
 
         for f, mid in mmap.iteritems():
             if f in omap:
-                if mid != omap[f]: 
-                    nmap[f] = new.get(f, mid) # use merged version
+                if mid != omap[f]:
+                    self.ui.debug("%s versions differ\n" % f)
+                    if f in new: self.ui.debug("%s updated in resolve\n" % f)
+                    # use merged version or local version
+                    nmap[f] = new.get(f, mid)
                 else:
-                    nmap[f] = new.get(f, mid) # they're the same
+                    nmap[f] = mid # keep ours
                 del omap[f]
             elif f in amap:
-                if mid != amap[f]: 
+                if mid != amap[f]:
+                    self.ui.debug("local changed %s which other deleted\n" % f)
                     pass # we should prompt here
                 else:
+                    self.ui.debug("other deleted %s\n" % f)
                     pass # other deleted it
             else:
-                nmap[f] = new.get(f, mid) # we created it
+                self.ui.debug("local created %s\n" %f)
+                nmap[f] = mid # we created it
                 
         del mmap
 
         for f, oid in omap.iteritems():
             if f in amap:
                 if oid != amap[f]:
+                    self.ui.debug("other changed %s which we deleted\n" % f)
                     pass # this is the nasty case, we should prompt
                 else:
                     pass # probably safe
             else:
+                self.ui.debug("remote created %s\n" % f)
                 nmap[f] = new.get(f, oid) # remote created it
 
         del omap
@@ -808,11 +725,48 @@ class localrepository:
         new.sort()
         if co == cn: cn = -1
 
-        edittext = "\n"+"".join(["HG: changed %s\n" % f for f in new])
+        edittext = "\nHG: merge resolve\n" + \
+                   "".join(["HG: changed %s\n" % f for f in new])
         edittext = self.ui.edit(edittext)
         n = self.changelog.add(node, new, edittext, tr, co, cn)
 
         tr.close()
+
+    def merge3(self, fl, fn, my, other, transaction, link):
+        """perform a 3-way merge and append the result"""
+        
+        def temp(prefix, node):
+            pre = "%s~%s." % (os.path.basename(fn), prefix)
+            (fd, name) = tempfile.mkstemp("", pre)
+            f = os.fdopen(fd, "w")
+            f.write(fl.revision(node))
+            f.close()
+            return name
+
+        base = fl.ancestor(my, other)
+        self.ui.note("resolving %s\n" % fn)
+        self.ui.debug("local %s remote %s ancestor %s\n" %
+                              (short(my), short(other), short(base)))
+
+        if my == base: 
+            text = fl.revision(other)
+        else:
+            a = temp("local", my)
+            b = temp("remote", other)
+            c = temp("parent", base)
+
+            cmd = os.environ["HGMERGE"]
+            self.ui.debug("invoking merge with %s\n" % cmd)
+            r = os.system("%s %s %s %s" % (cmd, a, b, c))
+            if r:
+                raise "Merge failed!"
+
+            text = open(a).read()
+            os.unlink(a)
+            os.unlink(b)
+            os.unlink(c)
+            
+        return fl.addrevision(text, transaction, link, my, other)
 
 class remoterepository:
     def __init__(self, ui, path):
@@ -820,6 +774,7 @@ class remoterepository:
         self.ui = ui
 
     def do_cmd(self, cmd, **args):
+        self.ui.debug("sending %s command\n" % cmd)
         q = {"cmd": cmd}
         q.update(args)
         qs = urllib.urlencode(q)
@@ -856,8 +811,10 @@ def repository(ui, path=None, create=0):
         return localrepository(ui, path, create)
 
 class ui:
-    def __init__(self, verbose=False, debug=False):
-        self.verbose = verbose
+    def __init__(self, verbose=False, debug=False, quiet=False):
+        self.quiet = quiet and not verbose and not debug
+        self.verbose = verbose or debug
+        self.debugflag = debug
     def write(self, *args):
         for a in args:
             sys.stdout.write(str(a))
@@ -868,13 +825,13 @@ class ui:
             if re.match(pat, r):
                 return r
     def status(self, *msg):
-        self.write(*msg)
+        if not self.quiet: self.write(*msg)
     def warn(self, msg):
         self.write(*msg)
     def note(self, msg):
         if self.verbose: self.write(*msg)
     def debug(self, msg):
-        if self.debug: self.write(*msg)
+        if self.debugflag: self.write(*msg)
     def edit(self, text):
         (fd, name) = tempfile.mkstemp("hg")
         f = os.fdopen(fd, "w")
