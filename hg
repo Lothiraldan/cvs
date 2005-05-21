@@ -1,0 +1,540 @@
+#!/usr/bin/env python
+#
+# mercurial - a minimal scalable distributed SCM
+# v0.4f "jane dark"
+#
+# Copyright 2005 Matt Mackall <mpm@selenic.com>
+#
+# This software may be used and distributed according to the terms
+# of the GNU General Public License, incorporated herein by reference.
+
+# the psyco compiler makes commits a bit faster
+# and makes changegroup merge about 20 times slower!
+# try:
+#    import psyco
+#    psyco.full()
+# except:
+#    pass
+
+import sys, os, time
+from mercurial import hg, mdiff, fancyopts
+
+def help():
+    print """\
+ commands:
+
+ init                  create a new repository in this directory
+ branch <path>         create a branch of <path> in this directory
+ merge <path>          merge changes from <path> into local repository
+ checkout [changeset]  checkout the latest or given changeset
+ status                show new, missing, and changed files in working dir
+ add [files...]        add the given files in the next commit
+ remove [files...]     remove the given files in the next commit
+ addremove             add all new files, delete all missing files
+ commit                commit all changes to the repository
+ history               show changeset history
+ log <file>            show revision history of a single file
+ dump <file> [rev]     dump the latest or given revision of a file
+ dumpmanifest [rev]    dump the latest or given revision of the manifest
+ diff [files...]       diff working directory (or selected files)
+ tags                  show current changeset tags
+ annotate [files...]   show changeset number per file line
+ blame [files...]      show commit user per file line
+"""
+
+def filterfiles(list, files):
+    l = [ x for x in list if x in files ]
+
+    for f in files:
+        if f[-1] != os.sep: f += os.sep
+        l += [ x for x in list if x.startswith(f) ]
+    return l
+
+def diff(files = None, node1 = None, node2 = None):
+    def date(c):
+        return time.asctime(time.gmtime(float(c[2].split(' ')[0])))
+
+    if node2:
+        change = repo.changelog.read(node2)
+        mmap2 = repo.manifest.read(change[0])
+        (c, a, d) = repo.diffrevs(node1, node2)
+        def read(f): return repo.file(f).read(mmap2[f])
+        date2 = date(change)
+    else:
+        date2 = time.asctime()
+        if not node1:
+            node1 = repo.current
+        (c, a, d) = repo.diffdir(repo.root, node1)
+        def read(f): return file(os.path.join(repo.root, f)).read()
+
+    change = repo.changelog.read(node1)
+    mmap = repo.manifest.read(change[0])
+    date1 = date(change)
+
+    if files:
+        c = filterfiles(c, files)
+        d = filterfiles(d, files)
+
+    for f in c:
+        to = repo.file(f).read(mmap[f])
+        tn = read(f)
+        sys.stdout.write(mdiff.unidiff(to, date1, tn, date2, f))
+    for f in d:
+        to = repo.file(f).read(mmap[f])
+        tn = ""
+        sys.stdout.write(mdiff.unidiff(to, date1, tn, date2, f))
+
+options = {}
+opts = [('v', 'verbose', None, 'verbose'),
+        ('d', 'debug', None, 'debug'),
+        ('q', 'quiet', None, 'quiet'),
+        ('y', 'noninteractive', None, 'run non-interactively'),
+        ]
+
+args = fancyopts.fancyopts(sys.argv[1:], opts, options,
+                           'hg [options] <command> [command options] [files]')
+
+try:
+    cmd = args[0]
+    args = args[1:]
+except:
+    cmd = ""
+
+ui = hg.ui(options["verbose"], options["debug"], options["quiet"],
+           not options["noninteractive"])
+    
+if cmd == "init":
+    repo = hg.repository(ui, ".", create=1)
+    sys.exit(0)
+elif cmd == "branch" or cmd == "clone":
+    os.system("cp -al %s/.hg .hg" % args[0])
+    sys.exit(0)
+elif cmd == "help":
+    help()
+    sys.exit(0)
+else:
+    try:
+        repo = hg.repository(ui=ui)
+    except IOError:
+        ui.warn("Unable to open repository\n")
+        sys.exit(0)
+
+relpath = None
+if os.getcwd() != repo.root:
+    relpath = os.getcwd()[len(repo.root) + 1: ]
+
+if cmd == "checkout" or cmd == "co":
+    node = repo.changelog.tip()
+    if args:
+        node = repo.lookup(args[0])
+    repo.checkout(node)
+
+elif cmd == "add":
+    repo.add(args)
+
+elif cmd == "remove" or cmd == "rm" or cmd == "del" or cmd == "delete":
+    repo.remove(args)
+
+elif cmd == "commit" or cmd == "checkin" or cmd == "ci":
+    if 1:
+        if len(args) > 0:
+            repo.commit(repo.current, args)
+        else:
+            repo.commit(repo.current)
+
+elif cmd == "import" or cmd == "patch":
+    try:
+        import psyco
+        psyco.full()
+    except:
+        pass
+    
+    ioptions = {}
+    opts = [('p', 'strip', 1, 'path strip'),
+            ('b', 'base', "", 'base path'),
+            ('q', 'quiet', "", 'silence diff')
+            ]
+    
+    args = fancyopts.fancyopts(args, opts, ioptions,
+                              'hg import [options] <patch names>')
+    d = ioptions["base"]
+    strip = ioptions["strip"]
+    quiet = ioptions["quiet"] and "> /dev/null" or ""
+
+    for patch in args:
+        ui.status("applying %s\n" % patch)
+        pf = os.path.join(d, patch)
+
+        text = ""
+        for l in file(pf):
+            if l[:4] == "--- ": break
+            text += l
+
+        f = os.popen("lsdiff --strip %d %s" % (strip, pf))
+        files = filter(None, map(lambda x: x.rstrip(), f.read().splitlines()))
+        f.close()
+
+        if files:
+            if os.system("patch -p%d < %s %s" % (strip, pf, quiet)):
+                raise "patch failed!"
+        repo.commit(repo.current, files, text)
+
+elif cmd == "status":
+    (c, a, d) = repo.diffdir(repo.root, repo.current)
+    if relpath:
+        (c, a, d) = map(lambda x: filterfiles(x, [ relpath ]), (c, a, d))
+
+    for f in c: print "C", f
+    for f in a: print "?", f
+    for f in d: print "R", f
+
+elif cmd == "diff":
+    revs = []
+
+    if args:
+        doptions = {}
+        opts = [('r', 'revision', [], 'revision')]
+        args = fancyopts.fancyopts(args, opts, doptions,
+                                   'hg diff [options] [files]')
+        revs = map(lambda x: repo.lookup(x), doptions['revision'])
+    
+    if len(revs) > 2:
+        self.ui.warn("too many revisions to diff\n")
+        sys.exit(1)
+
+    if relpath:
+        if not args: args = [ relpath ]
+        else: args = [ os.path.join(relpath, x) for x in args ]
+
+    diff(args, *revs)
+
+elif cmd == "annotate":
+    aoptions = {}
+    opts = [('r', 'revision', '', 'revision')]
+    args = fancyopts.fancyopts(args, opts, aoptions,
+                               'hg annotate [-r id] [files]')
+
+    if args:
+        if relpath: args = [ os.path.join(relpath, x) for x in args ]
+
+        node = repo.current
+        if aoptions['revision']:
+            node = repo.changelog.lookup(aoptions['revision'])
+        change = repo.changelog.read(node)
+        mmap = repo.manifest.read(change[0])
+        for f in args:
+            for n, l in repo.file(f).annotate(mmap[f]):
+                sys.stdout.write("% 6s:%s"%(n, l))
+
+elif cmd == "blame":
+    aoptions = {}
+    opts = [('r', 'revision', '', 'revision')]
+    args = fancyopts.fancyopts(args, opts, aoptions,
+                               'hg blame [-r id] [files]')
+    if args:
+        bcache = {}
+        node = repo.current
+        if aoptions['revision']:
+            node = repo.changelog.lookup(aoptions['revision'])
+        change = repo.changelog.read(node)
+        mmap = repo.manifest.read(change[0])
+        for f in args:
+            for n, l in repo.file(f).annotate(mmap[f]):
+                try:
+                    name = bcache[n]
+                except KeyError:
+                    cl = repo.changelog.read(repo.changelog.node(n))
+                    name = cl[1]
+                    f = name.find('@')
+                    if f >= 0:
+                        name = name[:f]
+                    bcache[n] = name
+                sys.stdout.write("% 10s:%s"%(name, l))
+
+elif cmd == "export":
+    node = repo.lookup(args[0])
+    prev, other = repo.changelog.parents(node)
+    change = repo.changelog.read(node)
+    print "# HG changeset patch"
+    print "# User %s" % change[1]
+    print "# Node ID %s" % hg.hex(node)
+    print "# Parent  %s" % hg.hex(prev)
+    print
+    if other != hg.nullid:
+        print "# Parent  %s" % hg.hex(other)
+    print change[4]
+    
+    diff(None, prev, node)
+
+elif cmd == "debugchangegroup":
+    newer = repo.newer(map(repo.lookup, args))
+    for chunk in repo.changegroup(newer):
+        sys.stdout.write(chunk)
+
+elif cmd == "debugaddchangegroup":
+    data = sys.stdin.read()
+    repo.addchangegroup(data)
+
+elif cmd == "addremove":
+    (c, a, d) = repo.diffdir(repo.root, repo.current)
+    repo.add(a)
+    repo.remove(d)
+    
+elif cmd == "history":
+    for i in range(repo.changelog.count()):
+        n = repo.changelog.node(i)
+        changes = repo.changelog.read(n)
+        (p1, p2) = repo.changelog.parents(n)
+        (h, h1, h2) = map(hg.hex, (n, p1, p2))
+        (i1, i2) = map(repo.changelog.rev, (p1, p2))
+        print "rev:      %4d:%s" % (i, h)
+        print "parents:  %4d:%s" % (i1, h1)
+        if i2: print "          %4d:%s" % (i2, h2)
+        print "manifest: %4d:%s" % (repo.manifest.rev(changes[0]),
+                                    hg.hex(changes[0]))
+        print "user:", changes[1]
+        print "date:", time.asctime(
+            time.localtime(float(changes[2].split(' ')[0])))
+        if ui.verbose: print "files:", " ".join(changes[3])
+        print "description:"
+        print changes[4]
+
+elif cmd == "tip":
+    n = repo.changelog.tip()
+    t = repo.changelog.rev(n)
+    ui.status("%d:%s\n" % (t, hg.hex(n)))
+
+elif cmd == "log":
+
+    if len(args) == 1:
+        if relpath:
+            args[0] = os.path.join(relpath, args[0])
+
+        r = repo.file(args[0])
+        for i in range(r.count()):
+            n = r.node(i)
+            (p1, p2) = r.parents(n)
+            (h, h1, h2) = map(hg.hex, (n, p1, p2))
+            (i1, i2) = map(r.rev, (p1, p2))
+            cr = r.linkrev(n)
+            cn = hg.hex(repo.changelog.node(cr))
+            print "rev:       %4d:%s" % (i, h)
+            print "changeset: %4d:%s" % (cr, cn)
+            print "parents:   %4d:%s" % (i1, h1)
+            if i2: print "           %4d:%s" % (i2, h2)
+            changes = repo.changelog.read(repo.changelog.node(cr))
+            print "user: %s" % changes[1]
+            print "date: %s" % time.asctime(
+                time.localtime(float(changes[2].split(' ')[0])))
+            print "description:"
+            print changes[4]
+            print
+    elif len(args) > 1:
+        print "too many args"
+    else:
+        print "missing filename"
+
+elif cmd == "dump":
+    if args:
+        r = repo.file(args[0])
+        n = r.tip()
+        if len(args) > 1: n = r.lookup(args[1])
+        sys.stdout.write(r.read(n))
+    else:
+        print "missing filename"
+
+elif cmd == "dumpmanifest":
+    n = repo.manifest.tip()
+    if len(args) > 0:
+        n = repo.manifest.lookup(args[0])
+    m = repo.manifest.read(n)
+    files = m.keys()
+    files.sort()
+
+    for f in files:
+        print hg.hex(m[f]), f
+
+elif cmd == "debugprompt":
+    print ui.prompt(args[0], args[1], args[2])
+
+elif cmd == "debughash":
+    f = repo.file(args[0])
+    print f.encodepath(args[0])
+
+elif cmd == "debugindex":
+    if ".hg" not in args[0]:
+        args[0] = ".hg/data/" + repo.file(args[0]).encodepath(args[0]) + "i"
+    
+    r = hg.revlog(open, args[0], "")
+    print "   rev    offset  length   base linkrev"+\
+          " p1           p2           nodeid"
+    for i in range(r.count()):
+        e = r.index[i]
+        print "% 6d % 9d % 7d % 6d % 7d %s.. %s.. %s.." % (
+            i, e[0], e[1], e[2], e[3],
+            hg.hex(e[4][:5]), hg.hex(e[5][:5]), hg.hex(e[6][:5]))
+
+elif cmd == "debugindexdot":
+    if ".hg" not in args[0]:
+        args[0] = ".hg/data/" + repo.file(args[0]).encodepath(args[0]) + "i"
+
+    r = hg.revlog(open, args[0], "")
+    print "digraph G {"
+    for i in range(r.count()):
+        e = r.index[i]
+        print "\t%d -> %d" % (r.rev(e[4]), i)
+        if e[5] != hg.nullid:
+            print "\t%d -> %d" % (r.rev(e[5]), i)
+    print "}"
+
+elif cmd == "merge":
+    if args:
+        other = hg.repository(ui, args[0])
+        ui.status("requesting changegroup\n")
+        cg = repo.getchangegroup(other)
+        repo.addchangegroup(cg)
+    else:
+        print "missing source repository"
+
+elif cmd == "tags":
+    repo.lookup(0) # prime the cache
+    i = repo.tags.items()
+    i.sort()
+    for k, n in i:
+        try:
+            r = repo.changelog.rev(n)
+        except KeyError:
+            r = "?"
+        print "%-30s %5d:%s" % (k, repo.changelog.rev(n), hg.hex(n))
+
+elif cmd == "verify":
+    filelinkrevs = {}
+    filenodes = {}
+    manifestchangeset = {}
+    changesets = revisions = files = 0
+    errors = 0
+
+    ui.status("checking changesets\n")
+    for i in range(repo.changelog.count()):
+        changesets += 1
+        n = repo.changelog.node(i)
+        for p in repo.changelog.parents(n):
+            if p not in repo.changelog.nodemap:
+                ui.warn("changeset %s has unknown parent %s\n" %
+                        (hg.short(n), hg.short(p)))
+                errors += 1
+        try:
+            changes = repo.changelog.read(n)
+        except Error, inst:
+            ui.warn("unpacking changeset %s: %s\n" % (short(n), inst))
+            errors += 1
+            
+        manifestchangeset[changes[0]] = n
+        for f in changes[3]:
+            revisions += 1
+            filelinkrevs.setdefault(f, []).append(i)
+
+    ui.status("checking manifests\n")
+    for i in range(repo.manifest.count()):
+        n = repo.manifest.node(i)
+        for p in repo.manifest.parents(n):
+            if p not in repo.manifest.nodemap:
+                ui.warn("manifest %s has unknown parent %s\n" %
+                        (hg.short(n), hg.short(p)))
+                errors += 1
+        ca = repo.changelog.node(repo.manifest.linkrev(n))
+        cc = manifestchangeset[n]
+        if ca != cc:
+            ui.warn("manifest %s points to %s, not %s\n" %
+                    (hg.hex(n), hg.hex(ca), hg.hex(cc)))
+            errors += 1
+
+        try:
+            delta = mdiff.patchtext(repo.manifest.delta(n))
+        except KeyboardInterrupt:
+            print "aborted"
+            sys.exit(0)
+        except Exception, inst:
+            ui.warn("unpacking manifest %s: %s\n" % (hg.short(n), inst))
+            errors += 1
+            
+        ff = [ l.split('\0') for l in delta.splitlines() ]
+        for f, fn in ff:
+            filenodes.setdefault(f, {})[hg.bin(fn)] = 1
+
+    ui.status("crosschecking files in changesets and manifests\n")
+    for f in filenodes:
+        if f not in filelinkrevs:
+            ui.warn("file %s in manifest but not in changesets\n" % f)
+            errors += 1
+
+    for f in filelinkrevs:
+        if f not in filenodes:
+            ui.warn("file %s in changeset but not in manifest\n" % f)
+            errors += 1
+
+    ui.status("checking files\n")
+    ff = filenodes.keys()
+    ff.sort()
+    for f in ff:
+        if f == "/dev/null": continue
+        files += 1
+        fl = repo.file(f)
+        nodes = { hg.nullid: 1 }
+        for i in range(fl.count()):
+            n = fl.node(i)
+
+            if n not in filenodes[f]:
+                ui.warn("%s: %d:%s not in manifests\n" % (f, i, hg.short(n)))
+                print len(filenodes[f].keys()), fl.count(), f
+                errors += 1
+            else:
+                del filenodes[f][n]
+
+            flr = fl.linkrev(n)
+            if flr not in filelinkrevs[f]:
+                ui.warn("%s:%s points to unexpected changeset rev %d\n"
+                        % (f, hg.short(n), fl.linkrev(n)))
+                errors += 1
+            else:
+                filelinkrevs[f].remove(flr)
+
+            # verify contents
+            try:
+                t = fl.read(n)
+            except Error, inst:
+                ui.warn("unpacking file %s %s: %s\n" % (f, short(n), inst))
+                errors += 1
+            
+            # verify parents
+            (p1, p2) = fl.parents(n)
+            if p1 not in nodes:
+                ui.warn("file %s:%s unknown parent 1 %s" %
+                        (f, hg.short(n), hg.short(p1)))
+                errors += 1
+            if p2 not in nodes:
+                ui.warn("file %s:%s unknown parent 2 %s" %
+                        (f, hg.short(n), hg.short(p1)))
+                errors += 1
+            nodes[n] = 1
+
+        # cross-check
+        for flr in filelinkrevs[f]:
+            ui.warn("changeset rev %d not in %s\n" % (flr, f))
+            errors += 1
+            
+        for node in filenodes[f]:
+            ui.warn("node %s in manifests not in %s\n" % (hg.hex(n), f))
+            errors += 1
+
+    ui.status("%d files, %d changesets, %d total revisions\n" %
+              (files, changesets, revisions))
+    
+    if errors:
+        ui.warn("%d integrity errors encountered!\n" % errors)
+        sys.exit(1)
+    
+else:
+    print "unknown command\n"
+    help()
+    sys.exit(1)
