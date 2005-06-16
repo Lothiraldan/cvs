@@ -1,0 +1,43 @@
+#header#
+<title>#repo|escape#: #file# annotate</title>
+</head>
+<body>
+
+<div class="buttons">
+<a href="?cmd=changelog;rev=#rev#">changelog</a>
+<a href="?cmd=tags">tags</a>
+<a href="?cmd=changeset;node=#node#">changeset</a>
+<a href="?cmd=manifest;manifest=#manifest#;path=#path#">manifest</a>
+<a href="?cmd=file;file=#file#;filenode=#filenode#">file</a>
+<a href="?cmd=filelog;file=#file#;filenode=#filenode#">revisions</a>
+</div>
+
+<h2>Annotate #file# (#filenode#)</h2>
+
+<table>
+<tr>
+ <td class="metatag">changeset #rev#:</td>
+ <td><a href="?cmd=changeset;node=#node#">#node#</a></td></tr>
+#parent1#
+#parent2#
+<tr>
+ <td class="metatag">manifest:</td>
+ <td><a href="?cmd=manifest;manifest=#manifest#;path=/">#manifest#</a></td></tr>
+<tr>
+ <td class="metatag">author:</td>
+ <td>#author|obfuscate#</td></tr>
+<tr>
+ <td class="metatag">date:</td>
+ <td>#date|date# (#date|age# ago)</td></tr>
+<tr>
+ <td class="metatag">permissions:</td>
+ <td>#permissions|permissions#</td></tr>
+</table>
+
+<br/>
+
+<table cellspacing="0" cellpadding="0">
+#annotate#
+</table>
+
+#footer#
