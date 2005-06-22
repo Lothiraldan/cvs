@@ -6,6 +6,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 import sys, struct, os
+import util
 from revlog import *
 from demandload import *
 demandload(globals(), "re lock urllib urllib2 transaction time socket")
@@ -336,8 +337,8 @@ def opener(base):
                     os.makedirs(d)
             else:
                 if s.st_nlink > 1:
-                    file(f + ".tmp", "w").write(file(f).read())
-                    os.rename(f+".tmp", f)
+                    file(f + ".tmp", "wb").write(file(f, "rb").read())
+                    util.rename(f+".tmp", f)
 
         return file(f, mode)
 
@@ -353,10 +354,14 @@ class localrepository:
             if not path:
                 p = os.getcwd()
                 while not os.path.isdir(os.path.join(p, ".hg")):
+                    oldp = p
                     p = os.path.dirname(p)
-                    if p == "/": raise "No repo found"
+                    if p == oldp: raise "No repo found"
                 path = p
             self.path = os.path.join(path, ".hg")
+
+            if not create and not os.path.isdir(self.path):
+                raise "repository %s not found" % self.path
 
         self.root = path
         self.ui = ui
@@ -383,10 +388,10 @@ class localrepository:
         if self.ignorelist is None:
             self.ignorelist = []
             try:
-                l = self.wfile(".hgignore")
+                l = file(self.wjoin(".hgignore"))
                 for pat in l:
                     if pat != "\n":
-                        self.ignorelist.append(re.compile(pat[:-1]))
+                        self.ignorelist.append(re.compile(util.pconvert(pat[:-1])))
             except IOError: pass
         for pat in self.ignorelist:
             if pat.search(f): return True
@@ -477,7 +482,7 @@ class localrepository:
             self.ui.status("attempting to rollback last transaction\n")
             transaction.rollback(self.opener, self.join("undo"))
             self.dirstate = None
-            os.rename(self.join("undo.dirstate"), self.join("dirstate"))
+            util.rename(self.join("undo.dirstate"), self.join("dirstate"))
             self.dirstate = dirstate(self.opener, self.ui, self.root)
         else:
             self.ui.warn("no undo information available\n")
@@ -566,7 +571,7 @@ class localrepository:
             try:
                 fp = self.wjoin(f)
                 mf1[f] = is_exec(fp)
-                t = file(fp).read()
+                t = self.wfile(f).read()
             except IOError:
                 self.warn("trouble committing %s!\n" % f)
                 raise
@@ -585,7 +590,9 @@ class localrepository:
 
         # update manifest
         m1.update(new)
-        for f in remove: del m1[f]
+        for f in remove:
+            if f in m1:
+                del m1[f]
         mn = self.manifest.add(m1, mf1, tr, linkrev, c1[0], c2[0])
 
         # add changeset
@@ -634,7 +641,7 @@ class localrepository:
             if ".hg" in subdirs: subdirs.remove(".hg")
             
             for f in files:
-                fn = os.path.join(d, f)
+                fn = util.pconvert(os.path.join(d, f))
                 try: s = os.stat(os.path.join(self.root, fn))
                 except: continue
                 if fn in dc:
@@ -706,6 +713,9 @@ class localrepository:
             p = self.wjoin(f)
             if os.path.isfile(p):
                 self.ui.warn("%s still exists!\n" % f)
+            elif self.dirstate.state(f) == 'a':
+                self.ui.warn("%s never committed!\n" % f)
+                self.dirstate.forget(f)
             elif f not in self.dirstate:
                 self.ui.warn("%s not tracked!\n" % f)
             else:
@@ -1001,9 +1011,13 @@ class localrepository:
         m2 = self.manifest.read(m2n)
         mf2 = self.manifest.readflags(m2n)
         ma = self.manifest.read(man)
-        mfa = self.manifest.readflags(m2n)
+        mfa = self.manifest.readflags(man)
 
         (c, a, d, u) = self.diffdir(self.root)
+
+        # is this a jump, or a merge?  i.e. is there a linear path
+        # from p1 to p2?
+        linear_path = (pa == p1 or pa == p2)
 
         # resolve the manifest to determine which files
         # we care about merging
@@ -1025,9 +1039,26 @@ class localrepository:
         for f in d:
             if f in mw: del mw[f]
 
+            # If we're jumping between revisions (as opposed to merging),
+            # and if neither the working directory nor the target rev has
+            # the file, then we need to remove it from the dirstate, to
+            # prevent the dirstate from listing the file when it is no
+            # longer in the manifest.
+            if linear_path and f not in m2:
+                self.dirstate.forget((f,))
+
         for f, n in mw.iteritems():
             if f in m2:
                 s = 0
+
+                # is the wfile new since m1, and match m2?
+                if f not in m1:
+                    t1 = self.wfile(f).read()
+                    t2 = self.file(f).revision(m2[f])
+                    if cmp(t1, t2) == 0:
+                        mark[f] = 1
+                        n = m2[f]
+                    del t1, t2
 
                 # are files different?
                 if n != m2[f]:
@@ -1035,7 +1066,6 @@ class localrepository:
                     # are both different from the ancestor?
                     if n != a and m2[f] != a:
                         self.ui.debug(" %s versions differ, resolve\n" % f)
-                        merge[f] = (m1.get(f, nullid), m2[f])
                         # merge executable bits
                         # "if we changed or they changed, change in merge"
                         a, b, c = mfa.get(f, 0), mfw[f], mf2[f]
@@ -1066,9 +1096,11 @@ class localrepository:
                 del m2[f]
             elif f in ma:
                 if not force and n != ma[f]:
-                    r = self.ui.prompt(
-                        (" local changed %s which remote deleted\n" % f) +
-                        "(k)eep or (d)elete?", "[kd]", "k")
+                    r = ""
+                    if linear_path or allow:
+                        r = self.ui.prompt(
+                            (" local changed %s which remote deleted\n" % f) +
+                            "(k)eep or (d)elete?", "[kd]", "k")
                     if r == "d":
                         remove.append(f)
                 else:
@@ -1087,9 +1119,11 @@ class localrepository:
         for f, n in m2.iteritems():
             if f[0] == "/": continue
             if not force and f in ma and n != ma[f]:
-                r = self.ui.prompt(
-                    ("remote changed %s which local deleted\n" % f) +
-                    "(k)eep or (d)elete?", "[kd]", "k")
+                r = ""
+                if linear_path or allow:
+                    r = self.ui.prompt(
+                        ("remote changed %s which local deleted\n" % f) +
+                        "(k)eep or (d)elete?", "[kd]", "k")
                 if r == "d": remove.append(f)
             else:
                 self.ui.debug("remote created %s\n" % f)
@@ -1102,7 +1136,7 @@ class localrepository:
                 get[f] = merge[f][1]
             merge = {}
 
-        if pa == p1 or pa == p2:
+        if linear_path:
             # we don't need to do any magic, just jump to the new rev
             mode = 'n'
             p1, p2 = p2, nullid
@@ -1166,7 +1200,7 @@ class localrepository:
         def temp(prefix, node):
             pre = "%s~%s." % (os.path.basename(fn), prefix)
             (fd, name) = tempfile.mkstemp("", pre)
-            f = os.fdopen(fd, "w")
+            f = os.fdopen(fd, "wb")
             f.write(fl.revision(node))
             f.close()
             return name

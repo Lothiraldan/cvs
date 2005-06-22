@@ -6,7 +6,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 import os, re, sys, signal
-import fancyopts, ui, hg
+import fancyopts, ui, hg, util
 from demandload import *
 demandload(globals(), "mdiff time hgweb traceback random signal errno version")
 
@@ -16,20 +16,20 @@ def filterfiles(filters, files):
     l = [ x for x in files if x in filters ]
 
     for t in filters:
-        if t and t[-1] != os.sep: t += os.sep
+        if t and t[-1] != "/": t += "/"
         l += [ x for x in files if x.startswith(t) ]
     return l
 
 def relfilter(repo, files):
     if os.getcwd() != repo.root:
         p = os.getcwd()[len(repo.root) + 1: ]
-        return filterfiles([p], files)
+        return filterfiles([util.pconvert(p)], files)
     return files
 
 def relpath(repo, args):
     if os.getcwd() != repo.root:
         p = os.getcwd()[len(repo.root) + 1: ]
-        return [ os.path.normpath(os.path.join(p, x)) for x in args ]
+        return [ util.pconvert(os.path.normpath(os.path.join(p, x))) for x in args ]
     return args
 
 def dodiff(ui, repo, path, files = None, node1 = None, node2 = None):
@@ -47,7 +47,7 @@ def dodiff(ui, repo, path, files = None, node1 = None, node2 = None):
         (c, a, d, u) = repo.diffdir(path, node1)
         if not node1:
             node1 = repo.dirstate.parents()[0]
-        def read(f): return file(os.path.join(repo.root, f)).read()
+        def read(f): return repo.wfile(f).read()
 
     if ui.quiet:
         r = None
@@ -285,7 +285,7 @@ def debugchangegroup(ui, repo, roots):
         sys.stdout.write(chunk)
 
 def debugindex(ui, file):
-    r = hg.revlog(open, file, "")
+    r = hg.revlog(hg.opener(""), file, "")
     print "   rev    offset  length   base linkrev"+\
           " p1           p2           nodeid"
     for i in range(r.count()):
@@ -295,7 +295,7 @@ def debugindex(ui, file):
             hg.hex(e[4][:5]), hg.hex(e[5][:5]), hg.hex(e[6][:5]))
 
 def debugindexdot(ui, file):
-    r = hg.revlog(open, file, "")
+    r = hg.revlog(hg.opener(""), file, "")
     print "digraph G {"
     for i in range(r.count()):
         e = r.index[i]
@@ -485,17 +485,27 @@ def patch(ui, repo, patch1, *patches, **opts):
             addremove(ui, repo, *files)
         repo.commit(files, text)
 
-def pull(ui, repo, source="default"):
+def pull(ui, repo, source="default", **opts):
     """pull changes from the specified source"""
     paths = {}
     for name, path in ui.configitems("paths"):
         paths[name] = path
 
-    if source in paths: source = paths[source]
+    if source in paths:
+        source = paths[source]
+
+    ui.status('pulling from %s\n' % (source))
     
     other = hg.repository(ui, source)
     cg = repo.getchangegroup(other)
-    repo.addchangegroup(cg)
+    r = repo.addchangegroup(cg)
+    if cg and not r:
+        if opts['update']:
+            return update(ui, repo)
+	else:
+            ui.status("(run 'hg update' to get a working copy)\n")
+
+    return r
 
 def push(ui, repo, dest="default-push"):
     """push changes to the specified destination"""
@@ -533,7 +543,7 @@ def push(ui, repo, dest="default-push"):
         os.kill(child, signal.SIGTERM)
         return r
 
-def rawcommit(ui, repo, flist, **rc):
+def rawcommit(ui, repo, *flist, **rc):
     "raw commit interface"
 
     text = rc['text']
@@ -544,7 +554,7 @@ def rawcommit(ui, repo, flist, **rc):
         print "missing commit text"
         return 1
 
-    files = relpath(repo, flist)
+    files = relpath(repo, list(flist))
     if rc['files']:
         files += open(rc['files']).read().splitlines()
         
@@ -578,6 +588,35 @@ def status(ui, repo):
     for f in a: print "A", f
     for f in d: print "R", f
     for f in u: print "?", f
+
+def tag(ui, repo, name, rev = None, **opts):
+    """add a tag for the current tip or a given revision"""
+    
+    if name == "tip":
+	ui.warn("abort: 'tip' is a reserved name!\n")
+	return -1
+
+    (c, a, d, u) = repo.diffdir(repo.root)
+    for x in (c, a, d, u):
+	if ".hgtags" in x:
+	    ui.warn("abort: working copy of .hgtags is changed!\n")
+            ui.status("(please commit .hgtags manually)\n")
+	    return -1
+
+    if rev:
+        r = hg.hex(repo.lookup(rev))
+    else:
+        r = hg.hex(repo.changelog.tip())
+
+    add = 0
+    if not os.path.exists(repo.wjoin(".hgtags")): add = 1
+    repo.wfile(".hgtags", "a").write("%s %s\n" % (r, name))
+    if add: repo.add([".hgtags"])
+
+    if not opts['text']:
+        opts['text'] = "Added tag %s for changeset %s" % (name, r)
+
+    repo.commit([".hgtags"], opts['text'], opts['user'], opts['date'])
 
 def tags(ui, repo):
     """list repository tags"""
@@ -662,7 +701,9 @@ table = {
                       ('b', 'base', "", 'base path'),
                       ('q', 'quiet', "", 'silence diff')],
                      "hg import [options] patches"),
-    "pull|merge": (pull, [], 'hg pull [source]'),
+    "pull|merge": (pull, 
+                  [('u', 'update', None, 'update working directory')],
+		  'hg pull [options] [source]'),
     "push": (push, [], 'hg push <destination>'),
     "rawcommit": (rawcommit,
                   [('p', 'parent', [], 'parent'),
@@ -680,6 +721,10 @@ table = {
                       ('t', 'templates', "", 'template map')],
               "hg serve [options]"),
     "status": (status, [], 'hg status'),
+    "tag": (tag,  [('t', 'text', "", 'commit text'),
+                   ('d', 'date', "", 'date'),
+                   ('u', 'user', "", 'user')],
+            'hg tag [options] <name> [rev]'),
     "tags": (tags, [], 'hg tags'),
     "tip": (tip, [], 'hg tip'),
     "undo": (undo, [], 'hg undo'),

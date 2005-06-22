@@ -23,19 +23,20 @@ class install_package_data(install_data):
 try:
     mercurial.version.remember_version(version)
     setup(name='mercurial',
-        version=mercurial.version.get_version(),
-        author='Matt Mackall',
-        author_email='mpm@selenic.com',
-        url='http://selenic.com/mercurial',
-        description='scalable distributed SCM',
-        license='GNU GPL',
-        packages=['mercurial'],
-        ext_modules=[Extension('mercurial.mpatch', ['mercurial/mpatch.c'])],
-        data_files=[('mercurial/templates',
-                    ['templates/map'] +
-                    glob.glob('templates/map-*') +
-                    glob.glob('templates/*.tmpl'))], 
-        cmdclass = { 'install_data' : install_package_data },
-        scripts=['hg', 'hgmerge'])
+          version=mercurial.version.get_version(),
+          author='Matt Mackall',
+          author_email='mpm@selenic.com',
+          url='http://selenic.com/mercurial',
+          description='scalable distributed SCM',
+          license='GNU GPL',
+          packages=['mercurial'],
+          ext_modules=[Extension('mercurial.mpatch', ['mercurial/mpatch.c']),
+                       Extension('mercurial.bdiff', ['mercurial/bdiff.c'])],
+          data_files=[('mercurial/templates',
+                       ['templates/map'] +
+                       glob.glob('templates/map-*') +
+                       glob.glob('templates/*.tmpl'))], 
+          cmdclass = { 'install_data' : install_package_data },
+          scripts=['hg', 'hgmerge'])
 finally:
     mercurial.version.forget_version()
