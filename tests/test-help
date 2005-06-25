@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -x
+
+hg -q help
+hg add -h
+hg help diff
+hg help foo
+hg -q commands
+
+exit 0
