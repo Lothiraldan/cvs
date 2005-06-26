@@ -1,0 +1,11 @@
+.*\.orig
+.*\.rej
+.*~
+.*\.so
+.*pyc
+build/.*
+dist/
+MANIFEST$
+.pc/
+patches/
+mercurial/__version__.py$
