@@ -1,0 +1,83 @@
+#!/bin/bash
+
+set -e
+
+tests=0
+failed=0
+H=$PWD
+
+if [ -d /usr/lib64 ]; then
+    lib=lib64
+else
+    lib=lib
+fi
+
+TESTPATH=$PWD/install/bin
+export PATH=$TESTPATH:$PATH
+export PYTHONPATH=$PWD/install/$lib/python
+
+rm -rf install
+cd ..
+${PYTHON:-python} setup.py install --home=tests/install > tests/install.err
+if [ $? != 0 ] ; then
+    cat tests/install.err
+fi
+cd $H
+rm install.err
+
+function run_one
+{
+    rm -f $1.err
+    export TZ=GMT
+    D=`mktemp -d`
+    if [ "$D" == "" ] ; then
+	echo mktemp failed!
+    fi
+
+    cd $D
+    fail=0
+
+    if ! $H/$1 > .out 2>&1 ; then
+	echo $1 failed with error code $?
+	fail=1
+    fi
+
+    if [ -s .out -a ! -r $H/$1.out ] ; then
+	echo $1 generated unexpected output:
+	cat .out
+	cp .out $H/$1.err
+	fail=1
+    elif [ -r $H/$1.out ] && ! diff -u $H/$1.out .out > /dev/null ; then
+	echo $1 output changed:
+	diff -u $H/$1.out .out && true
+	cp .out $H/$1.err
+	fail=1
+    fi
+
+    cd $H
+    rm -r $D
+    return $fail
+}
+
+TESTS=$@
+if [ "$TESTS" == "" ] ; then
+    TESTS=`ls test-* | grep -Ev "\.|~"`
+fi
+
+for f in $TESTS ; do
+    echo -n "."
+    if ! run_one $f ; then
+	failed=$[$failed + 1]
+    fi
+    tests=$[$tests + 1]
+done
+
+rm -rf install
+
+echo
+echo Ran $tests tests, $failed failed
+
+if [ $failed -gt 0 ] ; then
+    exit 1
+fi
+
