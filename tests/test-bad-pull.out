@@ -9,8 +9,8 @@ rollback completed
 + ls copy
 ls: copy: No such file or directory
 + cat
-+ sleep 2
 + python dumb.py
++ sleep 2
 + hg clone http://localhost:20059/foo copy2
 requesting all changes
 adding changesets

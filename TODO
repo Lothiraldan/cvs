@@ -20,7 +20,6 @@ Core:
 - make showing removed files (in history etc.) faster.
 
 Commands:
-- hg diff Makefile should avoid walking the tree
 - hg add <directory> should work
 - hg status <filename>: file rev, changeset rev, changed, added,
   deleted, sha-1
@@ -43,4 +42,3 @@ Web:
 - some web servers think hgweb.cgi.[di] is a CGI script with old-http://
   (use quoting (see foo.d in Core) or document server configurations?)
 - link children in hgweb
-- search field searching in descriptions, file names, what else?
