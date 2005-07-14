@@ -1,0 +1,24 @@
++ hg init
++ echo nothing
++ hg add a
++ hg commit -t ancestor -u test -d '0 0'
++ echo something
++ hg commit -t branch1 -u test -d '0 0'
++ hg co 0
++ echo 'something else'
++ hg commit -t branch2 -u test -d '0 0'
++ export HGMERGE=merge
++ HGMERGE=merge
++ hg up -m 1
+merge: warning: conflicts during merge
+merging a
+merging a failed!
++ hg id
+32e80765d7fe+75234512624c+ tip
++ grep -Ev '>>>|<<<' a
+something else
+=======
+something
++ hg status
+C a
+? .out
