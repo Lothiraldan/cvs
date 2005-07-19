@@ -1,0 +1,38 @@
+General:
+- Better documentation
+- More regression tests
+- More specific try/except.
+- less code duplication, more code in the right places
+- python 2.2 support
+- better import support
+- export to git
+- Code cleanup: apply http://python.org/peps/pep-0008.html
+
+Core:
+- difflib creating/removing files (fixed except dates: should be epoch)
+- directory foo.d or foo.i with existing file foo (use some quoting?)
+- get various options from hgrc (e.g. history always -v, tip always -q)
+- better push support (hack exists)
+- hg over ssh:// and https:// and rsync://
+- hooks for new changesets getting pulled/imported etc.
+- make showing removed files (in history etc.) faster.
+
+Commands:
+- hg add <directory> should work
+- hg status <filename>: file rev, changeset rev, changed, added,
+  deleted, sha-1
+- select to pull a subset of the heads
+- commands.py: number of args too much magic (e.g. in patch())
+- automatic pull fallback to old-http://
+- optionally only show merges (two parents or parent != changeset-1, etc.)
+
+Web:
+- optionally only show merges (two parents or parent != changeset-1, etc.)
+- one hgweb with many repos (another script)
+- hgweb tip link too verbose
+- hgweb: deliver static files (e.g. favicon, stylesheets)
+- hgweb personalization: timezone (display/change), display of
+  features
+- some web servers think hgweb.cgi.[di] is a CGI script with old-http://
+  (use quoting (see foo.d in Core) or document server configurations?)
+- link children in hgweb
