@@ -1,0 +1,72 @@
++ umask 027
++ mkdir test1
++ cd test1
++ hg init
++ touch a b
++ hg add a b
++ hg ci -m 'added a b' -d '0 0'
++ cd ..
++ mkdir test2
++ cd test2
++ hg init
++ hg pull ../test1
+pulling from ../test1
+requesting all changes
+adding changesets
+adding manifests
+adding file revisions
+modified 2 files, added 1 changesets and 2 new revisions
+(run 'hg update' to get a working copy)
++ hg co
++ chmod +x a
++ hg ci -m 'chmod +x a' -d '0 0'
++ cd ../test1
++ echo 123
++ hg ci -m 'a updated' -d '0 0'
++ hg pull ../test2
+pulling from ../test2
+searching for changes
+adding changesets
+adding manifests
+adding file revisions
+modified 1 files, added 1 changesets and 1 new revisions
+(run 'hg update' to get a working copy)
++ hg heads
+changeset:   2:3ef54330565526bebf37a0d9bf540c283fd133a1
+tag:         tip
+parent:      0:22a449e20da501ca558394c083ca470e9c81b9f7
+user:        test
+date:        Thu Jan  1 00:00:00 1970
+summary:     chmod +x a
+
+changeset:   1:c6ecefc45368ed556d965f1c1086c6561a8b2ac5
+user:        test
+date:        Thu Jan  1 00:00:00 1970
+summary:     a updated
+
++ hg history
+changeset:   2:3ef54330565526bebf37a0d9bf540c283fd133a1
+tag:         tip
+parent:      0:22a449e20da501ca558394c083ca470e9c81b9f7
+user:        test
+date:        Thu Jan  1 00:00:00 1970
+summary:     chmod +x a
+
+changeset:   1:c6ecefc45368ed556d965f1c1086c6561a8b2ac5
+user:        test
+date:        Thu Jan  1 00:00:00 1970
+summary:     a updated
+
+changeset:   0:22a449e20da501ca558394c083ca470e9c81b9f7
+user:        test
+date:        Thu Jan  1 00:00:00 1970
+summary:     added a b
+
++ hg -v co -m
+resolving manifests
+merging a
+resolving a
++ ls -l ../test1/a ../test2/a
++ cut -b 0-10
+-rwxr-x---
+-rwxr-x---

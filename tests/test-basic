@@ -1,0 +1,13 @@
+#!/bin/sh
+
+set -x
+mkdir t
+cd t
+hg init
+echo a > a
+hg add a
+hg commit -m test -d "0 0"
+hg history
+hg manifest
+hg cat a
+hg verify
