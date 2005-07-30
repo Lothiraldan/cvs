@@ -1,0 +1,20 @@
+#!/bin/sh
+
+set -x
+hg init
+echo a > a
+hg add a
+hg commit -m "1" -d "0 0"
+hg status
+cp a b
+hg copy a b
+hg status
+hg --debug commit -m "2" -d "0 0"
+hg history
+hg log a
+hexdump -C .hg/data/b.d
+hg cat b > bsum
+md5sum bsum
+hg cat a > asum
+md5sum asum
+hg verify
