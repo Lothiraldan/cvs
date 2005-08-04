@@ -1,0 +1,14 @@
+\.orig$
+\.rej$
+~$
+\.so$
+\.pyc$
+\.swp$
+^tests/.*\.err$
+^build/
+^dist/
+^doc/.*\.[0-9]$
+^MANIFEST$
+^\.pc/
+^patches/
+^mercurial/__version__.py$
