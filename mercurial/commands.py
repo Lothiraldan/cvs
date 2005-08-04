@@ -40,16 +40,30 @@ def relpath(repo, args):
     return args
 
 def matchpats(cwd, pats = [], opts = {}, head = ''):
-    return util.matcher(cwd, pats, opts.get('include'),
+    return util.matcher(cwd, pats or ['.'], opts.get('include'),
                         opts.get('exclude'), head)
 
-def walk(repo, pats, opts, head = ''):
+def pathto(n1, n2):
+    '''return the relative path from one place to another'''
+    if not n1: return n2
+    a, b = n1.split(os.sep), n2.split(os.sep)
+    a.reverse(), b.reverse()
+    while a and b and a[-1] == b[-1]:
+        a.pop(), b.pop()
+    b.reverse()
+    return os.sep.join((['..'] * len(a)) + b)
+
+def makewalk(repo, pats, opts, head = ''):
     cwd = repo.getcwd()
-    c = 0
-    if cwd: c = len(cwd) + 1
     files, matchfn = matchpats(cwd, pats, opts, head)
-    for src, fn in repo.walk(files = files, match = matchfn):
-        yield src, fn, fn[c:]
+    def walk():
+        for src, fn in repo.walk(files = files, match = matchfn):
+            yield src, fn, pathto(cwd, fn)
+    return files, matchfn, walk()
+
+def walk(repo, pats, opts, head = ''):
+    files, matchfn, results = makewalk(repo, pats, opts, head)
+    for r in results: yield r
 
 revrangesep = ':'
 
@@ -145,11 +159,11 @@ def make_file(repo, r, pat, node=None,
     return open(make_filename(repo, r, pat, node, total, seqno, revwidth),
                 mode)
 
-def dodiff(fp, ui, repo, files=None, node1=None, node2=None):
+def dodiff(fp, ui, repo, files=None, node1=None, node2=None, match=util.always):
     def date(c):
         return time.asctime(time.gmtime(float(c[2].split(' ')[0])))
 
-    (c, a, d, u) = repo.changes(node1, node2, files)
+    (c, a, d, u) = repo.changes(node1, node2, files, match = match)
     if files:
         c, a, d = map(lambda x: filterfiles(files, x), (c, a, d))
 
@@ -565,6 +579,11 @@ def debugindexdot(ui, file_):
             ui.write("\t%d -> %d\n" % (r.rev(e[5]), i))
     ui.write("}\n")
 
+def debugwalk(ui, repo, *pats, **opts):
+    items = list(walk(repo, pats, opts))
+    fmt = '%%s  %%-%ds  %%s' % max([len(abs) for (src, abs, rel) in items])
+    for i in items: print fmt % i
+
 def diff(ui, repo, *pats, **opts):
     """diff working directory (or selected files)"""
     revs = []
@@ -575,9 +594,10 @@ def diff(ui, repo, *pats, **opts):
         raise Abort("too many revisions to diff")
 
     files = []
-    for src, abs, rel in walk(repo, pats, opts):
+    roots, match, results = makewalk(repo, pats, opts)
+    for src, abs, rel in results:
         files.append(abs)
-    dodiff(sys.stdout, ui, repo, files, *revs)
+    dodiff(sys.stdout, ui, repo, files, *revs, **{'match': match})
 
 def doexport(ui, repo, changeset, seqno, total, revwidth, opts):
     node = repo.lookup(changeset)
@@ -1015,9 +1035,10 @@ def status(ui, repo, *pats, **opts):
     R = removed
     ? = not tracked'''
 
-    files, matchfn = matchpats(repo.getcwd(), pats, opts)
-    (c, a, d, u) = repo.changes(files = files, match = matchfn)
-    (c, a, d, u) = map(lambda x: relfilter(repo, x), (c, a, d, u))
+    cwd = repo.getcwd()
+    files, matchfn = matchpats(cwd, pats, opts)
+    (c, a, d, u) = [[pathto(cwd, x) for x in n]
+                    for n in repo.changes(files=files, match=matchfn)]
 
     for f in c:
         ui.write("M ", f, "\n")
@@ -1160,6 +1181,10 @@ table = {
     "debugstate": (debugstate, [], 'debugstate'),
     "debugindex": (debugindex, [], 'debugindex FILE'),
     "debugindexdot": (debugindexdot, [], 'debugindexdot FILE'),
+    "debugwalk": (debugwalk,
+                  [('I', 'include', [], 'include path in search'),
+                   ('X', 'exclude', [], 'exclude path from search')],
+                  'debugwalk [OPTIONS]... [FILE]...'),
     "^diff":
         (diff,
          [('r', 'rev', [], 'revision'),
