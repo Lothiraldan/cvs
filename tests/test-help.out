@@ -1,0 +1,88 @@
++ hg help
+basic hg commands (use "hg help -v" for more):
+
+ add        add the specified files on the next commit
+ annotate   show changeset information per file line
+ clone      make a copy of an existing repository
+ commit     commit the specified files or all outstanding changes
+ diff       diff working directory (or selected files)
+ export     dump the header and diffs for one or more changesets
+ init       create a new repository in the current directory
+ log        show the revision history of the repository or a single file
+ pull       pull changes from the specified source
+ push       push changes to the specified destination
+ remove     remove the specified files on the next commit
+ revert     revert modified files or dirs back to their unmodified states
+ serve      export the repository via HTTP
+ status     show changed files in the working directory
+ update     update or merge working directory
++ hg -q help
+basic hg commands (use "hg help -v" for more):
+
+ add        add the specified files on the next commit
+ annotate   show changeset information per file line
+ clone      make a copy of an existing repository
+ commit     commit the specified files or all outstanding changes
+ diff       diff working directory (or selected files)
+ export     dump the header and diffs for one or more changesets
+ init       create a new repository in the current directory
+ log        show the revision history of the repository or a single file
+ pull       pull changes from the specified source
+ push       push changes to the specified destination
+ remove     remove the specified files on the next commit
+ revert     revert modified files or dirs back to their unmodified states
+ serve      export the repository via HTTP
+ status     show changed files in the working directory
+ update     update or merge working directory
++ hg add -h
+hg add: option -h not recognized
+hg add [FILE]...
+
+ -I --include 
+   include path in search
+ -X --exclude 
+   exclude path from search
+
+add the specified files on the next commit
++ hg add --skjdfks
+hg add: option --skjdfks not recognized
+hg add [FILE]...
+
+ -I --include 
+   include path in search
+ -X --exclude 
+   exclude path from search
+
+add the specified files on the next commit
++ hg help diff
+hg diff [-r REV1 [-r REV2]] [FILE]...
+
+ -r --rev 
+   revision
+ -I --include 
+   include path in search
+ -X --exclude 
+   exclude path from search
+
+diff working directory (or selected files)
++ hg help foo
+hg: unknown command foo
++ hg -q commands
+hg: unknown command 'commands'
+basic hg commands (use "hg help -v" for more):
+
+ add        add the specified files on the next commit
+ annotate   show changeset information per file line
+ clone      make a copy of an existing repository
+ commit     commit the specified files or all outstanding changes
+ diff       diff working directory (or selected files)
+ export     dump the header and diffs for one or more changesets
+ init       create a new repository in the current directory
+ log        show the revision history of the repository or a single file
+ pull       pull changes from the specified source
+ push       push changes to the specified destination
+ remove     remove the specified files on the next commit
+ revert     revert modified files or dirs back to their unmodified states
+ serve      export the repository via HTTP
+ status     show changed files in the working directory
+ update     update or merge working directory
