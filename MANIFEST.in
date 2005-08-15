@@ -1,0 +1,16 @@
+include hg
+recursive-include mercurial *.py
+include hgweb.cgi
+include hgeditor rewrite-log
+include tests/README tests/run-tests tests/test-*[a-z0-9] tests/*.out
+prune tests/*.err
+include *.txt
+include templates/map templates/map-*[a-z0-9]
+include templates/*.tmpl
+include doc/README doc/*.txt doc/Makefile
+recursive-include contrib *
+include README
+include CONTRIBUTORS
+include COPYING
+include TODO
+include MANIFEST.in
