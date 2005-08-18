@@ -119,7 +119,7 @@ class hgweb:
     maxfiles = 10
 
     def __init__(self, path, name, templates = ""):
-        self.templates = templates or templatepath()
+        self.templates = templates
         self.reponame = name
         self.path = path
         self.mtime = -1
@@ -603,7 +603,9 @@ class hgweb:
         self.refresh()
         args = cgi.parse()
 
-        m = os.path.join(self.templates, "map")
+        t = self.templates or self.repo.ui.config("web", "templates",
+                                                  templatepath())
+        m = os.path.join(t, "map")
         if args.has_key('style'):
             b = os.path.basename("map-" + args['style'][0])
             p = os.path.join(self.templates, b)
@@ -615,16 +617,18 @@ class hgweb:
         if "?" in uri: uri = uri.split("?")[0]
         url = "http://%s%s%s" % (os.environ["SERVER_NAME"], port, uri)
 
+        name = self.reponame or self.repo.ui.config("web", "name", os.getcwd())
+
         self.t = templater(m, self.filters,
                            {"url":url,
-                            "repo":self.reponame,
+                            "repo":name,
                             "header":header,
                             "footer":footer,
                             })
 
         if not args.has_key('cmd'):
             args['cmd'] = [self.t.cache['default'],]
-        
+
         if args['cmd'][0] == 'changelog':
             c = self.repo.changelog.count() - 1
             hi = c
@@ -705,6 +709,25 @@ class hgweb:
 def create_server(path, name, templates, address, port, use_ipv6 = False,
                   accesslog = sys.stdout, errorlog = sys.stderr):
 
+    def openlog(opt, default):
+        if opt and opt != '-':
+            return open(opt, 'w')
+        return default
+
+    u = ui()
+    repo = repository(u, path)
+    if not address:
+        address = u.config("web", "address", "")
+    if not port:
+        port = int(u.config("web", "port", 8000))
+    if not use_ipv6:
+        use_ipv6 = u.configbool("web", "ipv6")
+
+    accesslog = openlog(accesslog or u.config("web", "accesslog", "-"),
+                        sys.stdout)
+    errorlog = openlog(errorlog or u.config("web", "errorlog", "-"),
+                       sys.stderr)
+
     import BaseHTTPServer
 
     class IPv6HTTPServer(BaseHTTPServer.HTTPServer):
@@ -720,7 +743,7 @@ def create_server(path, name, templates, address, port, use_ipv6 = False,
             errorlog.write("%s - - [%s] %s\n" % (self.address_string(),
                                                  self.log_date_time_string(),
                                                  format % args))
-            
+
         def log_message(self, format, *args):
             accesslog.write("%s - - [%s] %s\n" % (self.address_string(),
                                                   self.log_date_time_string(),

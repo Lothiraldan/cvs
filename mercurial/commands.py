@@ -1087,16 +1087,9 @@ def serve(ui, repo, **opts):
                 r = repo.addchangegroup(fin)
                 respond("")
 
-    def openlog(opt, default):
-        if opts[opt] and opts[opt] != '-':
-            return open(opts[opt], 'w')
-        else:
-            return default
-
     httpd = hgweb.create_server(repo.root, opts["name"], opts["templates"],
                                 opts["address"], opts["port"], opts["ipv6"],
-                                openlog('accesslog', sys.stdout),
-                                openlog('errorlog', sys.stderr))
+                                opts['accesslog'], opts['errorlog'])
     if ui.verbose:
         addr, port = httpd.socket.getsockname()
         if addr == '0.0.0.0':
@@ -1319,7 +1312,7 @@ table = {
          [('p', 'strip', 1, 'path strip'),
           ('b', 'base', "", 'base path')],
          "hg import [-p NUM] [-b BASE] PATCH..."),
-    "incoming": (incoming, [], 'hg incoming [SOURCE]'),
+    "incoming|in": (incoming, [], 'hg incoming [SOURCE]'),
     "^init": (init, [], 'hg init [DEST]'),
     "locate":
         (locate,
@@ -1335,7 +1328,7 @@ table = {
           ('p', 'patch', None, 'show patch')],
          'hg log [-r REV1 [-r REV2]] [-p] [FILE]'),
     "manifest": (manifest, [], 'hg manifest [REV]'),
-    "outgoing": (outgoing, [], 'hg outgoing [DEST]'),
+    "outgoing|out": (outgoing, [], 'hg outgoing [DEST]'),
     "parents": (parents, [], 'hg parents [REV]'),
     "paths": (paths, [], 'hg paths [NAME]'),
     "^pull":
@@ -1368,9 +1361,9 @@ table = {
         (serve,
          [('A', 'accesslog', '', 'access log file'),
           ('E', 'errorlog', '', 'error log file'),
-          ('p', 'port', 8000, 'listen port'),
+          ('p', 'port', 0, 'listen port'),
           ('a', 'address', '', 'interface address'),
-          ('n', 'name', os.getcwd(), 'repository name'),
+          ('n', 'name', "", 'repository name'),
           ('', 'stdio', None, 'for remote clients'),
           ('t', 'templates', "", 'template map'),
           ('6', 'ipv6', None, 'use IPv6 in addition to IPv4')],
