@@ -1,0 +1,18 @@
+pulling from ../B1
+searching for changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 1 changes to 1 files
+(run 'hg update' to get a working copy)
+bar should remain deleted.
+6b70e9e451a5a33faad7bbebe627e46b937b7364 644 foo
+pulling from ../A2
+searching for changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 0 changes to 0 files
+(run 'hg update' to get a working copy)
+bar should remain deleted.
+6b70e9e451a5a33faad7bbebe627e46b937b7364 644 foo
