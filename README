@@ -1,0 +1,100 @@
+MERCURIAL QUICK-START
+
+Setting up Mercurial:
+
+ Note: some distributions fails to include bits of distutils by
+ default, you'll need python-dev to install. You'll also need a C
+ compiler and a 3-way merge tool like merge, tkdiff, or kdiff3.
+
+ First, unpack the source:
+
+ $ tar xvzf mercurial-<ver>.tar.gz
+ $ cd mercurial-<ver>
+
+ To install system-wide:
+
+ $ python setup.py install   # change python to python2.3 if 2.2 is default
+
+ To install in your home directory (~/bin and ~/lib, actually), run:
+
+ $ python2.3 setup.py install --home=~
+ $ export PYTHONPATH=${HOME}/lib/python  # (or lib64/ on some systems)
+ $ export PATH=${HOME}/bin:$PATH         # add these to your .bashrc
+
+ And finally:
+
+ $ hg                                    # test installation, show help
+
+ If you get complaints about missing modules, you probably haven't set
+ PYTHONPATH correctly.
+
+Setting up a Mercurial project:
+
+ $ cd project/
+ $ hg init         # creates .hg
+ $ hg addremove    # add all unknown files and remove all missing files
+ $ hg commit       # commit all changes, edit changelog entry
+
+ Mercurial will look for a file named .hgignore in the root of your
+ repository which contains a set of regular expressions to ignore in
+ file paths.
+
+Branching and merging:
+
+ $ hg clone linux linux-work    # create a new branch
+ $ cd linux-work
+ $ <make changes>
+ $ hg commit
+ $ cd ../linux
+ $ hg pull ../linux-work     # pull changesets from linux-work
+ $ hg update -m              # merge the new tip from linux-work into
+                             # our working directory
+ $ hg commit                 # commit the result of the merge
+
+Importing patches:
+
+ Fast:
+ $ patch < ../p/foo.patch
+ $ hg addremove
+ $ hg commit
+
+ Faster:
+ $ patch < ../p/foo.patch
+ $ hg commit `lsdiff -p1 ../p/foo.patch`
+
+ Fastest:
+ $ cat ../p/patchlist | xargs hg import -p1 -b ../p 
+
+Exporting a patch:
+
+ (make changes)
+ $ hg commit
+ $ hg tip
+ 28237:747a537bd090880c29eae861df4d81b245aa0190
+ $ hg export 28237 > foo.patch    # export changeset 28237
+
+Network support:
+
+ # pull from the primary Mercurial repo
+ foo$ hg clone http://selenic.com/hg/ 
+ foo$ cd hg
+
+ # export your current repo via HTTP with browsable interface
+ foo$ hg serve -n "My repo" -p 80
+ 
+ # pushing changes to a remote repo with SSH
+ foo$ hg push ssh://user@example.com/~/hg/
+
+ # merge changes from a remote machine
+ bar$ hg pull http://foo/
+ bar$ hg update -m        # merge changes into your working directory
+
+ # Set up a CGI server on your webserver
+ foo$ cp hgweb.cgi ~/public_html/hg/index.cgi
+ foo$ emacs ~/public_html/hg/index.cgi # adjust the defaults
+
+For more info:
+
+ Documentation in doc/
+ Mercurial website at http://selenic.com/mercurial
+ Mercurial wiki at http://selenic.com/mercurial/wiki
