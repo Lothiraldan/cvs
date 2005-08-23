@@ -1,0 +1,50 @@
+adding a
+diff -r c19d34741b0a a
+--- a/a
++++ b/a
+@@ -1,1 +1,1 @@
+-a
++abc
+adding b
+M a
+resolving manifests
+ force None allow None moddirstate True linear True
+ ancestor a0c8bcbbb45c local a0c8bcbbb45c remote 1165e8bd193e
+ a versions differ, resolve
+remote created b
+getting b
+merging a
+resolving a
+file a: other d730145abbf9 ancestor b789fdd96dc2
+resolving manifests
+ force None allow 1 moddirstate True linear True
+ ancestor 1165e8bd193e local 1165e8bd193e remote 1165e8bd193e
+changeset:   1:1e71731e6fbb
+tag:         tip
+user:        test
+date:        Thu Jan  1 00:00:00 1970 +0000
+summary:     2
+
+changeset:   1:1e71731e6fbb5b35fae293120dea6964371c13c6
+tag:         tip
+user:        test
+date:        Thu Jan  1 00:00:00 1970 +0000
+files:       a b
+description:
+2
+
+
+changeset:   0:c19d34741b0a4ced8e4ba74bb834597d5193851e
+user:        test
+date:        Thu Jan  1 00:00:00 1970 +0000
+files:       a
+description:
+1
+
+
+diff -r 1e71731e6fbb a
+--- a/a
++++ b/a
+@@ -1,1 +1,1 @@
+-a2
++abc
