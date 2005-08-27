@@ -1,0 +1,16 @@
+\.elc$
+\.orig$
+\.rej$
+~$
+\.so$
+\.pyc$
+\.swp$
+\.prof$
+^tests/.*\.err$
+^build/
+^dist/
+^doc/.*\.[0-9](\.(x|ht)ml)?$
+^MANIFEST$
+^\.pc/
+^patches/
+^mercurial/__version__.py$
