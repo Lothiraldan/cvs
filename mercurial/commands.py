@@ -592,7 +592,7 @@ def clone(ui, source, dest=None, **opts):
         dest = os.path.basename(os.path.normpath(source))
 
     if os.path.exists(dest):
-        raise util.Abort("destination '%s' already exists")
+        raise util.Abort("destination '%s' already exists", dest)
 
     dest = os.path.realpath(dest)
 
@@ -620,10 +620,6 @@ def clone(ui, source, dest=None, **opts):
 
     if other.dev() != -1:
         abspath = os.path.abspath(source)
-        copyfile = (os.stat(dest).st_dev == other.dev()
-                    and getattr(os, 'link', None) or shutil.copy2)
-        if copyfile is not shutil.copy2:
-            ui.note("cloning by hardlink\n")
 
         # we use a lock here because if we race with commit, we can
         # end up with extra data in the cloned revlogs that's not
@@ -638,7 +634,7 @@ def clone(ui, source, dest=None, **opts):
         for f in files.split():
             src = os.path.join(source, ".hg", f)
             dst = os.path.join(dest, ".hg", f)
-            util.copyfiles(src, dst, copyfile)
+            util.copyfiles(src, dst)
 
         repo = hg.repository(ui, dest)
 
@@ -1161,7 +1157,10 @@ def log(ui, repo, *pats, **opts):
             du = dui(ui)
         elif st == 'add':
             du.bump(rev)
-            show_changeset(du, repo, rev)
+            br = None
+            if opts['branch']:
+                br = repo.branchlookup([repo.changelog.node(rev)])
+            show_changeset(du, repo, rev, brinfo=br)
             if opts['patch']:
                 changenode = repo.changelog.node(rev)
                 prev, other = repo.changelog.parents(changenode)
@@ -1314,6 +1313,11 @@ def remove(ui, repo, pat, *pats, **opts):
         if okaytoremove(abs, rel, exact):
             if not exact: ui.status('removing %s\n' % rel)
             names.append(abs)
+    for name in names:
+        try:
+            os.unlink(name)
+        except OSError, inst:
+            if inst.errno != errno.ENOENT: raise
     repo.remove(names)
 
 def revert(ui, repo, *names, **opts):
@@ -1743,6 +1747,7 @@ table = {
         (log,
          [('I', 'include', [], 'include path in search'),
           ('X', 'exclude', [], 'exclude path from search'),
+          ('b', 'branch', None, 'show branches'),
           ('r', 'rev', [], 'revision'),
           ('p', 'patch', None, 'show patch')],
          'hg log [-I] [-X] [-r REV]... [-p] [FILE]'),
