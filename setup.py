@@ -34,7 +34,10 @@ try:
             # Sets the 'includes' option with the list of needed modules
             if not self.includes:
                 self.includes = []
-            self.includes += mercurial.packagescan.getmodules(self.build_lib,'mercurial')
+            self.includes += mercurial.packagescan.getmodules(self.build_lib,
+                                                              'mercurial')
+            self.includes += mercurial.packagescan.getmodules(self.build_lib,
+                                                              'hgext')
             build_exe.finalize_options(self)
 except ImportError:
     py2exe_for_demandload = None
@@ -61,7 +64,7 @@ try:
           url='http://selenic.com/mercurial',
           description='scalable distributed SCM',
           license='GNU GPL',
-          packages=['mercurial'],
+          packages=['mercurial', 'hgext'],
           ext_modules=[Extension('mercurial.mpatch', ['mercurial/mpatch.c']),
                        Extension('mercurial.bdiff', ['mercurial/bdiff.c'])],
           data_files=[('mercurial/templates',
