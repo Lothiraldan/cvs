@@ -1,13 +1,13 @@
 <table class="changelogEntry parity#parity#">
  <tr>
   <th class="age" width="15%">#date|age# ago:</th>
-  <th class="firstline">#desc|firstline|escape#</th>
+  <th class="firstline">#desc|strip|firstline|escape#</th>
  </tr>
  <tr>
   <th class="changesetRev">changeset #rev#:</th>
-  <td class="changesetNode"><a href="?cmd=changeset;node=#node#">#node|short#</a></td>
+  <td class="changesetNode"><a href="?cs=#node|short#">#node|short#</a></td>
  </tr>
- #parent#
+ #parent%changelogparent#
  #changelogtag#
  <tr>
   <th class="author">author:</th>
@@ -18,7 +18,7 @@
   <td class="date">#date|date#</td>
  </tr>
  <tr>
-  <th class="files"><a href="?cmd=manifest;manifest=#manifest#;path=/">files</a>:</th>
+  <th class="files"><a href="?mf=#manifest|short#;path=/">files</a>:</th>
   <td class="files">#files#</td>
  </tr>
 </table>

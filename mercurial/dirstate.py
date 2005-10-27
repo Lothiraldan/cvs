@@ -9,6 +9,7 @@ of the GNU General Public License, incorporated herein by reference.
 
 import struct, os
 from node import *
+from i18n import gettext as _
 from demandload import *
 demandload(globals(), "time bisect stat util re")
 
@@ -67,7 +68,7 @@ class dirstate:
                     try:
                         syntax = syntaxes[s]
                     except KeyError:
-                        self.ui.warn("ignoring invalid syntax '%s'\n" % s)
+                        self.ui.warn(_("ignoring invalid syntax '%s'\n") % s)
                     continue
                 pat = syntax + line
                 for s in syntaxes.values():
@@ -117,6 +118,8 @@ class dirstate:
             self.dirty = 1
 
     def setparents(self, p1, p2=nullid):
+        if not self.pl:
+            self.read()
         self.markdirty()
         self.pl = p1, p2
 
@@ -187,7 +190,7 @@ class dirstate:
             try:
                 del self.map[f]
             except KeyError:
-                self.ui.warn("not in dirstate: %s!\n" % f)
+                self.ui.warn(_("not in dirstate: %s!\n") % f)
                 pass
 
     def clear(self):
@@ -268,6 +271,22 @@ class dirstate:
     # directly by this function, but might be modified by your statmatch call.
     #
     def walkhelper(self, files, statmatch, dc):
+        def supported_type(f, st):
+            if stat.S_ISREG(st.st_mode):
+                return True
+            else:
+                kind = 'unknown'
+                if stat.S_ISCHR(st.st_mode): kind = _('character device')
+                elif stat.S_ISBLK(st.st_mode): kind = _('block device')
+                elif stat.S_ISFIFO(st.st_mode): kind = _('fifo')
+                elif stat.S_ISLNK(st.st_mode): kind = _('symbolic link')
+                elif stat.S_ISSOCK(st.st_mode): kind = _('socket')
+                elif stat.S_ISDIR(st.st_mode): kind = _('directory')
+                self.ui.warn(_('%s: unsupported file type (type is %s)\n') % (
+                    util.pathto(self.getcwd(), f),
+                    kind))
+                return False
+
         # recursion free walker, faster than os.walk.
         def findfiles(s):
             retfiles = []
@@ -290,9 +309,9 @@ class dirstate:
                         ds = os.path.join(nd, f +'/')
                         if statmatch(ds, st):
                             work.append(p)
-                    else:
-                        if statmatch(np, st):
-                            yield util.pconvert(np)
+                    elif statmatch(np, st) and supported_type(np, st):
+                        yield util.pconvert(np)
+
 
         known = {'.hg': 1}
         def seen(fn):
@@ -315,27 +334,17 @@ class dirstate:
                 sorted.sort()
                 for fl in sorted:
                     yield 'f', fl
-            elif stat.S_ISREG(st.st_mode):
+            else:
                 ff = util.normpath(ff)
                 if seen(ff):
                     continue
                 found = False
                 self.blockignore = True
-                if statmatch(ff, st):
+                if statmatch(ff, st) and supported_type(ff, st):
                     found = True
                 self.blockignore = False
                 if found:
                     yield 'f', ff
-            else:
-                kind = 'unknown'
-                if stat.S_ISCHR(st.st_mode): kind = 'character device'
-                elif stat.S_ISBLK(st.st_mode): kind = 'block device'
-                elif stat.S_ISFIFO(st.st_mode): kind = 'fifo'
-                elif stat.S_ISLNK(st.st_mode): kind = 'symbolic link'
-                elif stat.S_ISSOCK(st.st_mode): kind = 'socket'
-                self.ui.warn('%s: unsupported file type (type is %s)\n' % (
-                    util.pathto(self.getcwd(), ff),
-                    kind))
 
         # step two run through anything left in the dc hash and yield
         # if we haven't already seen it
@@ -368,8 +377,6 @@ class dirstate:
                 if self.ignore(fn): return False
                 return match(fn)
 
-            if not stat.S_ISREG(s.st_mode):
-                return False
             c = dc.pop(fn, None)
             if c:
                 type, mode, size, time = c

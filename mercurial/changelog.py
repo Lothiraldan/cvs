@@ -6,6 +6,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from revlog import *
+from i18n import gettext as _
 from demandload import demandload
 demandload(globals(), "os time util")
 
@@ -43,11 +44,11 @@ class changelog(revlog):
             try:
                 when, offset = map(int, date.split(' '))
             except ValueError:
-                raise ValueError('invalid date: %r' % date)
+                raise ValueError(_('invalid date: %r') % date)
             if abs(when) > 0x7fffffff:
-                raise ValueError('date exceeds 32 bits: %d' % when)
+                raise ValueError(_('date exceeds 32 bits: %d') % when)
             if abs(offset) >= 43200:
-                raise ValueError('impossible time zone offset: %d' % offset)
+                raise ValueError(_('impossible time zone offset: %d') % offset)
         else:
             date = "%d %d" % util.makedate()
         list.sort()

@@ -10,7 +10,9 @@ import os, cgi, sys
 from demandload import demandload
 demandload(globals(), "mdiff time re socket zlib errno ui hg ConfigParser")
 demandload(globals(), "zipfile tempfile StringIO tarfile BaseHTTPServer util")
+demandload(globals(), "mimetypes")
 from node import *
+from i18n import gettext as _
 
 def templatepath():
     for f in "templates", "../templates":
@@ -61,12 +63,20 @@ def up(p):
         return "/"
     return up + "/"
 
+def get_mtime(repo_path):
+    hg_path = os.path.join(repo_path, ".hg")
+    cl_path = os.path.join(hg_path, "00changelog.i")
+    if os.path.exists(os.path.join(cl_path)):
+        return os.stat(cl_path).st_mtime
+    else:
+        return os.stat(hg_path).st_mtime
+
 class hgrequest:
     def __init__(self, inp=None, out=None, env=None):
         self.inp = inp or sys.stdin
         self.out = out or sys.stdout
         self.env = env or os.environ
-        self.form = cgi.parse(self.inp, self.env)
+        self.form = cgi.parse(self.inp, self.env, keep_blank_values=1)
 
     def write(self, *things):
         for thing in things:
@@ -111,7 +121,7 @@ class templater:
                 if m:
                     self.map[m.group(1)] = os.path.join(self.base, m.group(2))
                 else:
-                    raise LookupError("unknown map entry '%s'" % l)
+                    raise LookupError(_("unknown map entry '%s'") % l)
 
     def __call__(self, t, **map):
         m = self.defaults.copy()
@@ -154,6 +164,8 @@ class templater:
 
 common_filters = {
     "escape": cgi.escape,
+    "strip": lambda x: x.strip(),
+    "rstrip": lambda x: x.rstrip(),
     "age": age,
     "date": lambda x: util.datestr(x),
     "addbreaks": nl2br,
@@ -176,9 +188,9 @@ class hgweb:
         self.archives = 'zip', 'gz', 'bz2'
 
     def refresh(self):
-        s = os.stat(os.path.join(self.repo.root, ".hg", "00changelog.i"))
-        if s.st_mtime != self.mtime:
-            self.mtime = s.st_mtime
+        mtime = get_mtime(self.repo.root)
+        if mtime != self.mtime:
+            self.mtime = mtime
             self.repo = hg.repository(self.repo.ui, self.repo.root)
             self.maxchanges = int(self.repo.ui.config("web", "maxchanges", 10))
             self.maxfiles = int(self.repo.ui.config("web", "maxfiles", 10))
@@ -196,12 +208,14 @@ class hgweb:
         if len(files) > self.maxfiles:
             yield self.t("fileellipses")
 
-    def parents(self, t1, nodes=[], rev=None,**args):
+    def parents(self, node, parents=[], rev=None, hide=False, **args):
         if not rev:
             rev = lambda x: ""
-        for node in nodes:
-            if node != nullid:
-                yield self.t(t1, node=hex(node), rev=rev(node), **args)
+        parents = [p for p in parents if p != nullid]
+        if hide and len(parents) == 1 and rev(parents[0]) == rev(node) - 1:
+            return
+        for p in parents:
+            yield dict(node=hex(p), rev=rev(p), **args)
 
     def showtag(self, t1, node=nullid, **args):
         for t in self.repo.nodetags(node):
@@ -290,7 +304,7 @@ class hgweb:
             for label, rev in l:
                 yield {"label": label, "rev": rev}
 
-            yield {"label": "tip", "rev": ""}
+            yield {"label": "tip", "rev": "tip"}
 
         def changelist(**map):
             parity = (start - end) & 1
@@ -303,8 +317,8 @@ class hgweb:
 
                 l.insert(0, {"parity": parity,
                              "author": changes[1],
-                             "parent": self.parents("changelogparent",
-                                                    cl.parents(n), cl.rev),
+                             "parent": self.parents(n, cl.parents(n), cl.rev,
+                                                    hide=True),
                              "changelogtag": self.showtag("changelogtag",n),
                              "manifest": hex(changes[0]),
                              "desc": changes[4],
@@ -364,8 +378,7 @@ class hgweb:
                 yield self.t('searchentry',
                              parity=count & 1,
                              author=changes[1],
-                             parent=self.parents("changelogparent",
-                                                 cl.parents(n), cl.rev),
+                             parent=self.parents(n, cl.parents(n), cl.rev),
                              changelogtag=self.showtag("changelogtag",n),
                              manifest=hex(changes[0]),
                              desc=changes[4],
@@ -410,8 +423,7 @@ class hgweb:
                      diff=diff,
                      rev=cl.rev(n),
                      node=nodeid,
-                     parent=self.parents("changesetparent",
-                                         cl.parents(n), cl.rev),
+                     parent=self.parents(n, cl.parents(n), cl.rev),
                      changesettag=self.showtag("changesettag",n),
                      manifest=hex(changes[0]),
                      author=changes[1],
@@ -443,8 +455,7 @@ class hgweb:
                              "node": hex(cn),
                              "author": cs[1],
                              "date": cs[2],
-                             "parent": self.parents("filelogparent",
-                                                    fl.parents(n),
+                             "parent": self.parents(n, fl.parents(n),
                                                     fl.rev, file=f),
                              "desc": cs[4]})
                 parity = 1 - parity
@@ -465,6 +476,11 @@ class hgweb:
         cs = cl.read(cn)
         mfn = cs[0]
 
+        mt = mimetypes.guess_type(f)[0]
+        rawtext = text
+        if util.binary(text):
+            text = "(binary:%s)" % mt
+
         def lines():
             for l, t in enumerate(text.splitlines(1)):
                 yield {"line": t,
@@ -476,13 +492,14 @@ class hgweb:
                      filenode=node,
                      path=up(f),
                      text=lines(),
+                     raw=rawtext,
+                     mimetype=mt,
                      rev=changerev,
                      node=hex(cn),
                      manifest=hex(mfn),
                      author=cs[1],
                      date=cs[2],
-                     parent=self.parents("filerevparent",
-                                         fl.parents(n), fl.rev, file=f),
+                     parent=self.parents(n, fl.parents(n), fl.rev, file=f),
                      permissions=self.repo.manifest.readflags(mfn)[f])
 
     def fileannotate(self, f, node):
@@ -534,8 +551,7 @@ class hgweb:
                      manifest=hex(mfn),
                      author=cs[1],
                      date=cs[2],
-                     parent=self.parents("fileannotateparent",
-                                         fl.parents(n), fl.rev, file=f),
+                     parent=self.parents(n, fl.parents(n), fl.rev, file=f),
                      permissions=self.repo.manifest.readflags(mfn)[f])
 
     def manifest(self, mnode, path):
@@ -639,8 +655,7 @@ class hgweb:
                      filenode=hex(mf.get(file, nullid)),
                      node=changeset,
                      rev=self.repo.changelog.rev(n),
-                     parent=self.parents("filediffparent",
-                                         cl.parents(n), cl.rev),
+                     parent=self.parents(n, cl.parents(n), cl.rev),
                      diff=diff)
 
     def archive(self, req, cnode, type):
@@ -704,7 +719,31 @@ class hgweb:
         def footer(**map):
             yield self.t("footer", **map)
 
+        def expand_form(form):
+            shortcuts = {
+                'cl': [('cmd', ['changelog']), ('rev', None)],
+                'cs': [('cmd', ['changeset']), ('node', None)],
+                'f': [('cmd', ['file']), ('filenode', None)],
+                'fl': [('cmd', ['filelog']), ('filenode', None)],
+                'fd': [('cmd', ['filediff']), ('node', None)],
+                'fa': [('cmd', ['annotate']), ('filenode', None)],
+                'mf': [('cmd', ['manifest']), ('manifest', None)],
+                'ca': [('cmd', ['archive']), ('node', None)],
+                'tags': [('cmd', ['tags'])],
+                'tip': [('cmd', ['changeset']), ('node', ['tip'])],
+            }
+
+            for k in shortcuts.iterkeys():
+                if form.has_key(k):
+                    for name, value in shortcuts[k]:
+                        if value is None:
+                            value = form[k]
+                        form[name] = value
+                    del form[k]
+
         self.refresh()
+
+        expand_form(req.form)
 
         t = self.repo.ui.config("web", "templates", templatepath())
         m = os.path.join(t, "map")
@@ -843,7 +882,7 @@ def create_server(repo):
 
         def __init__(self, *args, **kwargs):
             if self.address_family is None:
-                raise hg.RepoError('IPv6 not available on this system')
+                raise hg.RepoError(_('IPv6 not available on this system'))
             BaseHTTPServer.HTTPServer.__init__(self, *args, **kwargs)
 
     class hgwebhandler(BaseHTTPServer.BaseHTTPRequestHandler):
@@ -960,9 +999,7 @@ class hgwebdir:
                        .replace("//", "/"))
 
                 # update time with local timezone
-                d = (os.stat(os.path.join(path,
-                                          ".hg", "00changelog.d")).st_mtime,
-                     util.makedate()[1])
+                d = (get_mtime(path), util.makedate()[1])
 
                 yield dict(contact=(get("ui", "username") or # preferred
                                     get("web", "contact") or # deprecated

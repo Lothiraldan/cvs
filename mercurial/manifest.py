@@ -7,6 +7,7 @@
 
 import sys, struct
 from revlog import *
+from i18n import gettext as _
 from demandload import *
 demandload(globals(), "bisect")
 
@@ -37,16 +38,6 @@ class manifest(revlog):
         if not self.mapcache or self.mapcache[0] != node:
             self.read(node)
         return self.mapcache[2]
-
-    def diff(self, a, b):
-        # this is sneaky, as we're not actually using a and b
-        if self.listcache and self.addlist and self.listcache[0] == a:
-            d = mdiff.diff(self.listcache[1], self.addlist, 1)
-            if mdiff.patch(a, d) != b:
-                raise AssertionError("sortdiff failed!")
-            return d
-        else:
-            return mdiff.textdiff(a, b)
 
     def add(self, map, flags, transaction, link, p1=None, p2=None,
             changed=None):
@@ -144,7 +135,7 @@ class manifest(revlog):
                     end = bs
                     if w[1] == 1:
                         raise AssertionError(
-                            "failed to remove %s from manifest\n" % f)
+                            _("failed to remove %s from manifest\n") % f)
                 else:
                     # item is found, replace/delete the existing line
                     end = bs + 1
@@ -158,7 +149,7 @@ class manifest(revlog):
 
         text = "".join(self.addlist)
         if cachedelta and mdiff.patch(self.listcache[0], cachedelta) != text:
-            raise AssertionError("manifest delta failure\n")
+            raise AssertionError(_("manifest delta failure\n"))
         n = self.addrevision(text, transaction, link, p1, p2, cachedelta)
         self.mapcache = (n, map, flags)
         self.listcache = (text, self.addlist)

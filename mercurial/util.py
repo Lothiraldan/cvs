@@ -11,6 +11,7 @@ platform-specific details from the core.
 """
 
 import os, errno
+from i18n import gettext as _
 from demandload import *
 demandload(globals(), "re cStringIO shutil popen2 tempfile threading time")
 
@@ -46,7 +47,7 @@ def tempfilter(s, cmd):
         cmd = cmd.replace('INFILE', inname)
         cmd = cmd.replace('OUTFILE', outname)
         code = os.system(cmd)
-        if code: raise Abort("command '%s' failed: %s" %
+        if code: raise Abort(_("command '%s' failed: %s") %
                              (cmd, explain_exit(code)))
         return open(outname, 'rb').read()
     finally:
@@ -82,7 +83,7 @@ def patch(strip, patchname, ui):
             files.setdefault(pf, 1)
     code = fp.close()
     if code:
-        raise Abort("patch command failed: %s" % explain_exit(code))
+        raise Abort(_("patch command failed: %s") % explain_exit(code)[0])
     return files.keys()
 
 def binary(s):
@@ -178,6 +179,16 @@ def canonpath(root, cwd, myname):
         raise Abort('%s not under root' % myname)
 
 def matcher(canonroot, cwd='', names=['.'], inc=[], exc=[], head=''):
+    return _matcher(canonroot, cwd, names, inc, exc, head, 'glob')
+
+def cmdmatcher(canonroot, cwd='', names=['.'], inc=[], exc=[], head=''):
+    if os.name == 'nt':
+        dflt_pat = 'glob'
+    else:
+        dflt_pat = 'relpath'
+    return _matcher(canonroot, cwd, names, inc, exc, head, dflt_pat)
+
+def _matcher(canonroot, cwd, names, inc, exc, head, dflt_pat):
     """build a function to match a set of file patterns
 
     arguments:
@@ -207,12 +218,15 @@ def matcher(canonroot, cwd='', names=['.'], inc=[], exc=[], head=''):
     make head regex a rooted bool
     """
 
-    def patkind(name):
+    def patkind(name, dflt_pat='glob'):
         for prefix in 're', 'glob', 'path', 'relglob', 'relpath', 'relre':
             if name.startswith(prefix + ':'): return name.split(':', 1)
+        return dflt_pat, name
+
+    def contains_glob(name):
         for c in name:
-            if c in _globchars: return 'glob', name
-        return 'relpath', name
+            if c in _globchars: return True
+        return False
 
     def regex(kind, name, tail):
         '''convert a pattern into a regular expression'''
@@ -232,22 +246,36 @@ def matcher(canonroot, cwd='', names=['.'], inc=[], exc=[], head=''):
 
     def matchfn(pats, tail):
         """build a matching function from a set of patterns"""
-        if pats:
-            pat = '(?:%s)' % '|'.join([regex(k, p, tail) for (k, p) in pats])
-            return re.compile(pat).match
+        if not pats:
+            return
+        matches = []
+        for k, p in pats:
+            try:
+                pat = '(?:%s)' % regex(k, p, tail)
+                matches.append(re.compile(pat).match)
+            except re.error, inst:
+                raise Abort("invalid pattern: %s:%s" % (k, p))
+
+        def buildfn(text):
+            for m in matches:
+                r = m(text)
+                if r:
+                    return r
+
+        return buildfn
 
     def globprefix(pat):
         '''return the non-glob prefix of a path, e.g. foo/* -> foo'''
         root = []
         for p in pat.split(os.sep):
-            if patkind(p)[0] == 'glob': break
+            if contains_glob(p): break
             root.append(p)
         return '/'.join(root)
 
     pats = []
     files = []
     roots = []
-    for kind, name in map(patkind, names):
+    for kind, name in [patkind(p, dflt_pat) for p in names]:
         if kind in ('glob', 'relpath'):
             name = canonpath(canonroot, cwd, name)
             if name == '':
@@ -295,6 +323,13 @@ def rename(src, dst):
     except:
         os.unlink(dst)
         os.rename(src, dst)
+
+def unlink(f):
+    """unlink and remove the directory if it is empty"""
+    os.unlink(f)
+    # try removing directories that might now be empty
+    try: os.removedirs(os.path.dirname(f))
+    except: pass
 
 def copyfiles(src, dst, hardlink=None):
     """Copy a directory tree using hardlinks if possible"""
@@ -365,13 +400,23 @@ if hasattr(os, 'link'):
     os_link = os.link
 else:
     def os_link(src, dst):
-        raise OSError(0, "Hardlinks not supported")
+        raise OSError(0, _("Hardlinks not supported"))
 
 # Platform specific variants
 if os.name == 'nt':
+    demandload(globals(), "msvcrt")
     nulldev = 'NUL:'
+    
+    try:
+        import win32api, win32process
+        filename = win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
+        systemrc = os.path.join(os.path.dirname(filename), 'mercurial.ini')
+        
+    except ImportError:
+        systemrc = r'c:\mercurial\mercurial.ini'
+        pass
 
-    rcpath = (r'c:\mercurial\mercurial.ini',
+    rcpath = (systemrc,
               os.path.join(os.path.expanduser('~'), 'mercurial.ini'))
 
     def parse_patch_output(output_line):
@@ -408,6 +453,9 @@ if os.name == 'nt':
     def set_exec(f, mode):
         pass
 
+    def set_binary(fd):
+        msvcrt.setmode(fd.fileno(), os.O_BINARY)
+
     def pconvert(path):
         return path.replace("\\", "/")
 
@@ -421,7 +469,7 @@ if os.name == 'nt':
     readlock = _readlock_file
 
     def explain_exit(code):
-        return "exited with status %d" % code, code
+        return _("exited with status %d") % code, code
 
 else:
     nulldev = '/dev/null'
@@ -454,6 +502,9 @@ else:
         else:
             os.chmod(f, s & 0666)
 
+    def set_binary(fd):
+        pass
+
     def pconvert(path):
         return path
 
@@ -484,14 +535,14 @@ else:
         """return a 2-tuple (desc, code) describing a process's status"""
         if os.WIFEXITED(code):
             val = os.WEXITSTATUS(code)
-            return "exited with status %d" % val, val
+            return _("exited with status %d") % val, val
         elif os.WIFSIGNALED(code):
             val = os.WTERMSIG(code)
-            return "killed by signal %d" % val, val
+            return _("killed by signal %d") % val, val
         elif os.WIFSTOPPED(code):
             val = os.WSTOPSIG(code)
-            return "stopped by signal %d" % val, val
-        raise ValueError("invalid exit code")
+            return _("stopped by signal %d") % val, val
+        raise ValueError(_("invalid exit code"))
 
 class chunkbuffer(object):
     """Allow arbitrary sized chunks of data to be efficiently read from an
@@ -504,7 +555,7 @@ class chunkbuffer(object):
         self.buf = ''
         self.targetsize = int(targetsize)
         if self.targetsize <= 0:
-            raise ValueError("targetsize must be greater than 0, was %d" %
+            raise ValueError(_("targetsize must be greater than 0, was %d") %
                              targetsize)
         self.iterempty = False
 
