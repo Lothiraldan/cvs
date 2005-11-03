@@ -1504,9 +1504,6 @@ class localrepository:
                 return 1
             branch_merge = True
 
-        if moddirstate:
-            self.dirstate.setparents(p1, p2)
-
         # get the files we don't need to change
         files = get.keys()
         files.sort()
@@ -1559,6 +1556,9 @@ class localrepository:
             else:
                 self.dirstate.forget(remove)
 
+        if moddirstate:
+            self.dirstate.setparents(p1, p2)
+
     def merge3(self, fn, my, other):
         """perform a 3-way merge in the working directory"""
 
@@ -1602,6 +1602,9 @@ class localrepository:
 
         seen = {}
         self.ui.status(_("checking changesets\n"))
+        d = self.changelog.checksize()
+        if d:
+            err(_("changeset data short %d bytes") % d)
         for i in range(self.changelog.count()):
             changesets += 1
             n = self.changelog.node(i)
@@ -1618,6 +1621,9 @@ class localrepository:
                                  (short(n), short(p)))
             try:
                 changes = self.changelog.read(n)
+            except KeyboardInterrupt:
+                self.ui.warn(_("interrupted"))
+                raise
             except Exception, inst:
                 err(_("unpacking changeset %s: %s") % (short(n), inst))
 
@@ -1628,6 +1634,9 @@ class localrepository:
 
         seen = {}
         self.ui.status(_("checking manifests\n"))
+        d = self.manifest.checksize()
+        if d:
+            err(_("manifest data short %d bytes") % d)
         for i in range(self.manifest.count()):
             n = self.manifest.node(i)
             l = self.manifest.linkrev(n)
@@ -1682,6 +1691,10 @@ class localrepository:
             if f == "/dev/null": continue
             files += 1
             fl = self.file(f)
+            d = fl.checksize()
+            if d:
+                err(_("%s file data short %d bytes") % (f, d))
+
             nodes = { nullid: 1 }
             seen = {}
             for i in range(fl.count()):
@@ -1705,6 +1718,9 @@ class localrepository:
                 # verify contents
                 try:
                     t = fl.read(n)
+                except KeyboardInterrupt:
+                    self.ui.warn(_("interrupted"))
+                    raise
                 except Exception, inst:
                     err(_("unpacking file %s %s: %s") % (f, short(n), inst))
 
