@@ -43,7 +43,7 @@ class localrepository:
 
         self.dirstate = dirstate.dirstate(self.opener, ui, self.root)
         try:
-            self.ui.readconfig(os.path.join(self.path, "hgrc"))
+            self.ui.readconfig(self.join("hgrc"))
         except IOError: pass
 
     def hook(self, name, **args):
@@ -225,9 +225,11 @@ class localrepository:
         lock = self.lock()
         if os.path.exists(self.join("journal")):
             self.ui.status(_("rolling back interrupted transaction\n"))
-            return transaction.rollback(self.opener, self.join("journal"))
+            transaction.rollback(self.opener, self.join("journal"))
+            return True
         else:
             self.ui.warn(_("no interrupted transaction available\n"))
+            return False
 
     def undo(self):
         lock = self.lock()
