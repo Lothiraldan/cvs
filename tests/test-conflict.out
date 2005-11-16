@@ -1,0 +1,8 @@
+merge: warning: conflicts during merge
+merging a
+merging a failed!
+32e80765d7fe+75234512624c+ tip
+something else
+=======
+something
+M a
