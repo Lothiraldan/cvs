@@ -1,0 +1,178 @@
+shopt -s extglob
+
+_hg_commands()
+{
+    local all commands result
+
+    all=($(hg --debug help | sed -e '1,/^list of commands:/d' \
+				 -e '/^global options:/,$d' \
+				 -e '/^ [^ ]/!d; s/^ //; s/[,:]//g;'))
+
+    commands="${all[*]##debug*}"
+    result=$(compgen -W "${commands[*]}" -- "$cur")
+
+    # hide debug commands from users, but complete them if
+    # there is no other possible command
+    if [ "$result" = "" ]; then
+	local debug
+	debug=(${all[*]##!(debug*)})
+	debug="${debug[*]/g/debug}"
+	result=$(compgen -W "$debug" -- "$cur")
+    fi
+
+    COMPREPLY=(${COMPREPLY[@]:-} $result)
+}
+
+_hg_paths()
+{
+    local paths="$(hg paths | sed -e 's/ = .*$//')"
+    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -W "$paths" -- "$cur" ))
+}
+
+_hg_status()
+{
+    local files="$( hg status -$1 | cut -b 3- )"
+    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -W "$files" -- "$cur" ))
+}
+
+_hg_tags()
+{
+    local tags="$(hg tags | sed -e 's/[0-9]*:[a-f0-9]\{40\}$//; s/ *$//')"
+    COMPREPLY=( ${COMPREPLY[@]:-} $(compgen -W "$tags" -- "$cur") )
+}
+
+# this is "kind of" ugly...
+_hg_count_non_option()
+{
+    local i count=0
+    local filters="$1"
+
+    for (( i=1; $i<=$COMP_CWORD; i++ )); do
+	if [[ "${COMP_WORDS[i]}" != -* ]]; then
+	    if [[ ${COMP_WORDS[i-1]} == @($filters|$global_args) ]]; then
+		continue
+	    fi
+	    count=$(($count + 1))
+	fi
+    done
+
+    echo $(($count - 1))
+}
+
+_hg()
+{
+    local cur prev cmd opts i
+    # global options that receive an argument
+    local global_args='--cwd|-R|--repository'
+
+    COMPREPLY=()
+    cur="$2"
+    prev="$3"
+
+    # searching for the command
+    # (first non-option argument that doesn't follow a global option that
+    #  receives an argument)
+    for (( i=1; $i<=$COMP_CWORD; i++ )); do
+	if [[ ${COMP_WORDS[i]} != -* ]]; then
+	    if [[ ${COMP_WORDS[i-1]} != @($global_args) ]]; then
+		cmd="${COMP_WORDS[i]}"
+		break
+	    fi
+	fi
+    done
+
+    if [[ "$cur" == -* ]]; then
+	# this assumes that there are no commands with spaces in the name
+	opts=$(hg -v help $cmd | sed -e '/^ *-/!d; s/ [^- ].*//')
+
+	COMPREPLY=( ${COMPREPLY[@]:-} $(compgen -W "$opts" -- "$cur") )
+	return
+    fi
+
+    # global options
+    case "$prev" in
+	-R|--repository)
+	    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -d -- "$cur" ))
+	    return
+	;;
+	--cwd)
+	    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -d -- "$cur" ))
+	    return
+	;;
+    esac
+
+    if [ -z "$cmd" ] || [ $COMP_CWORD -eq $i ]; then
+	_hg_commands
+	return
+    fi
+
+    # canonicalize command name
+    cmd=$(hg -q help "$cmd" | sed -e 's/^hg //; s/ .*//; 1q')
+
+    if [ "$cmd" != status ] && [ "$prev" = -r ] || [ "$prev" = --rev ]; then
+	_hg_tags
+	return
+    fi
+
+    case "$cmd" in
+	help)
+	    _hg_commands
+	;;
+	export|manifest|update)
+	    _hg_tags
+	;;
+	pull|push|outgoing|incoming)
+	    _hg_paths
+	    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -d -- "$cur" ))
+	;;
+	paths)
+	    _hg_paths
+	;;
+	add)
+	    _hg_status "u"
+	;;
+	commit)
+	    _hg_status "mra"
+	;;
+	remove)
+	    _hg_status "r"
+	;;
+	forget)
+	    _hg_status "a"
+	;;
+	diff)
+	    _hg_status "mra"
+	;;
+	revert)
+	    _hg_status "mra"
+	;;
+	clone)
+	    local count=$(_hg_count_non_option)
+	    if [ $count = 1 ]; then
+		_hg_paths
+	    fi
+	    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -d -- "$cur" ))
+	;;
+	debugindex|debugindexdot)
+	    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -f -X "!*.i" -- "$cur" ))
+	;;
+	debugdata)
+	    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -f -X "!*.d" -- "$cur" ))
+	;;
+	cat)
+	    local count=$(_hg_count_non_option '-o|--output')
+	    if [ $count = 2 ]; then
+		_hg_tags
+	    else
+		COMPREPLY=(${COMPREPLY[@]:-} $( compgen -f -- "$cur" ))
+	    fi
+	;;
+	*)
+	    COMPREPLY=(${COMPREPLY[@]:-} $( compgen -f -- "$cur" ))
+	;;
+    esac
+
+}
+
+complete -o bashdefault -o default -F _hg hg 2> /dev/null \
+    || complete -o default -F _hg hg
