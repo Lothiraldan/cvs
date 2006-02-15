@@ -1,0 +1,276 @@
+HGRC(5)
+=======
+Bryan O'Sullivan <bos@serpentine.com>
+
+NAME
+----
+hgrc - configuration files for Mercurial
+
+SYNOPSIS
+--------
+
+The Mercurial system uses a set of configuration files to control
+aspects of its behaviour.
+
+FILES
+-----
+
+Mercurial reads configuration data from several files, if they exist.
+The names of these files depend on the system on which Mercurial is
+installed.
+
+(Unix)    <install-root>/etc/mercurial/hgrc.d/*.rc::
+(Unix)    <install-root>/etc/mercurial/hgrc::
+    Per-installation configuration files, searched for in the
+    directory where Mercurial is installed.  For example, if installed
+    in /shared/tools, Mercurial will look in
+    /shared/tools/etc/mercurial/hgrc.  Options in these files apply to
+    all Mercurial commands executed by any user in any directory.
+
+(Unix)    /etc/mercurial/hgrc.d/*.rc::
+(Unix)    /etc/mercurial/hgrc::
+(Windows) C:\Mercurial\Mercurial.ini::
+    Per-system configuration files, for the system on which Mercurial
+    is running.  Options in these files apply to all Mercurial
+    commands executed by any user in any directory.  Options in these
+    files override per-installation options.
+
+(Unix)    $HOME/.hgrc::
+(Windows) C:\Documents and Settings\USERNAME\Mercurial.ini
+    Per-user configuration file, for the user running Mercurial.
+    Options in this file apply to all Mercurial commands executed by
+    any user in any directory.  Options in this file override
+    per-installation and per-system options.
+
+(Unix, Windows) <repo>/.hg/hgrc::
+    Per-repository configuration options that only apply in a
+    particular repository.  This file is not version-controlled, and
+    will not get transferred during a "clone" operation.  Options in
+    this file override options in all other configuration files.
+
+SYNTAX
+------
+
+A configuration file consists of sections, led by a "[section]" header
+and followed by "name: value" entries; "name=value" is also accepted.
+
+    [spam]
+    eggs=ham
+    green=
+       eggs
+
+Each line contains one entry.  If the lines that follow are indented,
+they are treated as continuations of that entry.
+
+Leading whitespace is removed from values.  Empty lines are skipped.
+
+The optional values can contain format strings which refer to other
+values in the same section, or values in a special DEFAULT section.
+
+Lines beginning with "#" or ";" are ignored and may be used to provide
+comments.
+
+SECTIONS
+--------
+
+This section describes the different sections that may appear in a
+Mercurial "hgrc" file, the purpose of each section, its possible
+keys, and their possible values.
+
+decode/encode::
+  Filters for transforming files on checkout/checkin. This would
+  typically be used for newline processing or other
+  localization/canonicalization of files.
+
+  Filters consist of a filter pattern followed by a filter command.
+  Filter patterns are globs by default, rooted at the repository
+  root.  For example, to match any file ending in ".txt" in the root
+  directory only, use the pattern "*.txt".  To match any file ending
+  in ".c" anywhere in the repository, use the pattern "**.c".
+
+  The filter command can start with a specifier, either "pipe:" or
+  "tempfile:".  If no specifier is given, "pipe:" is used by default.
+
+  A "pipe:" command must accept data on stdin and return the
+  transformed data on stdout.
+
+  Pipe example:
+
+    [encode]
+    # uncompress gzip files on checkin to improve delta compression
+    # note: not necessarily a good idea, just an example
+    *.gz = pipe: gunzip
+
+    [decode]
+    # recompress gzip files when writing them to the working dir (we
+    # can safely omit "pipe:", because it's the default)
+    *.gz = gzip
+
+  A "tempfile:" command is a template.  The string INFILE is replaced
+  with the name of a temporary file that contains the data to be
+  filtered by the command.  The string OUTFILE is replaced with the
+  name of an empty temporary file, where the filtered data must be
+  written by the command.
+
+  NOTE: the tempfile mechanism is recommended for Windows systems,
+  where the standard shell I/O redirection operators often have
+  strange effects.  In particular, if you are doing line ending
+  conversion on Windows using the popular dos2unix and unix2dos
+  programs, you *must* use the tempfile mechanism, as using pipes will
+  corrupt the contents of your files.
+
+  Tempfile example:
+
+    [encode]
+    # convert files to unix line ending conventions on checkin
+    **.txt = tempfile: dos2unix -n INFILE OUTFILE
+
+    [decode]
+    # convert files to windows line ending conventions when writing
+    # them to the working dir
+    **.txt = tempfile: unix2dos -n INFILE OUTFILE
+
+hooks::
+  Commands that get automatically executed by various actions such as
+  starting or finishing a commit. Multiple commands can be run for
+  the same action by appending a suffix to the action. Overriding a
+  site-wide hook can be done by changing its value or setting it to
+  an empty string.
+
+  Example .hg/hgrc:
+
+    [hooks]
+    # do not use the site-wide hook
+    incoming =
+    incoming.email = /my/email/hook
+    incoming.autobuild = /my/build/hook
+
+  changegroup;;
+    Run after a changegroup has been added via push or pull. Passed
+    the ID of the first new changeset in $NODE.
+  commit;;
+    Run after a changeset has been created in the local repository.
+    Passed the ID of the newly created changeset in environment
+    variable $NODE.  Parent changeset IDs in $P1 and $P2.
+  incoming;;
+    Run after a changeset has been pulled, pushed, or unbundled into
+    the local repository.  Passed the ID of the newly arrived
+    changeset in environment variable $NODE.
+  precommit;;
+    Run before starting a local commit.  Exit status 0 allows the
+    commit to proceed.  Non-zero status will cause the commit to
+    fail.  Parent changeset IDs in $P1 and $P2.
+  pretag;;
+    Run before creating a tag.  Exit status 0 allows the tag to be
+    created.  Non-zero status will cause the tag to fail.  ID of
+    changeset to tag in $NODE.  Name of tag in $TAG.  Tag is local if
+    $LOCAL=1, in repo if $LOCAL=0.
+  pretxncommit;;
+    Run after a changeset has been created but the transaction not yet
+    committed.  Changeset is visible to hook program.  This lets you
+    validate commit message and changes.  Exit status 0 allows the
+    commit to proceed.  Non-zero status will cause the transaction to
+    be rolled back.  ID of changeset in $NODE.  Parent changeset IDs
+    in $P1 and $P2.
+  tag;;
+    Run after a tag is created.  ID of tagged changeset in $NODE.
+    Name of tag in $TAG.  Tag is local if $LOCAL=1, in repo if
+    $LOCAL=0.
+
+http_proxy::
+  Used to access web-based Mercurial repositories through a HTTP
+  proxy.
+  host;;
+    Host name and (optional) port of the proxy server, for example
+    "myproxy:8000".
+  no;;
+    Optional.  Comma-separated list of host names that should bypass
+    the proxy.
+  passwd;;
+    Optional.  Password to authenticate with at the proxy server.
+  user;;
+    Optional.  User name to authenticate with at the proxy server.
+
+paths::
+  Assigns symbolic names to repositories.  The left side is the
+  symbolic name, and the right gives the directory or URL that is the
+  location of the repository.
+
+ui::
+  User interface controls.
+  debug;;
+    Print debugging information.  True or False.  Default is False.
+  editor;;
+    The editor to use during a commit.  Default is $EDITOR or "vi".
+  interactive;;
+    Allow to prompt the user.  True or False.  Default is True.
+  merge;;
+    The conflict resolution program to use during a manual merge.
+    Default is "hgmerge".
+  quiet;;
+    Reduce the amount of output printed.  True or False.  Default is False.
+  remotecmd;;
+    remote command to use for clone/push/pull operations. Default is 'hg'.
+  ssh;;
+    command to use for SSH connections. Default is 'ssh'.
+  username;;
+    The committer of a changeset created when running "commit".
+    Typically a person's name and email address, e.g. "Fred Widget
+    <fred@example.com>".  Default is $EMAIL or username@hostname.
+  verbose;;
+    Increase the amount of output printed.  True or False.  Default is False.
+
+
+web::
+  Web interface configuration.
+  accesslog;;
+    Where to output the access log. Default is stdout.
+  address;;
+    Interface address to bind to. Default is all.
+  allowbz2;;
+    Whether to allow .tar.bz2 downloading of repo revisions. Default is false.
+  allowgz;;
+    Whether to allow .tar.gz downloading of repo revisions. Default is false.
+  allowpull;;
+    Whether to allow pulling from the repository. Default is true.
+  allowzip;;
+    Whether to allow .zip downloading of repo revisions. Default is false.
+    This feature creates temporary files.
+  description;;
+    Textual description of the repository's purpose or contents.
+    Default is "unknown".
+  errorlog;;
+    Where to output the error log. Default is stderr.
+  ipv6;;
+    Whether to use IPv6. Default is false.
+  name;;
+    Repository name to use in the web interface. Default is current
+    working directory.
+  maxchanges;;
+    Maximum number of changes to list on the changelog. Default is 10.
+  maxfiles;;
+    Maximum number of files to list per changeset. Default is 10.
+  port;;
+    Port to listen on. Default is 8000.
+  style;;
+    Which template map style to use.
+  templates;;
+    Where to find the HTML templates. Default is install path.
+
+
+AUTHOR
+------
+Bryan O'Sullivan <bos@serpentine.com>.
+
+Mercurial was written by Matt Mackall <mpm@selenic.com>.
+
+SEE ALSO
+--------
+hg(1)
+
+COPYING
+-------
+This manual page is copyright 2005 Bryan O'Sullivan.
+Mercurial is copyright 2005 Matt Mackall.
+Free use of this software is granted under the terms of the GNU General
+Public License (GPL).
