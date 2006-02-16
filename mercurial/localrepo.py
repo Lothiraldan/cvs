@@ -54,7 +54,9 @@ class localrepository(object):
             old = {}
             for k, v in args.items():
                 k = k.upper()
+                old['HG_' + k] = os.environ.get(k, None)
                 old[k] = os.environ.get(k, None)
+                os.environ['HG_' + k] = str(v)
                 os.environ[k] = str(v)
 
             try:
@@ -64,7 +66,7 @@ class localrepository(object):
                 r = os.system(cmd)
             finally:
                 for k, v in old.items():
-                    if v != None:
+                    if v is not None:
                         os.environ[k] = v
                     else:
                         del os.environ[k]
@@ -380,7 +382,7 @@ class localrepository(object):
         if p2 == nullid: xp2 = ''
         else: xp2 = hex(p2)
 
-        self.hook("precommit", throw=True, p1=xp1, p2=xp2)
+        self.hook("precommit", throw=True, parent1=xp1, parent2=xp2)
 
         if not wlock:
             wlock = self.wlock()
@@ -466,14 +468,15 @@ class localrepository(object):
 
         user = user or self.ui.username()
         n = self.changelog.add(mn, changed + remove, text, tr, p1, p2, user, date)
-        self.hook('pretxncommit', throw=True, node=hex(n), p1=xp1, p2=xp2)
+        self.hook('pretxncommit', throw=True, node=hex(n), parent1=xp1,
+                  parent2=xp2)
         tr.close()
 
         self.dirstate.setparents(n)
         self.dirstate.update(new, "n")
         self.dirstate.forget(remove)
 
-        self.hook("commit", node=hex(n), p1=xp1, p2=xp2)
+        self.hook("commit", node=hex(n), parent1=xp1, parent2=xp2)
         return n
 
     def walk(self, node=None, files=[], match=util.always):
