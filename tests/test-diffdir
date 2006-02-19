@@ -1,0 +1,18 @@
+#!/bin/sh
+
+hg init
+touch a
+hg add a
+hg ci -m "a" -d "0 0"
+
+echo 123 > b
+hg add b
+hg diff | sed -e "s/\(+++ [a-zA-Z0-9_/.-]*\).*/\1/" \
+              -e "s/\(--- [a-zA-Z0-9_/.-]*\).*/\1/"
+
+hg diff -r tip | sed -e "s/\(+++ [a-zA-Z0-9_/.-]*\).*/\1/" \
+                     -e "s/\(--- [a-zA-Z0-9_/.-]*\).*/\1/"
+
+echo foo > a
+hg diff | sed -e "s/\(+++ [a-zA-Z0-9_/.-]*\).*/\1/" \
+              -e "s/\(--- [a-zA-Z0-9_/.-]*\).*/\1/"
