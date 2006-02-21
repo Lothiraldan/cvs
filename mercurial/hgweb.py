@@ -298,19 +298,25 @@ class hgweb(object):
 
     def changelog(self, pos):
         def changenav(**map):
-            def seq(factor=1):
-                yield 1 * factor
-                yield 3 * factor
-                #yield 5 * factor
+            def seq(factor, maxchanges=None):
+                if maxchanges:
+                    yield maxchanges
+                    if maxchanges >= 20 and maxchanges <= 40:
+                        yield 50
+                else:
+                    yield 1 * factor
+                    yield 3 * factor
                 for f in seq(factor * 10):
                     yield f
 
             l = []
-            for f in seq():
-                if f < self.maxchanges / 2:
+            last = 0
+            for f in seq(1, self.maxchanges):
+                if f < self.maxchanges or f <= last:
                     continue
                 if f > count:
                     break
+                last = f
                 r = "%d" % f
                 if pos + f < count:
                     l.append(("+" + r, pos + f))
@@ -958,7 +964,7 @@ class hgweb(object):
                 nodes = map(bin, req.form['roots'][0].split(" "))
 
             z = zlib.compressobj()
-            f = self.repo.changegroup(nodes)
+            f = self.repo.changegroup(nodes, 'serve')
             while 1:
                 chunk = f.read(4096)
                 if not chunk:

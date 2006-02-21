@@ -17,127 +17,151 @@ fi
 
 # find decent versions of our utilities, insisting on the GNU versions where we
 # need to
+MERGE=merge
 DIFF3=gdiff3
 DIFF=gdiff
 PATCH=gpatch
 
+type $MERGE >/dev/null 2>&1 || MERGE=
 type $DIFF3 >/dev/null 2>&1 || DIFF3=diff3
 type $DIFF  >/dev/null 2>&1 || DIFF=diff
-type $PATCH  >/dev/null 2>&1 || PATCH=patch
+type $PATCH >/dev/null 2>&1 || PATCH=patch
 $DIFF3 --version >/dev/null 2>&1 || DIFF3=
 
-# Back up our file
-cp "$LOCAL" "$LOCAL.orig"
+# find optional visual utilities
+FILEMERGE='/Developer/Applications/Utilities/FileMerge.app/Contents/MacOS/FileMerge'
+KDIFF3=kdiff3
+TKDIFF=tkdiff
+
+type $FILEMERGE >/dev/null 2>&1 || FILEMERGE=
+type $KDIFF3    >/dev/null 2>&1 || KDIFF3=
+type $TKDIFF    >/dev/null 2>&1 || TKDIFF=
+
+# random part of names
+RAND="$RANDOM.$RANDOM.$RANDOM.$$"
+
+# temporary directory for diff+patch merge
+HGTMP="${TMPDIR-/tmp}/hgmerge.$RAND"
+
+# backup file
+BACKUP="$LOCAL.orig.$RAND"
+
+# file used to test for file change
+CHGTEST="$LOCAL.chg.$RAND"
+
+# put all your required cleanup here
+cleanup() {
+    rm -f "$BACKUP" "$CHGTEST"
+    rm -rf "$HGTMP"
+}
+
+# functions concerning program exit
+success() {
+    cleanup
+    exit 0
+}
+
+failure() {
+    echo "merge failed" 1>&2
+    mv "$BACKUP" "$LOCAL"
+    cleanup
+    exit 1
+}
+
+# Clean up when interrupted
+trap "failure" 1 2 3 6 15 # HUP INT QUIT ABRT TERM
+
+# Back up our file (and try hard to keep the mtime unchanged)
+mv "$LOCAL" "$BACKUP"
+cp "$BACKUP" "$LOCAL"
 
 # Attempt to do a non-interactive merge
-if type merge > /dev/null 2>&1; then
-    merge "$LOCAL" "$BASE" "$OTHER" 2> /dev/null && exit 0
-    cp "$LOCAL.orig" "$LOCAL"
+if [ -n "$MERGE" ]; then
+    $MERGE "$LOCAL" "$BASE" "$OTHER" 2> /dev/null && success
+    cp "$BACKUP" "$LOCAL"
 elif [ -n "$DIFF3" ]; then
-    echo $DIFF3 -m "$LOCAL.orig" "$BASE" "$OTHER"
-    $DIFF3 -m "$LOCAL.orig" "$BASE" "$OTHER" > "$LOCAL" && exit 0
+    echo $DIFF3 -m "$BACKUP" "$BASE" "$OTHER"
+    $DIFF3 -m "$BACKUP" "$BASE" "$OTHER" > "$LOCAL" && success
     if [ $? -eq 2 ]; then
         echo "$DIFF3 failed! Exiting." 1>&2
-        cp "$LOCAL.orig" "$LOCAL"
-        exit 1
+        cp "$BACKUP" "$LOCAL"
+        failure
     fi
-    cp "$LOCAL.orig" "$LOCAL"
+    cp "$BACKUP" "$LOCAL"
 fi
 
 # on MacOS X try FileMerge.app, shipped with Apple's developer tools
-# TODO: make proper temp files. foo.orig and foo.link are dangerous
-FILEMERGE='/Developer/Applications/Utilities/FileMerge.app/Contents/MacOS/FileMerge'
-if type "$FILEMERGE" > /dev/null 2>&1; then
-    cp "$LOCAL.orig" "$LOCAL"
-    ln "$LOCAL" "$LOCAL.link"
+if [ -n "$FILEMERGE" ]; then
+    cp "$BACKUP" "$LOCAL"
+    cp "$BACKUP" "$CHGTEST"
     # filemerge prefers the right by default
-    if ! "$FILEMERGE" -left "$OTHER" -right "$LOCAL" -ancestor "$BASE" -merge "$LOCAL"
+    $FILEMERGE -left "$OTHER" -right "$LOCAL" -ancestor "$BASE" -merge "$LOCAL"
+    [ $? -ne 0 ] && echo "FileMerge failed to launch" && failure
+    if test "$LOCAL" -nt "$CHGTEST"
     then
-        echo "FileMerge failed to launch"
-        exit 1
-    fi
-    if ! test "$LOCAL" -ef "$LOCAL.link"
-    then
-        rm "$LOCAL.orig" "$LOCAL.link"
-        exit 0
+        success
     else
-        rm "$LOCAL.link"
-        echo "$LOCAL is unchanged. Was the merge successful?"
+        echo "$LOCAL seems unchanged. Was the merge successful?"
         select answer in yes no
         do
-            if test "$answer" == "yes"
-            then
-                rm "$LOCAL.orig"
-                exit 0
-            else
-                exit 1
-            fi
+            test "$answer" == "yes" && success || failure
         done
-        exit 1
     fi
+    failure
 fi
 
 if [ -n "$DISPLAY" ]; then
     # try using kdiff3, which is fairly nice
-    if type kdiff3 > /dev/null 2>&1; then
-	kdiff3 --auto "$BASE" "$LOCAL" "$OTHER" -o "$LOCAL" || exit 1
-	exit 0
+    if [ -n "$KDIFF3" ]; then
+	$KDIFF3 --auto "$BASE" "$LOCAL" "$OTHER" -o "$LOCAL" || failure
+	success
     fi
 
     # try using tkdiff, which is a bit less sophisticated
-    if type tkdiff > /dev/null 2>&1; then
-	tkdiff "$LOCAL" "$OTHER" -a "$BASE" -o "$LOCAL" || exit 1
-	exit 0
+    if [ -n "$TKDIFF" ]; then
+	$TKDIFF "$LOCAL" "$OTHER" -a "$BASE" -o "$LOCAL" || failure
+	success
     fi
 fi
 
 # Attempt to do a merge with $EDITOR
-if type merge > /dev/null 2>&1; then
+if [ -n "$MERGE" ]; then
     echo "conflicts detected in $LOCAL"
-    merge "$LOCAL" "$BASE" "$OTHER" 2>/dev/null || $EDITOR "$LOCAL"
-    exit 0
+    $MERGE "$LOCAL" "$BASE" "$OTHER" 2>/dev/null || $EDITOR "$LOCAL"
+    success
 fi
 
 if [ -n "$DIFF3" ]; then
     echo "conflicts detected in $LOCAL"
-    $DIFF3 -m "$LOCAL.orig" "$BASE" "$OTHER" > "$LOCAL" || {
+    $DIFF3 -m "$BACKUP" "$BASE" "$OTHER" > "$LOCAL" || {
         case $? in
             1)
                 $EDITOR "$LOCAL" ;;
             2)  echo "$DIFF3 failed! Exiting." 1>&2
-                cp "$LOCAL.orig" "$LOCAL"
-                exit 1 ;;
+                cp "$BACKUP" "$LOCAL"
+                failure ;;
         esac
-        exit 0
+        success
     }
 fi
 
-HGTMP=""
-cleanup_exit() {
-    rm -rf "$HGTMP"
-}
-
 # attempt to manually merge with diff and patch
 if [ -n "$DIFF" -a -n "$PATCH" ]; then
-    # Remove temporary files even if we get interrupted
-    trap "cleanup_exit" 0 # normal exit
-    trap "exit 1" 1 2 3 6 15 # HUP INT QUIT ABRT TERM
 
-    HGTMP="${TMPDIR-/tmp}/hgmerge.$RANDOM.$RANDOM.$RANDOM.$$"
     (umask 077 && mkdir "$HGTMP") || {
-	echo "Could not create temporary directory! Exiting." 1>&2
-	exit 1
+	echo "Could not create temporary directory $HGTMP" 1>&2
+	failure
     }
 
     $DIFF -u "$BASE" "$OTHER" > "$HGTMP/diff" || :
     if $PATCH "$LOCAL" < "$HGTMP/diff"; then
-	exit 0
+	success
     else
 	# If rejects are empty after using the editor, merge was ok
-	$EDITOR "$LOCAL" "$LOCAL.rej" && test -s "$LOCAL.rej" || exit 0
+	$EDITOR "$LOCAL" "$LOCAL.rej" && test -s "$LOCAL.rej" || success
     fi
-    exit 1
+    failure
 fi
 
 echo "hgmerge: unable to find merge, tkdiff, kdiff3, or diff+patch!"
-exit 1
+failure
