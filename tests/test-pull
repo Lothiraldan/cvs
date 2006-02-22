@@ -1,0 +1,23 @@
+#!/bin/sh
+
+mkdir test
+cd test
+echo foo>foo
+hg init
+hg addremove
+hg commit -m 1
+hg verify
+serverpid=`mktemp`
+hg serve -p 20059 -d --pid-file=$serverpid
+cd ..
+
+hg clone http://localhost:20059/ copy
+cd copy
+hg verify
+hg co
+cat foo
+hg manifest
+hg pull
+
+kill `cat $serverpid`
+rm $serverpid
