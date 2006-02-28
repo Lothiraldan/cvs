@@ -1,0 +1,21 @@
+pushing to ../a
+searching for changes
+abort: unsynced remote changes!
+(did you forget to sync? use push -f to force)
+pulling from ../a
+searching for changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 1 changes to 1 files (+1 heads)
+(run 'hg update' to get a working copy)
+pushing to ../a
+searching for changes
+abort: push creates new remote branches!
+(did you forget to merge? use push -f to force)
+pushing to ../a
+searching for changes
+adding changesets
+adding manifests
+adding file changes
+added 2 changesets with 1 changes to 1 files
