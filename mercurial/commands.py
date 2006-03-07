@@ -2673,23 +2673,36 @@ norepo = ("clone init version help debugancestor debugconfig debugdata"
 
 def find(cmd):
     """Return (aliases, command table entry) for command string."""
-    choice = None
-    count = 0
+    choice = []
+    debugchoice = []
     for e in table.keys():
         aliases = e.lstrip("^").split("|")
         if cmd in aliases:
             return aliases, table[e]
         for a in aliases:
             if a.startswith(cmd):
-                count += 1
-                choice = aliases, table[e]
+                if aliases[0].startswith("debug"):
+                    debugchoice.append([aliases, table[e]])
+                else:
+                    choice.append([aliases, table[e]])
                 break
 
-    if count > 1:
-        raise AmbiguousCommand(cmd)
+    if not choice and debugchoice:
+        choice = debugchoice
+
+    if len(choice) > 1:
+        clist = []
+        for aliases, table_e in choice:
+            if aliases[0].startswith(cmd):
+                clist.append(aliases[0])
+            for a in aliases[1:]:
+                if a.startswith(cmd) and not aliases[0].startswith(a):
+                    clist.append(a)
+        clist.sort()
+        raise AmbiguousCommand(cmd, clist)
 
     if choice:
-        return choice
+        return choice[0]
 
     raise UnknownCommand(cmd)
 
@@ -2801,7 +2814,8 @@ def dispatch(args):
             help_(u, 'shortlist')
         sys.exit(-1)
     except AmbiguousCommand, inst:
-        u.warn(_("hg: command '%s' is ambiguous.\n") % inst.args[0])
+        u.warn(_("hg: command '%s' is ambiguous:\n    %s\n") % 
+                (inst.args[0], " ".join(inst.args[1])))
         sys.exit(1)
     except UnknownCommand, inst:
         u.warn(_("hg: unknown command '%s'\n") % inst.args[0])
@@ -2936,7 +2950,8 @@ def dispatch(args):
         u.warn(_("%s: invalid arguments\n") % cmd)
         help_(u, cmd)
     except AmbiguousCommand, inst:
-        u.warn(_("hg: command '%s' is ambiguous.\n") % inst.args[0])
+        u.warn(_("hg: command '%s' is ambiguous:\n    %s\n") % 
+                (inst.args[0], " ".join(inst.args[1])))
         help_(u, 'shortlist')
     except UnknownCommand, inst:
         u.warn(_("hg: unknown command '%s'\n") % inst.args[0])
