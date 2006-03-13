@@ -6,57 +6,14 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os, cgi, sys, urllib
+import os, cgi, sys
 import mimetypes
 from demandload import demandload
 demandload(globals(), "mdiff time re socket zlib errno ui hg ConfigParser")
 demandload(globals(), "zipfile tempfile StringIO tarfile BaseHTTPServer util")
-demandload(globals(), "mimetypes")
+demandload(globals(), "mimetypes templater")
 from node import *
 from i18n import gettext as _
-
-def templatepath():
-    for f in "templates", "../templates":
-        p = os.path.join(os.path.dirname(__file__), f)
-        if os.path.isdir(p):
-            return os.path.normpath(p)
-    else:
-       # executable version (py2exe) doesn't support __file__
-        if hasattr(sys, 'frozen'):
-            return os.path.join(sys.prefix, "templates")
-
-def age(x):
-    def plural(t, c):
-        if c == 1:
-            return t
-        return t + "s"
-    def fmt(t, c):
-        return "%d %s" % (c, plural(t, c))
-
-    now = time.time()
-    then = x[0]
-    delta = max(1, int(now - then))
-
-    scales = [["second", 1],
-              ["minute", 60],
-              ["hour", 3600],
-              ["day", 3600 * 24],
-              ["week", 3600 * 24 * 7],
-              ["month", 3600 * 24 * 30],
-              ["year", 3600 * 24 * 365]]
-
-    scales.reverse()
-
-    for t, s in scales:
-        n = delta / s
-        if n >= 2 or s == 1:
-            return fmt(t, n)
-
-def nl2br(text):
-    return text.replace('\n', '<br/>\n')
-
-def obfuscate(text):
-    return ''.join(['&#%d;' % ord(c) for c in text])
 
 def up(p):
     if p[0] != "/":
@@ -132,78 +89,6 @@ class hgrequest(object):
         if size > 0:
             headers.append(('Content-length', str(size)))
         self.header(headers)
-
-class templater(object):
-    def __init__(self, mapfile, filters={}, defaults={}):
-        self.cache = {}
-        self.map = {}
-        self.base = os.path.dirname(mapfile)
-        self.filters = filters
-        self.defaults = defaults
-
-        for l in file(mapfile):
-            m = re.match(r'(\S+)\s*=\s*"(.*)"$', l)
-            if m:
-                self.cache[m.group(1)] = m.group(2)
-            else:
-                m = re.match(r'(\S+)\s*=\s*(\S+)', l)
-                if m:
-                    self.map[m.group(1)] = os.path.join(self.base, m.group(2))
-                else:
-                    raise LookupError(_("unknown map entry '%s'") % l)
-
-    def __call__(self, t, **map):
-        m = self.defaults.copy()
-        m.update(map)
-        try:
-            tmpl = self.cache[t]
-        except KeyError:
-            tmpl = self.cache[t] = file(self.map[t]).read()
-        return self.template(tmpl, self.filters, **m)
-
-    def template(self, tmpl, filters={}, **map):
-        while tmpl:
-            m = re.search(r"#([a-zA-Z0-9]+)((%[a-zA-Z0-9]+)*)((\|[a-zA-Z0-9]+)*)#", tmpl)
-            if m:
-                yield tmpl[:m.start(0)]
-                v = map.get(m.group(1), "")
-                v = callable(v) and v(**map) or v
-
-                format = m.group(2)
-                fl = m.group(4)
-
-                if format:
-                    q = v.__iter__
-                    for i in q():
-                        lm = map.copy()
-                        lm.update(i)
-                        yield self(format[1:], **lm)
-
-                    v = ""
-
-                elif fl:
-                    for f in fl.split("|")[1:]:
-                        v = filters[f](v)
-
-                yield v
-                tmpl = tmpl[m.end(0):]
-            else:
-                yield tmpl
-                return
-
-common_filters = {
-    "escape": lambda x: cgi.escape(x, True),
-    "urlescape": urllib.quote,
-    "strip": lambda x: x.strip(),
-    "age": age,
-    "date": lambda x: util.datestr(x),
-    "addbreaks": nl2br,
-    "obfuscate": obfuscate,
-    "short": (lambda x: x[:12]),
-    "firstline": (lambda x: x.splitlines(1)[0]),
-    "permissions": (lambda x: x and "-rwxr-xr-x" or "-rw-r--r--"),
-    "rfc822date": lambda x: util.datestr(x, "%a, %d %b %Y %H:%M:%S"),
-    }
 
 class hgweb(object):
     def __init__(self, repo, name=None):
@@ -889,7 +774,7 @@ class hgweb(object):
 
         expand_form(req.form)
 
-        t = self.repo.ui.config("web", "templates", templatepath())
+        t = self.repo.ui.config("web", "templates", templater.templatepath())
         static = self.repo.ui.config("web", "static", os.path.join(t,"static"))
         m = os.path.join(t, "map")
         style = self.repo.ui.config("web", "style", "")
@@ -911,12 +796,12 @@ class hgweb(object):
             self.reponame = (self.repo.ui.config("web", "name")
                              or uri.strip('/') or self.repo.root)
 
-        self.t = templater(m, common_filters,
-                           {"url": url,
-                            "repo": self.reponame,
-                            "header": header,
-                            "footer": footer,
-                           })
+        self.t = templater.templater(m, templater.common_filters,
+                                     {"url": url,
+                                      "repo": self.reponame,
+                                      "header": header,
+                                      "footer": footer,
+                                      })
 
         if not req.form.has_key('cmd'):
             req.form['cmd'] = [self.t.cache['default'],]
@@ -1143,9 +1028,9 @@ class hgwebdir(object):
         def footer(**map):
             yield tmpl("footer", **map)
 
-        m = os.path.join(templatepath(), "map")
-        tmpl = templater(m, common_filters,
-                         {"header": header, "footer": footer})
+        m = os.path.join(templater.templatepath(), "map")
+        tmpl = templater.templater(m, templater.common_filters,
+                                   {"header": header, "footer": footer})
 
         def entries(**map):
             parity = 0
@@ -1191,7 +1076,7 @@ class hgwebdir(object):
                 req.write(tmpl("notfound", repo=virtual))
         else:
             if req.form.has_key('static'):
-                static = os.path.join(templatepath(), "static")
+                static = os.path.join(templater.templatepath(), "static")
                 fname = req.form['static'][0]
                 req.write(staticfile(static, fname)
                           or tmpl("error", error="%r not found" % fname))
