@@ -593,12 +593,7 @@ def annotate(ui, repo, *pats, **opts):
     change = repo.changelog.read(node)
     mmap = repo.manifest.read(change[0])
 
-    for src, abs, rel, exact in walk(repo, pats, opts):
-        if abs not in mmap:
-            ui.warn(_("warning: %s is not in the repository!\n") %
-                    ((pats and rel) or abs))
-            continue
-
+    for src, abs, rel, exact in walk(repo, pats, opts, node=node):
         f = repo.file(abs)
         if not opts['text'] and util.binary(f.read(mmap[abs])):
             ui.write(_("%s: binary file\n") % ((pats and rel) or abs))
@@ -634,7 +629,7 @@ def bundle(ui, repo, fname, dest="default-push", **opts):
     contents including permissions, rename data, and revision history.
     """
     f = open(fname, "wb")
-    dest = ui.expandpath(dest, repo.root)
+    dest = ui.expandpath(dest)
     other = hg.repository(ui, dest)
     o = repo.findoutgoing(other)
     cg = repo.changegroup(o, 'bundle')
@@ -723,8 +718,7 @@ def clone(ui, source, dest=None, **opts):
     if opts['remotecmd']:
         ui.setconfig("ui", "remotecmd", opts['remotecmd'])
 
-    if not os.path.exists(source):
-        source = ui.expandpath(source)
+    source = ui.expandpath(source)
 
     d = Dircleanup(dest)
     abspath = source
@@ -1018,6 +1012,12 @@ def debugancestor(ui, index, rev1, rev2):
     a = r.ancestor(r.lookup(rev1), r.lookup(rev2))
     ui.write("%d:%s\n" % (r.rev(a), hex(a)))
 
+def debugcomplete(ui, cmd):
+    """returns the completion list associated with the given command"""
+    clist = findpossible(cmd).keys()
+    clist.sort()
+    ui.write("%s\n" % " ".join(clist))
+
 def debugrebuildstate(ui, repo, rev=None):
     """rebuild the dirstate as it would look like for the given revision"""
     if not rev:
@@ -1063,13 +1063,8 @@ def debugcheckstate(ui, repo):
         error = _(".hg/dirstate inconsistent with current parent's manifest")
         raise util.Abort(error)
 
-def debugconfig(ui):
+def debugconfig(ui, repo):
     """show combined config settings from all hgrc files"""
-    try:
-        repo = hg.repository(ui)
-        ui = repo.ui
-    except hg.RepoError:
-        pass
     for section, name, value in ui.walkconfig():
         ui.write('%s.%s=%s\n' % (section, name, value))
 
@@ -1548,7 +1543,7 @@ def incoming(ui, repo, source="default", **opts):
 
     Currently only local repositories are supported.
     """
-    source = ui.expandpath(source, repo.root)
+    source = ui.expandpath(source)
     other = hg.repository(ui, source)
     if not other.local():
         raise util.Abort(_("incoming doesn't work for remote repositories yet"))
@@ -1735,7 +1730,7 @@ def outgoing(ui, repo, dest="default-push", **opts):
 
     See pull for valid source format details.
     """
-    dest = ui.expandpath(dest, repo.root)
+    dest = ui.expandpath(dest)
     other = hg.repository(ui, dest)
     o = repo.findoutgoing(other)
     o = repo.changelog.nodesbetween(o)[0]
@@ -1768,7 +1763,7 @@ def parents(ui, repo, rev=None, branches=None):
         if n != nullid:
             show_changeset(ui, repo, changenode=n, brinfo=br)
 
-def paths(ui, search=None):
+def paths(ui, repo, search=None):
     """show definition of symbolic path names
 
     Show definition of symbolic path name NAME. If no name is given, show
@@ -1777,12 +1772,6 @@ def paths(ui, search=None):
     Path names are defined in the [paths] section of /etc/mercurial/hgrc
     and $HOME/.hgrc.  If run inside a repository, .hg/hgrc is used, too.
     """
-    try:
-        repo = hg.repository(ui)
-        ui = repo.ui
-    except hg.RepoError:
-        pass
-
     if search:
         for name, path in ui.configitems("paths"):
             if name == search:
@@ -1815,7 +1804,7 @@ def pull(ui, repo, source="default", **opts):
     to the remote user's home directory by default; use two slashes at
     the start of a path to specify it as relative to the filesystem root.
     """
-    source = ui.expandpath(source, repo.root)
+    source = ui.expandpath(source)
     ui.status(_('pulling from %s\n') % (source))
 
     if opts['ssh']:
@@ -1860,7 +1849,7 @@ def push(ui, repo, dest="default-push", **opts):
     SSH requires an accessible shell account on the destination
     machine and a copy of hg in the remote path.
     """
-    dest = ui.expandpath(dest, repo.root)
+    dest = ui.expandpath(dest)
     ui.status('pushing to %s\n' % (dest))
 
     if opts['ssh']:
@@ -1936,7 +1925,7 @@ def remove(ui, repo, pat, *pats, **opts):
     def okaytoremove(abs, rel, exact):
         modified, added, removed, deleted, unknown = repo.changes(files=[abs])
         reason = None
-        if modified:
+        if modified and not opts['force']:
             reason = _('is modified')
         elif added:
             reason = _('has been marked for add')
@@ -2443,6 +2432,7 @@ table = {
           ('X', 'exclude', [], _('exclude names matching the given patterns'))],
          _('hg copy [OPTION]... [SOURCE]... DEST')),
     "debugancestor": (debugancestor, [], _('debugancestor INDEX REV1 REV2')),
+    "debugcomplete": (debugcomplete, [], _('debugcomplete CMD')),
     "debugrebuildstate":
         (debugrebuildstate,
          [('r', 'rev', '', _('revision to rebuild to'))],
@@ -2579,7 +2569,8 @@ table = {
     "recover": (recover, [], _('hg recover')),
     "^remove|rm":
         (remove,
-         [('I', 'include', [], _('include names matching the given patterns')),
+         [('f', 'force', None, _('remove file even if modified')),
+          ('I', 'include', [], _('include names matching the given patterns')),
           ('X', 'exclude', [], _('exclude names matching the given patterns'))],
          _('hg remove [OPTION]... FILE...')),
     "rename|mv":
@@ -2589,7 +2580,7 @@ table = {
            _('forcibly copy over an existing managed file')),
           ('I', 'include', [], _('include names matching the given patterns')),
           ('X', 'exclude', [], _('exclude names matching the given patterns'))],
-         _('hg rename [OPTION]... [SOURCE]... DEST')),
+         _('hg rename [OPTION]... SOURCE... DEST')),
     "^revert":
         (revert,
          [('r', 'rev', '', _('revision to revert to')),
@@ -2658,7 +2649,8 @@ table = {
 }
 
 globalopts = [
-    ('R', 'repository', '', _('repository root directory')),
+    ('R', 'repository', '',
+     _('repository root directory or symbolic path name')),
     ('', 'cwd', '', _('change working directory')),
     ('y', 'noninteractive', None,
      _('do not prompt, assume \'yes\' for any required answers')),
@@ -2673,28 +2665,49 @@ globalopts = [
     ('h', 'help', None, _('display help and exit')),
 ]
 
-norepo = ("clone init version help debugancestor debugconfig debugdata"
-          " debugindex debugindexdot paths")
+norepo = ("clone init version help debugancestor debugcomplete debugdata"
+          " debugindex debugindexdot")
+optionalrepo = ("paths debugconfig")
 
-def find(cmd):
-    """Return (aliases, command table entry) for command string."""
-    choice = None
-    count = 0
+def findpossible(cmd):
+    """
+    Return cmd -> (aliases, command table entry)
+    for each matching command
+    """
+    choice = {}
+    debugchoice = {}
     for e in table.keys():
         aliases = e.lstrip("^").split("|")
         if cmd in aliases:
-            return aliases, table[e]
+            choice[cmd] = (aliases, table[e])
+            continue
         for a in aliases:
             if a.startswith(cmd):
-                count += 1
-                choice = aliases, table[e]
+                if aliases[0].startswith("debug"):
+                    debugchoice[a] = (aliases, table[e])
+                else:
+                    choice[a] = (aliases, table[e])
                 break
 
-    if count > 1:
-        raise AmbiguousCommand(cmd)
+    if not choice and debugchoice:
+        choice = debugchoice
+
+    return choice
+
+def find(cmd):
+    """Return (aliases, command table entry) for command string."""
+    choice = findpossible(cmd)
+
+    if choice.has_key(cmd):
+        return choice[cmd]
+
+    if len(choice) > 1:
+        clist = choice.keys()
+        clist.sort()
+        raise AmbiguousCommand(cmd, clist)
 
     if choice:
-        return choice
+        return choice.values()[0]
 
     raise UnknownCommand(cmd)
 
@@ -2782,7 +2795,10 @@ def dispatch(args):
                     mod = getattr(mod, comp)
                 return mod
             try:
-                mod = importh(x[0])
+                try:
+                    mod = importh("hgext." + x[0])
+                except ImportError:
+                    mod = importh(x[0])
             except Exception, inst:
                 on_exception(Exception, inst)
                 continue
@@ -2797,44 +2813,37 @@ def dispatch(args):
 
     try:
         cmd, func, args, options, cmdoptions = parse(u, args)
-    except ParseError, inst:
-        if inst.args[0]:
-            u.warn(_("hg %s: %s\n") % (inst.args[0], inst.args[1]))
-            help_(u, inst.args[0])
-        else:
-            u.warn(_("hg: %s\n") % inst.args[1])
-            help_(u, 'shortlist')
-        sys.exit(-1)
-    except AmbiguousCommand, inst:
-        u.warn(_("hg: command '%s' is ambiguous.\n") % inst.args[0])
-        sys.exit(1)
-    except UnknownCommand, inst:
-        u.warn(_("hg: unknown command '%s'\n") % inst.args[0])
-        help_(u, 'shortlist')
-        sys.exit(1)
+        if options["time"]:
+            def get_times():
+                t = os.times()
+                if t[4] == 0.0: # Windows leaves this as zero, so use time.clock()
+                    t = (t[0], t[1], t[2], t[3], time.clock())
+                return t
+            s = get_times()
+            def print_time():
+                t = get_times()
+                u.warn(_("Time: real %.3f secs (user %.3f+%.3f sys %.3f+%.3f)\n") %
+                    (t[4]-s[4], t[0]-s[0], t[2]-s[2], t[1]-s[1], t[3]-s[3]))
+            atexit.register(print_time)
 
-    if options["time"]:
-        def get_times():
-            t = os.times()
-            if t[4] == 0.0: # Windows leaves this as zero, so use time.clock()
-                t = (t[0], t[1], t[2], t[3], time.clock())
-            return t
-        s = get_times()
-        def print_time():
-            t = get_times()
-            u.warn(_("Time: real %.3f secs (user %.3f+%.3f sys %.3f+%.3f)\n") %
-                (t[4]-s[4], t[0]-s[0], t[2]-s[2], t[1]-s[1], t[3]-s[3]))
-        atexit.register(print_time)
+        u.updateopts(options["verbose"], options["debug"], options["quiet"],
+                not options["noninteractive"])
 
-    u.updateopts(options["verbose"], options["debug"], options["quiet"],
-              not options["noninteractive"])
+        # enter the debugger before command execution
+        if options['debugger']:
+            pdb.set_trace()
 
-    # enter the debugger before command execution
-    if options['debugger']:
-        pdb.set_trace()
-
-    try:
         try:
+            if options['cwd']:
+                try:
+                    os.chdir(options['cwd'])
+                except OSError, inst:
+                    raise util.Abort('%s: %s' %
+                                     (options['cwd'], inst.strerror))
+
+            path = u.expandpath(options["repository"]) or ""
+            repo = path and hg.repository(u, path=path) or None
+
             if options['help']:
                 help_(u, cmd, options['version'])
                 sys.exit(0)
@@ -2845,20 +2854,17 @@ def dispatch(args):
                 help_(u, 'shortlist')
                 sys.exit(0)
 
-            if options['cwd']:
-                try:
-                    os.chdir(options['cwd'])
-                except OSError, inst:
-                    raise util.Abort('%s: %s' %
-                                     (options['cwd'], inst.strerror))
-
             if cmd not in norepo.split():
-                path = options["repository"] or ""
-                repo = hg.repository(u, path=path)
-                u = repo.ui
-                for x in external:
-                    if hasattr(x, 'reposetup'):
-                        x.reposetup(u, repo)
+                try:
+                    if not repo:
+                        repo = hg.repository(u, path=path)
+                    u = repo.ui
+                    for x in external:
+                        if hasattr(x, 'reposetup'):
+                            x.reposetup(u, repo)
+                except hg.RepoError:
+                    if cmd not in optionalrepo.split():
+                        raise
                 d = lambda: func(u, repo, *args, **cmdoptions)
             else:
                 d = lambda: func(u, *args, **cmdoptions)
@@ -2894,6 +2900,22 @@ def dispatch(args):
             if options['traceback']:
                 traceback.print_exc()
             raise
+    except ParseError, inst:
+        if inst.args[0]:
+            u.warn(_("hg %s: %s\n") % (inst.args[0], inst.args[1]))
+            help_(u, inst.args[0])
+        else:
+            u.warn(_("hg: %s\n") % inst.args[1])
+            help_(u, 'shortlist')
+        sys.exit(-1)
+    except AmbiguousCommand, inst:
+        u.warn(_("hg: command '%s' is ambiguous:\n    %s\n") % 
+                (inst.args[0], " ".join(inst.args[1])))
+        sys.exit(1)
+    except UnknownCommand, inst:
+        u.warn(_("hg: unknown command '%s'\n") % inst.args[0])
+        help_(u, 'shortlist')
+        sys.exit(1)
     except hg.RepoError, inst:
         u.warn(_("abort: "), inst, "!\n")
     except revlog.RevlogError, inst:
@@ -2940,12 +2962,6 @@ def dispatch(args):
         u.debug(inst, "\n")
         u.warn(_("%s: invalid arguments\n") % cmd)
         help_(u, cmd)
-    except AmbiguousCommand, inst:
-        u.warn(_("hg: command '%s' is ambiguous.\n") % inst.args[0])
-        help_(u, 'shortlist')
-    except UnknownCommand, inst:
-        u.warn(_("hg: unknown command '%s'\n") % inst.args[0])
-        help_(u, 'shortlist')
     except SystemExit:
         # don't catch this in the catch-all below
         raise

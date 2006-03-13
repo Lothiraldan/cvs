@@ -5,18 +5,19 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os, ConfigParser
+import ConfigParser
 from i18n import gettext as _
 from demandload import *
-demandload(globals(), "re socket sys util")
+demandload(globals(), "os re socket sys util")
 
 class ui(object):
     def __init__(self, verbose=False, debug=False, quiet=False,
                  interactive=True, parentui=None):
         self.overlay = {}
-        self.cdata = ConfigParser.SafeConfigParser()
-        self.parentui = parentui and parentui.parentui or parentui
         if parentui is None:
+            # this is the parent of all ui children
+            self.parentui = None
+            self.cdata = ConfigParser.SafeConfigParser()
             self.readconfig(util.rcpath)
 
             self.quiet = self.configbool("ui", "quiet")
@@ -26,6 +27,16 @@ class ui(object):
 
             self.updateopts(verbose, debug, quiet, interactive)
             self.diffcache = None
+        else:
+            # parentui may point to an ui object which is already a child
+            self.parentui = parentui.parentui or parentui
+            parent_cdata = self.parentui.cdata
+            self.cdata = ConfigParser.SafeConfigParser(parent_cdata.defaults())
+            # make interpolation work
+            for section in parent_cdata.sections():
+                self.cdata.add_section(section)
+                for name, value in parent_cdata.items(section, raw=True):
+                    self.cdata.set(section, name, value)
 
     def __getattr__(self, key):
         return getattr(self.parentui, key)
@@ -37,7 +48,7 @@ class ui(object):
         self.debugflag = (self.debugflag or debug)
         self.interactive = (self.interactive and interactive)
 
-    def readconfig(self, fn):
+    def readconfig(self, fn, root=None):
         if isinstance(fn, basestring):
             fn = [fn]
         for f in fn:
@@ -45,6 +56,12 @@ class ui(object):
                 self.cdata.read(f)
             except ConfigParser.ParsingError, inst:
                 raise util.Abort(_("Failed to parse %s\n%s") % (f, inst))
+        # translate paths relative to root (or home) into absolute paths
+        if root is None:
+            root = os.path.expanduser('~')
+        for name, path in self.configitems("paths"):
+            if path and path.find("://") == -1 and not os.path.isabs(path):
+                self.cdata.set("paths", name, os.path.join(root, path))
 
     def setconfig(self, section, name, val):
         self.overlay[(section, name)] = val
@@ -53,7 +70,10 @@ class ui(object):
         if self.overlay.has_key((section, name)):
             return self.overlay[(section, name)]
         if self.cdata.has_option(section, name):
-            return self.cdata.get(section, name)
+            try:
+                return self.cdata.get(section, name)
+            except ConfigParser.InterpolationError, inst:
+                raise util.Abort(_("Error in configuration:\n%s") % inst)
         if self.parentui is None:
             return default
         else:
@@ -63,7 +83,10 @@ class ui(object):
         if self.overlay.has_key((section, name)):
             return self.overlay[(section, name)]
         if self.cdata.has_option(section, name):
-            return self.cdata.getboolean(section, name)
+            try:
+                return self.cdata.getboolean(section, name)
+            except ConfigParser.InterpolationError, inst:
+                raise util.Abort(_("Error in configuration:\n%s") % inst)
         if self.parentui is None:
             return default
         else:
@@ -74,7 +97,10 @@ class ui(object):
         if self.parentui is not None:
             items = dict(self.parentui.configitems(section))
         if self.cdata.has_section(section):
-            items.update(dict(self.cdata.items(section)))
+            try:
+                items.update(dict(self.cdata.items(section)))
+            except ConfigParser.InterpolationError, inst:
+                raise util.Abort(_("Error in configuration:\n%s") % inst)
         x = items.items()
         x.sort()
         return x
@@ -133,15 +159,12 @@ class ui(object):
                 user = user[f+1:]
         return user
 
-    def expandpath(self, loc, root=""):
-        paths = {}
-        for name, path in self.configitems("paths"):
-            m = path.find("://")
-            if m == -1:
-                    path = os.path.join(root, path)
-            paths[name] = path
+    def expandpath(self, loc):
+        """Return repository location relative to cwd or from [paths]"""
+        if loc.find("://") != -1 or os.path.exists(loc):
+            return loc
 
-        return paths.get(loc, loc)
+        return self.config("paths", loc, loc)
 
     def write(self, *args):
         for a in args:
@@ -189,7 +212,9 @@ class ui(object):
                   os.environ.get("EDITOR", "vi"))
 
         os.environ["HGUSER"] = self.username()
-        util.system("%s \"%s\"" % (editor, name), errprefix=_("edit failed"))
+        util.system("%s \"%s\"" % (editor, name),
+                    environ={'HGUSER': self.username()},
+                    onerr=util.Abort, errprefix=_("edit failed"))
 
         t = open(name).read()
         t = re.sub("(?m)^HG:.*\n", "", t)
@@ -197,4 +222,3 @@ class ui(object):
         os.unlink(name)
 
         return t
-
