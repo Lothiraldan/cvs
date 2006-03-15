@@ -9,9 +9,9 @@ from demandload import demandload
 from node import *
 from i18n import gettext as _
 demandload(globals(), "os re sys signal shutil imp urllib pdb")
-demandload(globals(), "fancyopts ui hg util lock revlog templater")
-demandload(globals(), "fnmatch hgweb mdiff random signal time traceback")
-demandload(globals(), "errno socket version struct atexit sets bz2")
+demandload(globals(), "fancyopts ui hg util lock revlog templater bundlerepo")
+demandload(globals(), "fnmatch hgweb mdiff random signal tempfile time")
+demandload(globals(), "traceback errno socket version struct atexit sets bz2")
 
 class UnknownCommand(Exception):
     """Exception raised if command is not in the command table."""
@@ -274,6 +274,32 @@ def make_file(repo, r, pat, node=None,
                               pathname),
                 mode)
 
+def write_bundle(cg, filename, compress=True, fh=None):
+    if fh is None:
+        fh = open(filename, "wb")
+
+    class nocompress(object):
+        def compress(self, x):
+            return x
+        def flush(self):
+            return ""
+    try:
+        if compress:
+            fh.write("HG10")
+            z = bz2.BZ2Compressor(9)
+        else:
+            fh.write("HG11")
+            z = nocompress()
+        while 1:
+            chunk = cg.read(4096)
+            if not chunk:
+                break
+            fh.write(z.compress(chunk))
+        fh.write(z.flush())
+    except:
+        os.unlink(filename)
+        raise
+
 def dodiff(fp, ui, repo, node1, node2, files=None, match=util.always,
            changes=None, text=False, opts={}):
     if not node1:
@@ -413,8 +439,12 @@ class changeset_templater(object):
             def one(v, tag=name):
                 try:
                     vargs.update(v)
-                except ValueError:
-                    vargs.update([(name, v)])
+                except (AttributeError, ValueError):
+                    try:
+                        for a, b in v:
+                            vargs[a] = b
+                    except ValueError:
+                        vargs[name] = v
                 return self.t(tag, **vargs)
             lastname = 'last_' + name
             if lastname in self.t:
@@ -441,8 +471,8 @@ class changeset_templater(object):
         if self.ui.debugflag:
             def showmanifest(**args):
                 args = args.copy()
-                args.update(rev=self.repo.manifest.rev(changes[0]),
-                            node=hex(changes[0]))
+                args.update(dict(rev=self.repo.manifest.rev(changes[0]),
+                                 node=hex(changes[0])))
                 yield self.t('manifest', **args)
         else:
             showmanifest = ''
@@ -830,24 +860,11 @@ def bundle(ui, repo, fname, dest="default-push", **opts):
     Unlike import/export, this exactly preserves all changeset
     contents including permissions, rename data, and revision history.
     """
-    f = open(fname, "wb")
     dest = ui.expandpath(dest)
     other = hg.repository(ui, dest)
     o = repo.findoutgoing(other)
     cg = repo.changegroup(o, 'bundle')
-
-    try:
-        f.write("HG10")
-        z = bz2.BZ2Compressor(9)
-        while 1:
-            chunk = cg.read(4096)
-            if not chunk:
-                break
-            f.write(z.compress(chunk))
-        f.write(z.flush())
-    except:
-        os.unlink(fname)
-        raise
+    write_bundle(cg, fname)
 
 def cat(ui, repo, file1, *pats, **opts):
     """output the latest or given revisions of files
@@ -1744,16 +1761,36 @@ def incoming(ui, repo, source="default", **opts):
     pull repo. These are the changesets that would be pulled if a pull
     was requested.
 
-    Currently only local repositories are supported.
+    For remote repository, using --bundle avoids downloading the changesets
+    twice if the incoming is followed by a pull.
     """
     source = ui.expandpath(source)
     other = hg.repository(ui, source)
-    if not other.local():
-        raise util.Abort(_("incoming doesn't work for remote repositories yet"))
-    o = repo.findincoming(other)
-    if not o:
+    incoming = repo.findincoming(other)
+    if not incoming:
         return
-    o = other.changelog.nodesbetween(o)[0]
+
+    cleanup = None
+    if not other.local() or opts["bundle"]:
+        # create an uncompressed bundle
+        if not opts["bundle"]:
+            # create a temporary bundle
+            fd, fname = tempfile.mkstemp(suffix=".hg",
+                                         prefix="tmp-hg-incoming")
+            f = os.fdopen(fd, "wb")
+            cleanup = fname
+        else:
+            fname = opts["bundle"]
+            f = open(fname, "wb")
+
+        cg = other.changegroup(incoming, "incoming")
+        write_bundle(cg, fname, compress=other.local(), fh=f)
+        f.close()
+        if not other.local():
+            # use a bundlerepo
+            other = bundlerepo.bundlerepository(ui, repo.root, fname)
+
+    o = other.changelog.nodesbetween(incoming)[0]
     if opts['newest_first']:
         o.reverse()
     displayer = show_changeset(ui, other, opts)
@@ -1766,6 +1803,9 @@ def incoming(ui, repo, source="default", **opts):
             prev = (parents and parents[0]) or nullid
             dodiff(ui, ui, other, prev, n)
             ui.write("\n")
+
+    if cleanup:
+        os.unlink(cleanup)
 
 def init(ui, dest="."):
     """create a new repository in the given directory
@@ -2492,16 +2532,20 @@ def unbundle(ui, repo, fname, **opts):
     """
     f = urllib.urlopen(fname)
 
-    if f.read(4) != "HG10":
+    header = f.read(4)
+    if header == "HG10":
+        def generator(f):
+            zd = bz2.BZ2Decompressor()
+            for chunk in f:
+                yield zd.decompress(chunk)
+    elif header == "HG11":
+        def generator(f):
+            for chunk in f:
+                yield chunk
+    else:
         raise util.Abort(_("%s: not a Mercurial bundle file") % fname)
-
-    def bzgenerator(f):
-        zd = bz2.BZ2Decompressor()
-        for chunk in f:
-            yield zd.decompress(chunk)
-
-    bzgen = bzgenerator(util.filechunkiter(f, 4096))
-    if repo.addchangegroup(util.chunkbuffer(bzgen)):
+    gen = generator(util.filechunkiter(f, 4096))
+    if repo.addchangegroup(util.chunkbuffer(gen)):
         return 1
 
     if opts['update']:
@@ -2715,9 +2759,10 @@ table = {
          [('M', 'no-merges', None, _('do not show merges')),
           ('', 'style', '', _('display using template map file')),
           ('n', 'newest-first', None, _('show newest record first')),
+          ('', 'bundle', '', _('file to store the bundles into')),
           ('p', 'patch', None, _('show patch')),
           ('', 'template', '', _('display with template'))],
-         _('hg incoming [-p] [-n] [-M] [SOURCE]')),
+         _('hg incoming [-p] [-n] [-M] [--bundle FILENAME] [SOURCE]')),
     "^init": (init, [], _('hg init [DEST]')),
     "locate":
         (locate,
