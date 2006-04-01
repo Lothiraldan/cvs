@@ -1,0 +1,57 @@
+#!/bin/sh
+
+set -e
+mkdir r1
+cd r1
+hg init
+echo a > a
+hg addremove
+hg commit -m "1" -d "1000000 0"
+
+hg clone . ../r2
+cd ../r2
+hg up
+echo abc > a
+hg diff | sed -e "s/\(+++ [a-zA-Z0-9_/.-]*\).*/\1/" \
+              -e "s/\(--- [a-zA-Z0-9_/.-]*\).*/\1/"
+
+cd ../r1
+echo b > b
+echo a2 > a
+hg addremove
+hg commit -m "2" -d "1000000 0"
+
+cd ../r2
+hg -q pull ../r1
+hg status
+hg parents
+hg --debug up
+hg parents
+hg --debug up 0
+hg parents
+hg --debug up -m || echo failed
+hg parents
+hg --debug up
+hg parents
+hg -v history
+hg diff | sed -e "s/\(+++ [a-zA-Z0-9_/.-]*\).*/\1/" \
+              -e "s/\(--- [a-zA-Z0-9_/.-]*\).*/\1/"
+
+# create a second head
+cd ../r1
+hg up 0
+echo b2 > b
+echo a3 > a
+hg addremove
+hg commit -m "3" -d "1000000 0"
+
+cd ../r2
+hg -q pull ../r1
+hg status
+hg parents
+hg --debug up || echo failed
+hg --debug up -m || echo failed
+hg --debug up -f -m
+hg parents
+hg diff | sed -e "s/\(+++ [a-zA-Z0-9_/.-]*\).*/\1/" \
+              -e "s/\(--- [a-zA-Z0-9_/.-]*\).*/\1/"

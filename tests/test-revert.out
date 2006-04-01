@@ -1,0 +1,40 @@
+%% should show b unknown
+? b
+%% should show b unknown and c modified
+M c
+? b
+%% should show b added and c modified
+M c
+A b
+%% should show a removed, b added and c modified
+M c
+A b
+R a
+%% should show b added, copy saved, and c modified
+M c
+A b
+%% should show b unknown, b.orig unknown, and c modified
+M c
+? b
+? b.orig
+%% should show unknown: b b.orig
+? b
+? b.orig
+%% should show a b b.orig c e
+a
+b
+b.orig
+c
+e
+%% should verbosely save backup to e.orig
+saving current version of e as e.orig
+reverting e
+resolving manifests
+getting e
+1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+%% should say no changes needed
+no changes needed to a
+%% should say file not managed
+file not managed: q
+%% should say file not found
+notfound: No such file or directory
