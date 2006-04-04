@@ -1,0 +1,138 @@
+adding a
+diff -r 33aaa84a386b a
+--- a/a
++++ b/a
+@@ -1,1 +1,1 @@ a
+-a
++abc
+adding b
+M a
+changeset:   0:33aaa84a386b
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     1
+
+resolving manifests
+ force None allow None moddirstate True linear True
+ ancestor a0c8bcbbb45c local a0c8bcbbb45c remote 1165e8bd193e
+ a versions differ, resolve
+remote created b
+getting b
+merging a
+resolving a
+file a: my b789fdd96dc2 other d730145abbf9 ancestor b789fdd96dc2
+1 files updated, 1 files merged, 0 files removed, 0 files unresolved
+changeset:   1:802f095af299
+tag:         tip
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     2
+
+resolving manifests
+ force None allow None moddirstate True linear True
+ ancestor a0c8bcbbb45c local 1165e8bd193e remote a0c8bcbbb45c
+remote deleted b
+removing b
+0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+changeset:   0:33aaa84a386b
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     1
+
+abort: there is nothing to merge, just use 'hg update'
+failed
+changeset:   0:33aaa84a386b
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     1
+
+resolving manifests
+ force None allow None moddirstate True linear True
+ ancestor a0c8bcbbb45c local a0c8bcbbb45c remote 1165e8bd193e
+ a versions differ, resolve
+remote created b
+getting b
+merging a
+resolving a
+file a: my b789fdd96dc2 other d730145abbf9 ancestor b789fdd96dc2
+1 files updated, 1 files merged, 0 files removed, 0 files unresolved
+changeset:   1:802f095af299
+tag:         tip
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     2
+
+changeset:   1:802f095af299cde27a85b2f056aef3829870956c
+tag:         tip
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+files:       a b
+description:
+2
+
+
+changeset:   0:33aaa84a386bd609094aeb21a97c09436c482ef1
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+files:       a
+description:
+1
+
+
+diff -r 802f095af299 a
+--- a/a
++++ b/a
+@@ -1,1 +1,1 @@ a2
+-a2
++abc
+adding b
+M a
+changeset:   1:802f095af299
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     2
+
+resolving manifests
+ force None allow None moddirstate True linear False
+ ancestor a0c8bcbbb45c local 1165e8bd193e remote 4096f2872392
+ a versions differ, resolve
+ b versions differ, resolve
+this update spans a branch affecting the following files:
+ a (resolve)
+ b (resolve)
+aborting update spanning branches!
+(use 'hg merge' to merge across branches or 'hg update -C' to lose changes)
+failed
+abort: outstanding uncommitted changes
+failed
+resolving manifests
+ force None allow 1 moddirstate True linear False
+ ancestor a0c8bcbbb45c local 1165e8bd193e remote 4096f2872392
+ a versions differ, resolve
+ b versions differ, resolve
+merging a
+resolving a
+file a: my d730145abbf9 other 13e0d5f949fa ancestor b789fdd96dc2
+merging b
+resolving b
+file b: my 1e88685f5dde other 61de8c7723ca ancestor 000000000000
+0 files updated, 2 files merged, 0 files removed, 0 files unresolved
+(branch merge, don't forget to commit)
+changeset:   1:802f095af299
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     2
+
+changeset:   2:030602aee63d
+tag:         tip
+parent:      0:33aaa84a386b
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     3
+
+diff -r 802f095af299 a
+--- a/a
++++ b/a
+@@ -1,1 +1,1 @@ a2
+-a2
++abc
