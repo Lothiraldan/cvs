@@ -20,8 +20,12 @@ def pipefilter(s, cmd):
     '''filter string S through command CMD, returning its output'''
     (pout, pin) = popen2.popen2(cmd, -1, 'b')
     def writer():
-        pin.write(s)
-        pin.close()
+        try:
+            pin.write(s)
+            pin.close()
+        except IOError, inst:
+            if inst.errno != errno.EPIPE:
+                raise
 
     # we should use select instead on UNIX, but this will work on most
     # systems, including Windows
@@ -201,7 +205,7 @@ def canonpath(root, cwd, myname):
     else:
         rootsep = root + os.sep
     name = myname
-    if not name.startswith(os.sep):
+    if not os.path.isabs(name):
         name = os.path.join(root, cwd, name)
     name = os.path.normpath(name)
     if name.startswith(rootsep):

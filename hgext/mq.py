@@ -625,7 +625,10 @@ class queue:
             try:
                 repo.wfile(f, "w").write(t)
             except IOError:
-                os.makedirs(os.path.dirname(repo.wjoin(f)))
+                try:
+                    os.makedirs(os.path.dirname(repo.wjoin(f)))
+                except OSError, err:
+                    if err.errno != errno.EEXIST: raise
                 repo.wfile(f, "w").write(t)
 
         if not wlock:
@@ -1105,7 +1108,8 @@ def refresh(ui, repo, **opts):
 
 def diff(ui, repo, *files, **opts):
     """diff of the current patch"""
-    repomap[repo].diff(repo, files)
+    # deep in the dirstate code, the walkhelper method wants a list, not a tuple
+    repomap[repo].diff(repo, list(files))
     return 0
 
 def lastsavename(path):
