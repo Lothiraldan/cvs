@@ -10,10 +10,22 @@ import os, cgi, sys
 import mimetypes
 from demandload import demandload
 demandload(globals(), "mdiff time re socket zlib errno ui hg ConfigParser")
-demandload(globals(), "tempfile StringIO BaseHTTPServer util")
-demandload(globals(), "archival mimetypes templater")
+demandload(globals(), "tempfile StringIO BaseHTTPServer util SocketServer")
+demandload(globals(), "archival mimetypes templater urllib")
 from node import *
 from i18n import gettext as _
+
+def splitURI(uri):
+    """ Return path and query splited from uri
+
+    Just like CGI environment, the path is unquoted, the query is
+    not.
+    """
+    if '?' in uri:
+        path, query = uri.split('?', 1)
+    else:
+        path, query = uri, ''
+    return urllib.unquote(path), query
 
 def up(p):
     if p[0] != "/":
@@ -776,54 +788,54 @@ class hgweb(object):
         if not req.form.has_key('cmd'):
             req.form['cmd'] = [self.t.cache['default'],]
 
-        if req.form['cmd'][0] == 'changelog':
-            c = self.repo.changelog.count() - 1
-            hi = c
+        cmd = req.form['cmd'][0]
+        if cmd == 'changelog':
+            hi = self.repo.changelog.count() - 1
             if req.form.has_key('rev'):
                 hi = req.form['rev'][0]
                 try:
                     hi = self.repo.changelog.rev(self.repo.lookup(hi))
                 except hg.RepoError:
-                    req.write(self.search(hi))
+                    req.write(self.search(hi)) # XXX redirect to 404 page?
                     return
 
             req.write(self.changelog(hi))
 
-        elif req.form['cmd'][0] == 'changeset':
+        elif cmd == 'changeset':
             req.write(self.changeset(req.form['node'][0]))
 
-        elif req.form['cmd'][0] == 'manifest':
+        elif cmd == 'manifest':
             req.write(self.manifest(req.form['manifest'][0],
                                     clean(req.form['path'][0])))
 
-        elif req.form['cmd'][0] == 'tags':
+        elif cmd == 'tags':
             req.write(self.tags())
 
-        elif req.form['cmd'][0] == 'summary':
+        elif cmd == 'summary':
             req.write(self.summary())
 
-        elif req.form['cmd'][0] == 'filediff':
+        elif cmd == 'filediff':
             req.write(self.filediff(clean(req.form['file'][0]),
                                     req.form['node'][0]))
 
-        elif req.form['cmd'][0] == 'file':
+        elif cmd == 'file':
             req.write(self.filerevision(clean(req.form['file'][0]),
                                         req.form['filenode'][0]))
 
-        elif req.form['cmd'][0] == 'annotate':
+        elif cmd == 'annotate':
             req.write(self.fileannotate(clean(req.form['file'][0]),
                                         req.form['filenode'][0]))
 
-        elif req.form['cmd'][0] == 'filelog':
+        elif cmd == 'filelog':
             req.write(self.filelog(clean(req.form['file'][0]),
                                    req.form['filenode'][0]))
 
-        elif req.form['cmd'][0] == 'heads':
+        elif cmd == 'heads':
             req.httphdr("application/mercurial-0.1")
             h = self.repo.heads()
             req.write(" ".join(map(hex, h)) + "\n")
 
-        elif req.form['cmd'][0] == 'branches':
+        elif cmd == 'branches':
             req.httphdr("application/mercurial-0.1")
             nodes = []
             if req.form.has_key('nodes'):
@@ -831,7 +843,7 @@ class hgweb(object):
             for b in self.repo.branches(nodes):
                 req.write(" ".join(map(hex, b)) + "\n")
 
-        elif req.form['cmd'][0] == 'between':
+        elif cmd == 'between':
             req.httphdr("application/mercurial-0.1")
             nodes = []
             if req.form.has_key('pairs'):
@@ -840,7 +852,7 @@ class hgweb(object):
             for b in self.repo.between(pairs):
                 req.write(" ".join(map(hex, b)) + "\n")
 
-        elif req.form['cmd'][0] == 'changegroup':
+        elif cmd == 'changegroup':
             req.httphdr("application/mercurial-0.1")
             nodes = []
             if not self.allowpull:
@@ -859,7 +871,7 @@ class hgweb(object):
 
             req.write(z.flush())
 
-        elif req.form['cmd'][0] == 'archive':
+        elif cmd == 'archive':
             changeset = self.repo.lookup(req.form['node'][0])
             type = req.form['type'][0]
             if (type in self.archives and
@@ -869,7 +881,7 @@ class hgweb(object):
 
             req.write(self.t("error"))
 
-        elif req.form['cmd'][0] == 'static':
+        elif cmd == 'static':
             fname = req.form['file'][0]
             req.write(staticfile(static, fname)
                       or self.t("error", error="%r not found" % fname))
@@ -877,20 +889,39 @@ class hgweb(object):
         else:
             req.write(self.t("error"))
 
-def create_server(repo):
+def create_server(ui, repo):
+    use_threads = True
 
     def openlog(opt, default):
         if opt and opt != '-':
             return open(opt, 'w')
         return default
 
-    address = repo.ui.config("web", "address", "")
-    port = int(repo.ui.config("web", "port", 8000))
-    use_ipv6 = repo.ui.configbool("web", "ipv6")
-    accesslog = openlog(repo.ui.config("web", "accesslog", "-"), sys.stdout)
-    errorlog = openlog(repo.ui.config("web", "errorlog", "-"), sys.stderr)
+    address = ui.config("web", "address", "")
+    port = int(ui.config("web", "port", 8000))
+    use_ipv6 = ui.configbool("web", "ipv6")
+    webdir_conf = ui.config("web", "webdir_conf")
+    accesslog = openlog(ui.config("web", "accesslog", "-"), sys.stdout)
+    errorlog = openlog(ui.config("web", "errorlog", "-"), sys.stderr)
 
-    class IPv6HTTPServer(BaseHTTPServer.HTTPServer):
+    if use_threads:
+        try:
+            from threading import activeCount
+        except ImportError:
+            use_threads = False
+
+    if use_threads:
+        _mixin = SocketServer.ThreadingMixIn
+    else:
+        if hasattr(os, "fork"):
+            _mixin = SocketServer.ForkingMixIn
+        else:
+            class _mixin: pass
+
+    class MercurialHTTPServer(_mixin, BaseHTTPServer.HTTPServer):
+        pass
+
+    class IPv6HTTPServer(MercurialHTTPServer):
         address_family = getattr(socket, 'AF_INET6', None)
 
         def __init__(self, *args, **kwargs):
@@ -899,6 +930,7 @@ def create_server(repo):
             BaseHTTPServer.HTTPServer.__init__(self, *args, **kwargs)
 
     class hgwebhandler(BaseHTTPServer.BaseHTTPRequestHandler):
+
         def log_error(self, format, *args):
             errorlog.write("%s - - [%s] %s\n" % (self.address_string(),
                                                  self.log_date_time_string(),
@@ -920,11 +952,7 @@ def create_server(repo):
             self.do_POST()
 
         def do_hgweb(self):
-            query = ""
-            p = self.path.find("?")
-            if p:
-                query = self.path[p + 1:]
-                query = query.replace('+', ' ')
+            path_info, query = splitURI(self.path)
 
             env = {}
             env['GATEWAY_INTERFACE'] = 'CGI/1.1'
@@ -932,6 +960,7 @@ def create_server(repo):
             env['SERVER_NAME'] = self.server.server_name
             env['SERVER_PORT'] = str(self.server.server_port)
             env['REQUEST_URI'] = "/"
+            env['PATH_INFO'] = path_info
             if query:
                 env['QUERY_STRING'] = query
             host = self.address_string()
@@ -956,13 +985,20 @@ def create_server(repo):
 
             req = hgrequest(self.rfile, self.wfile, env)
             self.send_response(200, "Script output follows")
-            hg.run(req)
 
-    hg = hgweb(repo)
+            if webdir_conf:
+                hgwebobj = hgwebdir(webdir_conf)
+            elif repo is not None:
+                hgwebobj = hgweb(repo.__class__(repo.ui, repo.origroot))
+            else:
+                raise hg.RepoError(_('no repo found'))
+            hgwebobj.run(req)
+
+
     if use_ipv6:
         return IPv6HTTPServer((address, port), hgwebhandler)
     else:
-        return BaseHTTPServer.HTTPServer((address, port), hgwebhandler)
+        return MercurialHTTPServer((address, port), hgwebhandler)
 
 # This is a stopgap
 class hgwebdir(object):

@@ -2495,6 +2495,8 @@ def serve(ui, repo, **opts):
     """
 
     if opts["stdio"]:
+        if repo is None:
+            raise hg.RepoError(_('no repo found'))
         fin, fout = sys.stdin, sys.stdout
         sys.stdout = sys.stderr
 
@@ -2566,10 +2568,14 @@ def serve(ui, repo, **opts):
                 r = repo.addchangegroup(fin)
                 respond(str(r))
 
-    optlist = "name templates style address port ipv6 accesslog errorlog"
+    optlist = ("name templates style address port ipv6"
+               " accesslog errorlog webdir_conf")
     for o in optlist.split():
         if opts[o]:
             ui.setconfig("web", o, opts[o])
+
+    if repo is None and not ui.config("web", "webdir_conf"):
+        raise hg.RepoError(_('no repo found'))
 
     if opts['daemon'] and not opts['daemon_pipefds']:
         rfd, wfd = os.pipe()
@@ -2582,7 +2588,7 @@ def serve(ui, repo, **opts):
         os._exit(0)
 
     try:
-        httpd = hgweb.create_server(repo)
+        httpd = hgweb.create_server(ui, repo)
     except socket.error, inst:
         raise util.Abort(_('cannot start server: ') + inst.args[1])
 
@@ -2997,8 +3003,8 @@ table = {
     "import|patch":
         (import_,
          [('p', 'strip', 1,
-           _('directory strip option for patch. This has the same\n') +
-           _('meaning as the corresponding patch option')),
+           _('directory strip option for patch. This has the same\n'
+             'meaning as the corresponding patch option')),
           ('b', 'base', '', _('base path')),
           ('f', 'force', None,
            _('skip check for outstanding uncommitted changes'))],
@@ -3127,6 +3133,8 @@ table = {
           ('a', 'address', '', _('address to use')),
           ('n', 'name', '',
            _('name to show in web pages (default: working dir)')),
+          ('', 'webdir-conf', '', _('name of the webdir config file'
+                                    ' (serve more than one repo)')),
           ('', 'pid-file', '', _('name of file to write process ID to')),
           ('', 'stdio', None, _('for remote clients')),
           ('t', 'templates', '', _('web templates to use')),
@@ -3199,7 +3207,7 @@ globalopts = [
 
 norepo = ("clone init version help debugancestor debugcomplete debugdata"
           " debugindex debugindexdot")
-optionalrepo = ("paths debugconfig")
+optionalrepo = ("paths serve debugconfig")
 
 def findpossible(cmd):
     """
