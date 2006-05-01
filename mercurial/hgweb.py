@@ -125,7 +125,7 @@ class hgweb(object):
     def archivelist(self, nodeid):
         for i in self.archives:
             if self.repo.ui.configbool("web", "allow" + i, False):
-                yield {"type" : i, "node" : nodeid}
+                yield {"type" : i, "node" : nodeid, "url": ""}
 
     def listfiles(self, files, mf):
         for f in files[:self.maxfiles]:
@@ -293,7 +293,8 @@ class hgweb(object):
         yield self.t('changelog',
                      changenav=changenav,
                      manifest=hex(mf),
-                     rev=pos, changesets=count, entries=changelist)
+                     rev=pos, changesets=count, entries=changelist,
+                     archives=self.archivelist("tip"))
 
     def search(self, query):
 
@@ -1044,6 +1045,11 @@ class hgwebdir(object):
                                    defaults={"header": header,
                                              "footer": footer})
 
+        def archivelist(ui, nodeid, url):
+            for i in ['zip', 'gz', 'bz2']:
+                if ui.configbool("web", "allow" + i, False):
+                    yield {"type" : i, "node": nodeid, "url": url}
+
         def entries(**map):
             parity = 0
             for name, path in self.repos:
@@ -1070,7 +1076,8 @@ class hgwebdir(object):
                            url=url,
                            parity=parity,
                            shortdesc=get("web", "description", "unknown"),
-                           lastupdate=d)
+                           lastupdate=d,
+                           archives=archivelist(u, "tip", url))
 
                 parity = 1 - parity
 
