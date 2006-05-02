@@ -11,7 +11,8 @@ from node import *
 from i18n import gettext as _
 from demandload import *
 demandload(globals(), "appendfile changegroup")
-demandload(globals(), "re lock transaction tempfile stat mdiff errno ui revlog")
+demandload(globals(), "re lock transaction tempfile stat mdiff errno ui")
+demandload(globals(), "revlog traceback")
 
 class localrepository(object):
     def __del__(self):
@@ -42,7 +43,8 @@ class localrepository(object):
             pass
 
         v = self.ui.revlogopts
-        self.revlogversion = int(v.get('format', 0))
+        self.revlogversion = int(v.get('format', revlog.REVLOGV0))
+        self.revlogv1 = self.revlogversion != revlog.REVLOGV0
         flags = 0
         for x in v.get('flags', "").split():
             flags |= revlog.flagstr(x)
@@ -71,7 +73,59 @@ class localrepository(object):
             os.mkdir(self.join("data"))
 
         self.dirstate = dirstate.dirstate(self.opener, self.ui, self.root)
+
     def hook(self, name, throw=False, **args):
+        def callhook(hname, funcname):
+            '''call python hook. hook is callable object, looked up as
+            name in python module. if callable returns "true", hook
+            passes, else fails. if hook raises exception, treated as
+            hook failure. exception propagates if throw is "true".'''
+
+            self.ui.note(_("calling hook %s: %s\n") % (hname, funcname))
+            d = funcname.rfind('.')
+            if d == -1:
+                raise util.Abort(_('%s hook is invalid ("%s" not in a module)')
+                                 % (hname, funcname))
+            modname = funcname[:d]
+            try:
+                obj = __import__(modname)
+            except ImportError:
+                raise util.Abort(_('%s hook is invalid '
+                                   '(import of "%s" failed)') %
+                                 (hname, modname))
+            try:
+                for p in funcname.split('.')[1:]:
+                    obj = getattr(obj, p)
+            except AttributeError, err:
+                raise util.Abort(_('%s hook is invalid '
+                                   '("%s" is not defined)') %
+                                 (hname, funcname))
+            if not callable(obj):
+                raise util.Abort(_('%s hook is invalid '
+                                   '("%s" is not callable)') %
+                                 (hname, funcname))
+            try:
+                r = obj(ui=ui, repo=repo, hooktype=name, **args)
+            except (KeyboardInterrupt, util.SignalInterrupt):
+                raise
+            except Exception, exc:
+                if isinstance(exc, util.Abort):
+                    self.ui.warn(_('error: %s hook failed: %s\n') %
+                                 (hname, exc.args[0] % exc.args[1:]))
+                else:
+                    self.ui.warn(_('error: %s hook raised an exception: '
+                                   '%s\n') % (hname, exc))
+                if throw:
+                    raise
+                if self.ui.traceback:
+                    traceback.print_exc()
+                return False
+            if not r:
+                if throw:
+                    raise util.Abort(_('%s hook failed') % hname)
+                self.ui.warn(_('error: %s hook failed\n') % hname)
+            return r
+
         def runhook(name, cmd):
             self.ui.note(_("running hook %s: %s\n") % (name, cmd))
             env = dict([('HG_' + k.upper(), v) for k, v in args.iteritems()] +
@@ -90,7 +144,10 @@ class localrepository(object):
                  if hname.split(".", 1)[0] == name and cmd]
         hooks.sort()
         for hname, cmd in hooks:
-            r = runhook(hname, cmd) and r
+            if cmd.startswith('python:'):
+                r = callhook(hname, cmd[7:].strip()) and r
+            else:
+                r = runhook(hname, cmd) and r
         return r
 
     def tags(self):
@@ -1320,7 +1377,8 @@ class localrepository(object):
             # Signal that no more groups are left.
             yield changegroup.closechunk()
 
-            self.hook('outgoing', node=hex(msng_cl_lst[0]), source=source)
+            if msng_cl_lst:
+                self.hook('outgoing', node=hex(msng_cl_lst[0]), source=source)
 
         return util.chunkbuffer(gengroup())
 
@@ -1766,7 +1824,7 @@ class localrepository(object):
 
         def temp(prefix, node):
             pre = "%s~%s." % (os.path.basename(fn), prefix)
-            (fd, name) = tempfile.mkstemp("", pre)
+            (fd, name) = tempfile.mkstemp(prefix=pre)
             f = os.fdopen(fd, "wb")
             self.wwrite(fn, fl.read(node), f)
             f.close()
@@ -1803,11 +1861,16 @@ class localrepository(object):
         filenodes = {}
         changesets = revisions = files = 0
         errors = [0]
+        warnings = [0]
         neededmanifests = {}
 
         def err(msg):
             self.ui.warn(msg + "\n")
             errors[0] += 1
+
+        def warn(msg):
+            self.ui.warn(msg + "\n")
+            warnings[0] += 1
 
         def checksize(obj, name):
             d = obj.checksize()
@@ -1815,6 +1878,18 @@ class localrepository(object):
                 err(_("%s data length off by %d bytes") % (name, d[0]))
             if d[1]:
                 err(_("%s index contains %d extra bytes") % (name, d[1]))
+
+        def checkversion(obj, name):
+            if obj.version != revlog.REVLOGV0:
+                if not revlogv1:
+                    warn(_("warning: `%s' uses revlog format 1") % name)
+            elif revlogv1:
+                warn(_("warning: `%s' uses revlog format 0") % name)
+
+        revlogv1 = self.revlogversion != revlog.REVLOGV0
+        if self.ui.verbose or revlogv1 != self.revlogv1:
+            self.ui.status(_("repository uses revlog format %d\n") %
+                           (revlogv1 and 1 or 0))
 
         seen = {}
         self.ui.status(_("checking changesets\n"))
@@ -1850,6 +1925,7 @@ class localrepository(object):
 
         seen = {}
         self.ui.status(_("checking manifests\n"))
+        checkversion(self.manifest, "manifest")
         checksize(self.manifest, "manifest")
 
         for i in range(self.manifest.count()):
@@ -1914,6 +1990,7 @@ class localrepository(object):
                 err(_("file without name in manifest %s") % short(n))
                 continue
             fl = self.file(f)
+            checkversion(fl, f)
             checksize(fl, f)
 
             nodes = {nullid: 1}
@@ -1962,6 +2039,8 @@ class localrepository(object):
         self.ui.status(_("%d files, %d changesets, %d total revisions\n") %
                        (files, changesets, revisions))
 
+        if warnings[0]:
+            self.ui.warn(_("%d warnings encountered!\n") % warnings[0])
         if errors[0]:
             self.ui.warn(_("%d integrity errors encountered!\n") % errors[0])
             return 1

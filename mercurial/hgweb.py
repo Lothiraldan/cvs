@@ -125,7 +125,7 @@ class hgweb(object):
     def archivelist(self, nodeid):
         for i in self.archives:
             if self.repo.ui.configbool("web", "allow" + i, False):
-                yield {"type" : i, "node" : nodeid}
+                yield {"type" : i, "node" : nodeid, "url": ""}
 
     def listfiles(self, files, mf):
         for f in files[:self.maxfiles]:
@@ -293,7 +293,8 @@ class hgweb(object):
         yield self.t('changelog',
                      changenav=changenav,
                      manifest=hex(mf),
-                     rev=pos, changesets=count, entries=changelist)
+                     rev=pos, changesets=count, entries=changelist,
+                     archives=self.archivelist("tip"))
 
     def search(self, query):
 
@@ -727,7 +728,9 @@ class hgweb(object):
             yield self.t("header", **map)
 
         def footer(**map):
-            yield self.t("footer", **map)
+            yield self.t("footer",
+                         motd=self.repo.ui.config("web", "motd", ""),
+                         **map)
 
         def expand_form(form):
             shortcuts = {
@@ -1006,8 +1009,11 @@ class hgwebdir(object):
         def cleannames(items):
             return [(name.strip(os.sep), path) for name, path in items]
 
+        self.motd = ""
+        self.repos_sorted = ('name', False)
         if isinstance(config, (list, tuple)):
             self.repos = cleannames(config)
+            self.repos_sorted = ('', False)
         elif isinstance(config, dict):
             self.repos = cleannames(config.items())
             self.repos.sort()
@@ -1015,6 +1021,8 @@ class hgwebdir(object):
             cp = ConfigParser.SafeConfigParser()
             cp.read(config)
             self.repos = []
+            if cp.has_section('web') and cp.has_option('web', 'motd'):
+                self.motd = cp.get('web', 'motd')
             if cp.has_section('paths'):
                 self.repos.extend(cleannames(cp.items('paths')))
             if cp.has_section('collections'):
@@ -1032,14 +1040,20 @@ class hgwebdir(object):
             yield tmpl("header", **map)
 
         def footer(**map):
-            yield tmpl("footer", **map)
+            yield tmpl("footer", motd=self.motd, **map)
 
         m = os.path.join(templater.templatepath(), "map")
         tmpl = templater.templater(m, templater.common_filters,
                                    defaults={"header": header,
                                              "footer": footer})
 
-        def entries(**map):
+        def archivelist(ui, nodeid, url):
+            for i in ['zip', 'gz', 'bz2']:
+                if ui.configbool("web", "allow" + i, False):
+                    yield {"type" : i, "node": nodeid, "url": url}
+
+        def entries(sortcolumn="", descending=False, **map):
+            rows = []
             parity = 0
             for name, path in self.repos:
                 u = ui.ui()
@@ -1058,16 +1072,37 @@ class hgwebdir(object):
                 except OSError:
                     continue
 
-                yield dict(contact=(get("ui", "username") or # preferred
-                                    get("web", "contact") or # deprecated
-                                    get("web", "author", "unknown")), # also
-                           name=get("web", "name", name),
+                contact = (get("ui", "username") or # preferred
+                           get("web", "contact") or # deprecated
+                           get("web", "author", "")) # also
+                description = get("web", "description", "")
+                name = get("web", "name", name)
+                row = dict(contact=contact or "unknown",
+                           contact_sort=contact.upper() or "unknown",
+                           name=name,
+                           name_sort=name,
                            url=url,
-                           parity=parity,
-                           shortdesc=get("web", "description", "unknown"),
-                           lastupdate=d)
-
-                parity = 1 - parity
+                           description=description or "unknown",
+                           description_sort=description.upper() or "unknown",
+                           lastchange=d,
+                           lastchange_sort=d[1]-d[0],
+                           archives=archivelist(u, "tip", url))
+                if (not sortcolumn
+                    or (sortcolumn, descending) == self.repos_sorted):
+                    # fast path for unsorted output
+                    row['parity'] = parity
+                    parity = 1 - parity
+                    yield row
+                else:
+                    rows.append((row["%s_sort" % sortcolumn], row))
+            if rows:
+                rows.sort()
+                if descending:
+                    rows.reverse()
+                for key, row in rows:
+                    row['parity'] = parity
+                    parity = 1 - parity
+                    yield row
 
         virtual = req.env.get("PATH_INFO", "").strip('/')
         if virtual:
@@ -1088,4 +1123,20 @@ class hgwebdir(object):
                 req.write(staticfile(static, fname)
                           or tmpl("error", error="%r not found" % fname))
             else:
-                req.write(tmpl("index", entries=entries))
+                sortable = ["name", "description", "contact", "lastchange"]
+                sortcolumn, descending = self.repos_sorted
+                if req.form.has_key('sort'):
+                    sortcolumn = req.form['sort'][0]
+                    descending = sortcolumn.startswith('-')
+                    if descending:
+                        sortcolumn = sortcolumn[1:]
+                    if sortcolumn not in sortable:
+                        sortcolumn = ""
+
+                sort = [("sort_%s" % column,
+                         "%s%s" % ((not descending and column == sortcolumn)
+                                   and "-" or "", column))
+                        for column in sortable]
+                req.write(tmpl("index", entries=entries,
+                               sortcolumn=sortcolumn, descending=descending,
+                               **dict(sort)))

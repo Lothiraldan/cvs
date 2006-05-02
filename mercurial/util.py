@@ -16,6 +16,9 @@ from demandload import *
 demandload(globals(), "cStringIO errno popen2 re shutil sys tempfile")
 demandload(globals(), "threading time")
 
+class SignalInterrupt(Exception):
+    """Exception raised on SIGTERM and SIGHUP."""
+
 def pipefilter(s, cmd):
     '''filter string S through command CMD, returning its output'''
     (pout, pin) = popen2.popen2(cmd, -1, 'b')
@@ -43,11 +46,11 @@ def tempfilter(s, cmd):
     the temporary files generated.'''
     inname, outname = None, None
     try:
-        infd, inname = tempfile.mkstemp(prefix='hgfin')
+        infd, inname = tempfile.mkstemp(prefix='hg-filter-in-')
         fp = os.fdopen(infd, 'wb')
         fp.write(s)
         fp.close()
-        outfd, outname = tempfile.mkstemp(prefix='hgfout')
+        outfd, outname = tempfile.mkstemp(prefix='hg-filter-out-')
         os.close(outfd)
         cmd = cmd.replace('INFILE', inname)
         cmd = cmd.replace('OUTFILE', outname)
@@ -676,7 +679,7 @@ def opener(base, audit=True):
 
     def mktempcopy(name):
         d, fn = os.path.split(name)
-        fd, temp = tempfile.mkstemp(prefix=fn, dir=d)
+        fd, temp = tempfile.mkstemp(prefix='.%s-' % fn, dir=d)
         os.close(fd)
         fp = posixfile(temp, "wb")
         try:

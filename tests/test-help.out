@@ -42,6 +42,7 @@ list of commands (use "hg help -v" to show aliases and global options):
  addremove   add all new files, delete all missing files
  annotate    show changeset information per file line
  archive     create unversioned archive of a repository revision
+ backout     reverse effect of earlier changeset
  bundle      create a changegroup file
  cat         output the latest or given revisions of files
  clone       make a copy of an existing repository
@@ -49,7 +50,6 @@ list of commands (use "hg help -v" to show aliases and global options):
  copy        mark files as copied for the next commit
  diff        diff repository (or selected files)
  export      dump the header and diffs for one or more changesets
- forget      don't add the specified files on the next commit
  grep        search for a pattern in specified files and revisions
  heads       show current repository heads
  help        show help for a given command or all commands
@@ -85,6 +85,7 @@ list of commands (use "hg help -v" to show aliases and global options):
  addremove   add all new files, delete all missing files
  annotate    show changeset information per file line
  archive     create unversioned archive of a repository revision
+ backout     reverse effect of earlier changeset
  bundle      create a changegroup file
  cat         output the latest or given revisions of files
  clone       make a copy of an existing repository
@@ -92,7 +93,6 @@ list of commands (use "hg help -v" to show aliases and global options):
  copy        mark files as copied for the next commit
  diff        diff repository (or selected files)
  export      dump the header and diffs for one or more changesets
- forget      don't add the specified files on the next commit
  grep        search for a pattern in specified files and revisions
  heads       show current repository heads
  help        show help for a given command or all commands

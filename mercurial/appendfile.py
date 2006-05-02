@@ -38,7 +38,7 @@ class appendfile(object):
             self.tmpname = tmpname
             self.tmpfp = util.posixfile(self.tmpname, 'ab+')
         else:
-            fd, self.tmpname = tempfile.mkstemp()
+            fd, self.tmpname = tempfile.mkstemp(prefix="hg-appendfile-")
             os.close(fd)
             self.tmpfp = util.posixfile(self.tmpname, 'ab+')
         self.realfp = fp
