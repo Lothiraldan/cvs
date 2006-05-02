@@ -1,0 +1,255 @@
+Mercurial Distributed SCM
+
+basic commands (use "hg help" for the full list or option "-v" for details):
+
+ add        add the specified files on the next commit
+ annotate   show changeset information per file line
+ clone      make a copy of an existing repository
+ commit     commit the specified files or all outstanding changes
+ diff       diff repository (or selected files)
+ export     dump the header and diffs for one or more changesets
+ init       create a new repository in the given directory
+ log        show revision history of entire repository or files
+ parents    show the parents of the working dir or revision
+ pull       pull changes from the specified source
+ push       push changes to the specified destination
+ remove     remove the specified files on the next commit
+ revert     revert modified files or dirs back to their unmodified states
+ serve      export the repository via HTTP
+ status     show changed files in the working directory
+ update     update or merge working directory
+ add        add the specified files on the next commit
+ annotate   show changeset information per file line
+ clone      make a copy of an existing repository
+ commit     commit the specified files or all outstanding changes
+ diff       diff repository (or selected files)
+ export     dump the header and diffs for one or more changesets
+ init       create a new repository in the given directory
+ log        show revision history of entire repository or files
+ parents    show the parents of the working dir or revision
+ pull       pull changes from the specified source
+ push       push changes to the specified destination
+ remove     remove the specified files on the next commit
+ revert     revert modified files or dirs back to their unmodified states
+ serve      export the repository via HTTP
+ status     show changed files in the working directory
+ update     update or merge working directory
+Mercurial Distributed SCM
+
+list of commands (use "hg help -v" to show aliases and global options):
+
+ add         add the specified files on the next commit
+ addremove   add all new files, delete all missing files
+ annotate    show changeset information per file line
+ archive     create unversioned archive of a repository revision
+ backout     reverse effect of earlier changeset
+ bundle      create a changegroup file
+ cat         output the latest or given revisions of files
+ clone       make a copy of an existing repository
+ commit      commit the specified files or all outstanding changes
+ copy        mark files as copied for the next commit
+ diff        diff repository (or selected files)
+ export      dump the header and diffs for one or more changesets
+ grep        search for a pattern in specified files and revisions
+ heads       show current repository heads
+ help        show help for a given command or all commands
+ identify    print information about the working copy
+ import      import an ordered set of patches
+ incoming    show new changesets found in source
+ init        create a new repository in the given directory
+ locate      locate files matching specific patterns
+ log         show revision history of entire repository or files
+ manifest    output the latest or given revision of the project manifest
+ merge       Merge working directory with another revision
+ outgoing    show changesets not found in destination
+ parents     show the parents of the working dir or revision
+ paths       show definition of symbolic path names
+ pull        pull changes from the specified source
+ push        push changes to the specified destination
+ recover     roll back an interrupted transaction
+ remove      remove the specified files on the next commit
+ rename      rename files; equivalent of copy + remove
+ revert      revert modified files or dirs back to their unmodified states
+ root        print the root (top) of the current working dir
+ serve       export the repository via HTTP
+ status      show changed files in the working directory
+ tag         add a tag for the current tip or a given revision
+ tags        list repository tags
+ tip         show the tip revision
+ unbundle    apply a changegroup file
+ undo        undo the last commit or pull
+ update      update or merge working directory
+ verify      verify the integrity of the repository
+ version     output version and copyright information
+ add         add the specified files on the next commit
+ addremove   add all new files, delete all missing files
+ annotate    show changeset information per file line
+ archive     create unversioned archive of a repository revision
+ backout     reverse effect of earlier changeset
+ bundle      create a changegroup file
+ cat         output the latest or given revisions of files
+ clone       make a copy of an existing repository
+ commit      commit the specified files or all outstanding changes
+ copy        mark files as copied for the next commit
+ diff        diff repository (or selected files)
+ export      dump the header and diffs for one or more changesets
+ grep        search for a pattern in specified files and revisions
+ heads       show current repository heads
+ help        show help for a given command or all commands
+ identify    print information about the working copy
+ import      import an ordered set of patches
+ incoming    show new changesets found in source
+ init        create a new repository in the given directory
+ locate      locate files matching specific patterns
+ log         show revision history of entire repository or files
+ manifest    output the latest or given revision of the project manifest
+ merge       Merge working directory with another revision
+ outgoing    show changesets not found in destination
+ parents     show the parents of the working dir or revision
+ paths       show definition of symbolic path names
+ pull        pull changes from the specified source
+ push        push changes to the specified destination
+ recover     roll back an interrupted transaction
+ remove      remove the specified files on the next commit
+ rename      rename files; equivalent of copy + remove
+ revert      revert modified files or dirs back to their unmodified states
+ root        print the root (top) of the current working dir
+ serve       export the repository via HTTP
+ status      show changed files in the working directory
+ tag         add a tag for the current tip or a given revision
+ tags        list repository tags
+ tip         show the tip revision
+ unbundle    apply a changegroup file
+ undo        undo the last commit or pull
+ update      update or merge working directory
+ verify      verify the integrity of the repository
+ version     output version and copyright information
+hg add [OPTION]... [FILE]...
+
+add the specified files on the next commit
+
+    Schedule files to be version controlled and added to the repository.
+
+    The files will be added to the repository at the next commit.
+
+    If no names are given, add all files in the repository.
+
+options:
+
+ -I --include  include names matching the given patterns
+ -X --exclude  exclude names matching the given patterns
+hg add: option --skjdfks not recognized
+hg add [OPTION]... [FILE]...
+
+add the specified files on the next commit
+
+    Schedule files to be version controlled and added to the repository.
+
+    The files will be added to the repository at the next commit.
+
+    If no names are given, add all files in the repository.
+
+options:
+
+ -I --include  include names matching the given patterns
+ -X --exclude  exclude names matching the given patterns
+hg diff [-a] [-I] [-X] [-r REV1 [-r REV2]] [FILE]...
+
+diff repository (or selected files)
+
+    Show differences between revisions for the specified files.
+
+    Differences between files are shown using the unified diff format.
+
+    When two revision arguments are given, then changes are shown
+    between those revisions. If only one revision is specified then
+    that revision is compared to the working directory, and, when no
+    revisions are specified, the working directory files are compared
+    to its parent.
+
+    Without the -a option, diff will avoid generating diffs of files
+    it detects as binary. With -a, diff will generate a diff anyway,
+    probably with undesirable results.
+
+options:
+
+ -r --rev               revision
+ -a --text              treat all files as text
+ -p --show-function     show which function each change is in
+ -w --ignore-all-space  ignore white space when comparing lines
+ -I --include           include names matching the given patterns
+ -X --exclude           exclude names matching the given patterns
+hg status [OPTION]... [FILE]...
+
+show changed files in the working directory
+
+    Show changed files in the repository.  If names are
+    given, only files that match are shown.
+
+    The codes used to show the status of files are:
+    M = modified
+    A = added
+    R = removed
+    ! = deleted, but still tracked
+    ? = not tracked
+    I = ignored (not shown by default)
+
+aliases: st
+
+options:
+
+ -m --modified   show only modified files
+ -a --added      show only added files
+ -r --removed    show only removed files
+ -d --deleted    show only deleted (but tracked) files
+ -u --unknown    show only unknown (not tracked) files
+ -i --ignored    show ignored files
+ -n --no-status  hide status prefix
+ -0 --print0     end filenames with NUL, for use with xargs
+ -I --include    include names matching the given patterns
+ -X --exclude    exclude names matching the given patterns
+hg status [OPTION]... [FILE]...
+
+show changed files in the working directory
+hg: unknown command 'foo'
+Mercurial Distributed SCM
+
+basic commands (use "hg help" for the full list or option "-v" for details):
+
+ add        add the specified files on the next commit
+ annotate   show changeset information per file line
+ clone      make a copy of an existing repository
+ commit     commit the specified files or all outstanding changes
+ diff       diff repository (or selected files)
+ export     dump the header and diffs for one or more changesets
+ init       create a new repository in the given directory
+ log        show revision history of entire repository or files
+ parents    show the parents of the working dir or revision
+ pull       pull changes from the specified source
+ push       push changes to the specified destination
+ remove     remove the specified files on the next commit
+ revert     revert modified files or dirs back to their unmodified states
+ serve      export the repository via HTTP
+ status     show changed files in the working directory
+ update     update or merge working directory
+hg: unknown command 'skjdfks'
+Mercurial Distributed SCM
+
+basic commands (use "hg help" for the full list or option "-v" for details):
+
+ add        add the specified files on the next commit
+ annotate   show changeset information per file line
+ clone      make a copy of an existing repository
+ commit     commit the specified files or all outstanding changes
+ diff       diff repository (or selected files)
+ export     dump the header and diffs for one or more changesets
+ init       create a new repository in the given directory
+ log        show revision history of entire repository or files
+ parents    show the parents of the working dir or revision
+ pull       pull changes from the specified source
+ push       push changes to the specified destination
+ remove     remove the specified files on the next commit
+ revert     revert modified files or dirs back to their unmodified states
+ serve      export the repository via HTTP
+ status     show changed files in the working directory
+ update     update or merge working directory
