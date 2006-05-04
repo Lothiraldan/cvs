@@ -398,194 +398,6 @@ def trimuser(ui, name, rev, revcache):
         user = revcache[rev] = ui.shortuser(name)
     return user
 
-class changeset_templater(object):
-    '''use templater module to format changeset information.'''
-
-    def __init__(self, ui, repo, mapfile):
-        self.t = templater.templater(mapfile, templater.common_filters,
-                                     cache={'parent': '{rev}:{node|short} ',
-                                            'manifest': '{rev}:{node|short}'})
-        self.ui = ui
-        self.repo = repo
-
-    def use_template(self, t):
-        '''set template string to use'''
-        self.t.cache['changeset'] = t
-
-    def write(self, thing, header=False):
-        '''write expanded template.
-        uses in-order recursive traverse of iterators.'''
-        for t in thing:
-            if hasattr(t, '__iter__'):
-                self.write(t, header=header)
-            elif header:
-                self.ui.write_header(t)
-            else:
-                self.ui.write(t)
-
-    def write_header(self, thing):
-        self.write(thing, header=True)
-
-    def show(self, rev=0, changenode=None, brinfo=None):
-        '''show a single changeset or file revision'''
-        log = self.repo.changelog
-        if changenode is None:
-            changenode = log.node(rev)
-        elif not rev:
-            rev = log.rev(changenode)
-
-        changes = log.read(changenode)
-
-        def showlist(name, values, plural=None, **args):
-            '''expand set of values.
-            name is name of key in template map.
-            values is list of strings or dicts.
-            plural is plural of name, if not simply name + 's'.
-
-            expansion works like this, given name 'foo'.
-
-            if values is empty, expand 'no_foos'.
-
-            if 'foo' not in template map, return values as a string,
-            joined by space.
-
-            expand 'start_foos'.
-
-            for each value, expand 'foo'. if 'last_foo' in template
-            map, expand it instead of 'foo' for last key.
-
-            expand 'end_foos'.
-            '''
-            if plural: names = plural
-            else: names = name + 's'
-            if not values:
-                noname = 'no_' + names
-                if noname in self.t:
-                    yield self.t(noname, **args)
-                return
-            if name not in self.t:
-                if isinstance(values[0], str):
-                    yield ' '.join(values)
-                else:
-                    for v in values:
-                        yield dict(v, **args)
-                return
-            startname = 'start_' + names
-            if startname in self.t:
-                yield self.t(startname, **args)
-            vargs = args.copy()
-            def one(v, tag=name):
-                try:
-                    vargs.update(v)
-                except (AttributeError, ValueError):
-                    try:
-                        for a, b in v:
-                            vargs[a] = b
-                    except ValueError:
-                        vargs[name] = v
-                return self.t(tag, **vargs)
-            lastname = 'last_' + name
-            if lastname in self.t:
-                last = values.pop()
-            else:
-                last = None
-            for v in values:
-                yield one(v)
-            if last is not None:
-                yield one(last, tag=lastname)
-            endname = 'end_' + names
-            if endname in self.t:
-                yield self.t(endname, **args)
-
-        if brinfo:
-            def showbranches(**args):
-                if changenode in brinfo:
-                    for x in showlist('branch', brinfo[changenode],
-                                      plural='branches', **args):
-                        yield x
-        else:
-            showbranches = ''
-
-        if self.ui.debugflag:
-            def showmanifest(**args):
-                args = args.copy()
-                args.update(dict(rev=self.repo.manifest.rev(changes[0]),
-                                 node=hex(changes[0])))
-                yield self.t('manifest', **args)
-        else:
-            showmanifest = ''
-
-        def showparents(**args):
-            parents = [[('rev', log.rev(p)), ('node', hex(p))]
-                       for p in log.parents(changenode)
-                       if self.ui.debugflag or p != nullid]
-            if (not self.ui.debugflag and len(parents) == 1 and
-                parents[0][0][1] == rev - 1):
-                return
-            for x in showlist('parent', parents, **args):
-                yield x
-
-        def showtags(**args):
-            for x in showlist('tag', self.repo.nodetags(changenode), **args):
-                yield x
-
-        if self.ui.debugflag:
-            files = self.repo.changes(log.parents(changenode)[0], changenode)
-            def showfiles(**args):
-                for x in showlist('file', files[0], **args): yield x
-            def showadds(**args):
-                for x in showlist('file_add', files[1], **args): yield x
-            def showdels(**args):
-                for x in showlist('file_del', files[2], **args): yield x
-        else:
-            def showfiles(**args):
-                for x in showlist('file', changes[3], **args): yield x
-            showadds = ''
-            showdels = ''
-
-        props = {
-            'author': changes[1],
-            'branches': showbranches,
-            'date': changes[2],
-            'desc': changes[4],
-            'file_adds': showadds,
-            'file_dels': showdels,
-            'files': showfiles,
-            'manifest': showmanifest,
-            'node': hex(changenode),
-            'parents': showparents,
-            'rev': rev,
-            'tags': showtags,
-            }
-
-        try:
-            if self.ui.debugflag and 'header_debug' in self.t:
-                key = 'header_debug'
-            elif self.ui.quiet and 'header_quiet' in self.t:
-                key = 'header_quiet'
-            elif self.ui.verbose and 'header_verbose' in self.t:
-                key = 'header_verbose'
-            elif 'header' in self.t:
-                key = 'header'
-            else:
-                key = ''
-            if key:
-                self.write_header(self.t(key, **props))
-            if self.ui.debugflag and 'changeset_debug' in self.t:
-                key = 'changeset_debug'
-            elif self.ui.quiet and 'changeset_quiet' in self.t:
-                key = 'changeset_quiet'
-            elif self.ui.verbose and 'changeset_verbose' in self.t:
-                key = 'changeset_verbose'
-            else:
-                key = 'changeset'
-            self.write(self.t(key, **props))
-        except KeyError, inst:
-            raise util.Abort(_("%s: no key named '%s'") % (self.t.mapfile,
-                                                           inst.args[0]))
-        except SyntaxError, inst:
-            raise util.Abort(_('%s: %s') % (self.t.mapfile, inst.args[0]))
-
 class changeset_printer(object):
     '''show changeset information when templating not requested.'''
 
@@ -672,7 +484,7 @@ def show_changeset(ui, repo, opts):
                 if not mapname: mapname = templater.templatepath(mapfile)
                 if mapname: mapfile = mapname
         try:
-            t = changeset_templater(ui, repo, mapfile)
+            t = templater.changeset_templater(ui, repo, mapfile)
         except SyntaxError, inst:
             raise util.Abort(inst.args[0])
         if tmpl: t.use_template(tmpl)
@@ -809,13 +621,19 @@ def add(ui, repo, *pats, **opts):
     repo.add(names)
 
 def addremove(ui, repo, *pats, **opts):
-    """add all new files, delete all missing files
+    """add all new files, delete all missing files (DEPRECATED)
 
+    (DEPRECATED)
     Add all new files and remove all missing files from the repository.
 
     New files are ignored if they match any of the patterns in .hgignore. As
     with add, these changes take effect at the next commit.
+
+    This command is now deprecated and will be removed in a future
+    release. Please use add and remove --after instead.
     """
+    ui.warn(_('(the addremove command is deprecated; use add and remove '
+              '--after instead)\n'))
     return addremove_lock(ui, repo, pats, opts)
 
 def addremove_lock(ui, repo, pats, opts, wlock=None):
@@ -1153,7 +971,7 @@ def commit(ui, repo, *pats, **opts):
                              (logfile, inst.strerror))
 
     if opts['addremove']:
-        addremove(ui, repo, *pats, **opts)
+        addremove_lock(ui, repo, pats, opts)
     fns, match, anypats = matchpats(repo, pats, opts)
     if pats:
         modified, added, removed, deleted, unknown = (
@@ -1894,7 +1712,7 @@ def import_(ui, repo, patch1, *patches, **opts):
         files = util.patch(strip, pf, ui)
 
         if len(files) > 0:
-            addremove(ui, repo, *files)
+            addremove_lock(ui, repo, files, {})
         repo.commit(files, message, user)
 
 def incoming(ui, repo, source="default", **opts):
@@ -2347,7 +2165,7 @@ def recover(ui, repo):
         return repo.verify()
     return 1
 
-def remove(ui, repo, pat, *pats, **opts):
+def remove(ui, repo, *pats, **opts):
     """remove the specified files on the next commit
 
     Schedule the indicated files for removal from the repository.
@@ -2355,29 +2173,36 @@ def remove(ui, repo, pat, *pats, **opts):
     This command schedules the files to be removed at the next commit.
     This only removes files from the current branch, not from the
     entire project history.  If the files still exist in the working
-    directory, they will be deleted from it.
+    directory, they will be deleted from it.  If invoked with --after,
+    files that have been manually deleted are marked as removed.
     """
     names = []
+    if not opts['after'] and not pats:
+        raise util.Abort(_('no files specified'))
     def okaytoremove(abs, rel, exact):
         modified, added, removed, deleted, unknown = repo.changes(files=[abs])
         reason = None
-        if modified and not opts['force']:
+        if not deleted and opts['after']:
+            reason = _('is still present')
+        elif modified and not opts['force']:
             reason = _('is modified')
         elif added:
             reason = _('has been marked for add')
         elif unknown:
             reason = _('is not managed')
+        elif removed:
+            return False
         if reason:
             if exact:
                 ui.warn(_('not removing %s: file %s\n') % (rel, reason))
         else:
             return True
-    for src, abs, rel, exact in walk(repo, (pat,) + pats, opts):
+    for src, abs, rel, exact in walk(repo, pats, opts):
         if okaytoremove(abs, rel, exact):
             if ui.verbose or not exact:
                 ui.status(_('removing %s\n') % rel)
             names.append(abs)
-    repo.remove(names, unlink=True)
+    repo.remove(names, unlink=not opts['after'])
 
 def rename(ui, repo, *pats, **opts):
     """rename files; equivalent of copy + remove
@@ -2916,7 +2741,7 @@ table = {
          [('I', 'include', [], _('include names matching the given patterns')),
           ('X', 'exclude', [], _('exclude names matching the given patterns'))],
          _('hg add [OPTION]... [FILE]...')),
-    "addremove":
+    "debugaddremove|addremove":
         (addremove,
          [('I', 'include', [], _('include names matching the given patterns')),
           ('X', 'exclude', [], _('exclude names matching the given patterns'))],
@@ -2976,7 +2801,8 @@ table = {
          _('hg clone [OPTION]... SOURCE [DEST]')),
     "^commit|ci":
         (commit,
-         [('A', 'addremove', None, _('run addremove during commit')),
+         [('A', 'addremove', None,
+           _('mark new/missing files as added/removed before committing')),
           ('m', 'message', '', _('use <text> as commit message')),
           ('l', 'logfile', '', _('read the commit message from <file>')),
           ('d', 'date', '', _('record datecode as commit date')),
@@ -3161,7 +2987,8 @@ table = {
     "recover": (recover, [], _('hg recover')),
     "^remove|rm":
         (remove,
-         [('f', 'force', None, _('remove file even if modified')),
+         [('', 'after', None, _('record remove that has already occurred')),
+          ('f', 'force', None, _('remove file even if modified')),
           ('I', 'include', [], _('include names matching the given patterns')),
           ('X', 'exclude', [], _('exclude names matching the given patterns'))],
          _('hg remove [OPTION]... FILE...')),
