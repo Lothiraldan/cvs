@@ -210,6 +210,7 @@ class notifier(object):
             msg['Message-Id'] = ('<hg.%s.%s.%s@%s>' %
                                  (short(node), int(time.time()),
                                   hash(self.repo.root), socket.getfqdn()))
+        msg['To'] = self.subs
 
         msgtext = msg.as_string(0)
         if self.ui.configbool('notify', 'test', True):
@@ -225,7 +226,8 @@ class notifier(object):
         if maxdiff == 0:
             return
         fp = templater.stringio()
-        commands.dodiff(fp, self.ui, self.repo, node,
+        prev = self.repo.changelog.parents(node)[0]
+        commands.dodiff(fp, self.ui, self.repo, prev,
                         self.repo.changelog.tip())
         difflines = fp.getvalue().splitlines(1)
         if maxdiff > 0 and len(difflines) > maxdiff:
