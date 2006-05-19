@@ -1,0 +1,43 @@
+#!/bin/sh
+
+mkdir t
+cd t
+hg init
+hg id
+echo a > a
+hg add a
+hg commit -m "test" -d "1000000 0"
+hg co
+hg identify
+T=`hg tip -v | head -n 1 | cut -d : -f 3`
+echo "$T first" > .hgtags
+cat .hgtags
+hg add .hgtags
+hg commit -m "add tags" -d "1000000 0"
+hg tags
+hg identify
+echo bb > a
+hg status
+hg identify
+hg co first
+hg id
+hg -v id
+hg status
+echo 1 > b
+hg add b
+hg commit -m "branch" -d "1000000 0"
+hg id
+hg merge 1
+hg id
+hg status
+
+hg commit -m "merge" -d "1000000 0"
+# invalid tags
+echo "spam" >> .hgtags
+echo >> .hgtags
+echo "foo bar" >> .hgtags
+echo "$T invalid" | sed "s/..../a5a5/" >> .hg/localtags
+hg commit -m "tags" -d "1000000 0"
+hg tags
+hg tip
+
