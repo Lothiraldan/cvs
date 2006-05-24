@@ -871,7 +871,7 @@ class localrepository(object):
         b = []
         for n in nodes:
             t = n
-            while n:
+            while 1:
                 p = self.changelog.parents(n)
                 if p[1] != nullid or p[0] == nullid:
                     b.append((t, n, p[0], p[1]))
