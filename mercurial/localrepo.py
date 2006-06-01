@@ -12,7 +12,7 @@ from i18n import gettext as _
 from demandload import *
 demandload(globals(), "appendfile changegroup")
 demandload(globals(), "re lock transaction tempfile stat mdiff errno ui")
-demandload(globals(), "revlog traceback")
+demandload(globals(), "revlog")
 
 class localrepository(object):
     def __del__(self):
@@ -125,8 +125,7 @@ class localrepository(object):
                                    '%s\n') % (hname, exc))
                 if throw:
                     raise
-                if self.ui.traceback:
-                    traceback.print_exc()
+                self.ui.print_exc()
                 return True
             if r:
                 if throw:
@@ -166,37 +165,44 @@ class localrepository(object):
                     return
                 s = l.split(" ", 1)
                 if len(s) != 2:
-                    self.ui.warn(_("%s: ignoring invalid tag\n") % context)
+                    self.ui.warn(_("%s: cannot parse entry\n") % context)
                     return
                 node, key = s
+                key = key.strip()
                 try:
                     bin_n = bin(node)
                 except TypeError:
-                    self.ui.warn(_("%s: ignoring invalid tag\n") % context)
+                    self.ui.warn(_("%s: node '%s' is not well formed\n") %
+                                 (context, node))
                     return
                 if bin_n not in self.changelog.nodemap:
-                    self.ui.warn(_("%s: ignoring invalid tag\n") % context)
+                    self.ui.warn(_("%s: tag '%s' refers to unknown node\n") %
+                                 (context, key))
                     return
-                self.tagscache[key.strip()] = bin_n
+                self.tagscache[key] = bin_n
 
-            # read each head of the tags file, ending with the tip
+            # read the tags file from each head, ending with the tip,
             # and add each tag found to the map, with "newer" ones
             # taking precedence
+            heads = self.heads()
+            heads.reverse()
             fl = self.file(".hgtags")
-            h = fl.heads()
-            h.reverse()
-            for r in h:
+            for node in heads:
+                change = self.changelog.read(node)
+                rev = self.changelog.rev(node)
+                fn, ff = self.manifest.find(change[0], '.hgtags')
+                if fn is None: continue
                 count = 0
-                for l in fl.read(r).splitlines():
+                for l in fl.read(fn).splitlines():
                     count += 1
-                    parsetag(l, ".hgtags:%d" % count)
-
+                    parsetag(l, _(".hgtags (rev %d:%s), line %d") %
+                             (rev, short(node), count))
             try:
                 f = self.opener("localtags")
                 count = 0
                 for l in f:
                     count += 1
-                    parsetag(l, "localtags:%d" % count)
+                    parsetag(l, _("localtags, line %d") % count)
             except IOError:
                 pass
 
@@ -297,7 +303,7 @@ class localrepository(object):
         if tr != None and tr.running():
             return tr.nest()
 
-        # save dirstate for undo
+        # save dirstate for rollback
         try:
             ds = self.opener("dirstate").read()
         except IOError:
@@ -321,7 +327,7 @@ class localrepository(object):
             self.ui.warn(_("no interrupted transaction available\n"))
             return False
 
-    def undo(self, wlock=None):
+    def rollback(self, wlock=None):
         if not wlock:
             wlock = self.wlock()
         l = self.lock()
@@ -332,7 +338,7 @@ class localrepository(object):
             self.reload()
             self.wreload()
         else:
-            self.ui.warn(_("no undo information available\n"))
+            self.ui.warn(_("no rollback information available\n"))
 
     def wreload(self):
         self.dirstate.read()
@@ -550,12 +556,15 @@ class localrepository(object):
             # run editor in the repository root
             olddir = os.getcwd()
             os.chdir(self.root)
-            edittext = self.ui.edit("\n".join(edittext), user)
+            text = self.ui.edit("\n".join(edittext), user)
             os.chdir(olddir)
-            if not edittext.rstrip():
-                return None
-            text = edittext
 
+        lines = [line.rstrip() for line in text.rstrip().splitlines()]
+        while lines and not lines[0]:
+            del lines[0]
+        if not lines:
+            return None
+        text = '\n'.join(lines)
         n = self.changelog.add(mn, changed + remove, text, tr, p1, p2, user, date)
         self.hook('pretxncommit', throw=True, node=hex(n), parent1=xp1,
                   parent2=xp2)
@@ -862,7 +871,7 @@ class localrepository(object):
         b = []
         for n in nodes:
             t = n
-            while n:
+            while 1:
                 p = self.changelog.parents(n)
                 if p[1] != nullid or p[0] == nullid:
                     b.append((t, n, p[0], p[1]))
@@ -890,6 +899,21 @@ class localrepository(object):
         return r
 
     def findincoming(self, remote, base=None, heads=None, force=False):
+        """Return list of roots of the subsets of missing nodes from remote
+
+        If base dict is specified, assume that these nodes and their parents
+        exist on the remote side and that no child of a node of base exists
+        in both remote and self.
+        Furthermore base will be updated to include the nodes that exists
+        in self and remote but no children exists in self and remote.
+        If a list of heads is specified, return only nodes which are heads
+        or ancestors of these heads.
+
+        All the ancestors of base are in self and in remote.
+        All the descendants of the list returned are missing in self.
+        (and so we know that the rest of the nodes are missing in remote, see
+        outgoing)
+        """
         m = self.changelog.nodemap
         search = []
         fetch = {}
@@ -902,6 +926,7 @@ class localrepository(object):
             heads = remote.heads()
 
         if self.changelog.tip() == nullid:
+            base[nullid] = 1
             if heads != [nullid]:
                 return [nullid]
             return []
@@ -920,7 +945,7 @@ class localrepository(object):
         if not unknown:
             return []
 
-        rep = {}
+        req = dict.fromkeys(unknown)
         reqcnt = 0
 
         # search through remote branches
@@ -937,12 +962,12 @@ class localrepository(object):
 
                 self.ui.debug(_("examining %s:%s\n")
                               % (short(n[0]), short(n[1])))
-                if n[0] == nullid:
-                    break
-                if n in seenbranch:
+                if n[0] == nullid: # found the end of the branch
+                    pass
+                elif n in seenbranch:
                     self.ui.debug(_("branch already found\n"))
                     continue
-                if n[1] and n[1] in m: # do we know the base?
+                elif n[1] and n[1] in m: # do we know the base?
                     self.ui.debug(_("found incomplete branch %s:%s\n")
                                   % (short(n[0]), short(n[1])))
                     search.append(n) # schedule branch range for scanning
@@ -953,14 +978,14 @@ class localrepository(object):
                             self.ui.debug(_("found new changeset %s\n") %
                                           short(n[1]))
                             fetch[n[1]] = 1 # earliest unknown
-                            base[n[2]] = 1 # latest known
-                            continue
+                        for p in n[2:4]:
+                            if p in m:
+                                base[p] = 1 # latest known
 
-                    for a in n[2:4]:
-                        if a not in rep:
-                            r.append(a)
-                            rep[a] = 1
-
+                    for p in n[2:4]:
+                        if p not in req and p not in m:
+                            r.append(p)
+                            req[p] = 1
                 seen[n[0]] = 1
 
             if r:
@@ -971,12 +996,7 @@ class localrepository(object):
                     for b in remote.branches(r[p:p+10]):
                         self.ui.debug(_("received %s:%s\n") %
                                       (short(b[0]), short(b[1])))
-                        if b[0] in m:
-                            self.ui.debug(_("found base node %s\n")
-                                          % short(b[0]))
-                            base[b[0]] = 1
-                        elif b[0] not in seen:
-                            unknown.append(b)
+                        unknown.append(b)
 
         # do binary search on the branches we found
         while search:
@@ -1488,12 +1508,11 @@ class localrepository(object):
 
             # pull off the changeset group
             self.ui.status(_("adding changesets\n"))
-            co = cl.tip()
+            cor = cl.count() - 1
             chunkiter = changegroup.chunkiter(source)
-            cn = cl.addgroup(chunkiter, csmap, tr, 1) # unique
-            cnr, cor = map(cl.rev, (cn, co))
-            if cn == nullid:
-                cnr = cor
+            if cl.addgroup(chunkiter, csmap, tr, 1) is None:
+                raise util.Abort(_("received changelog group is empty"))
+            cnr = cl.count() - 1
             changesets = cnr - cor
 
             mf = None
@@ -1503,9 +1522,12 @@ class localrepository(object):
 
                 # pull off the manifest group
                 self.ui.status(_("adding manifests\n"))
-                mm = mf.tip()
                 chunkiter = changegroup.chunkiter(source)
-                mo = mf.addgroup(chunkiter, revmap, tr)
+                # no need to check for empty manifest group here:
+                # if the result of the merge of 1 and 2 is the same in 3 and 4,
+                # no new manifest will be created and the manifest group will
+                # be empty during the pull
+                mf.addgroup(chunkiter, revmap, tr)
 
                 # process the files
                 self.ui.status(_("adding file changes\n"))
@@ -1517,7 +1539,8 @@ class localrepository(object):
                     fl = self.file(f)
                     o = fl.count()
                     chunkiter = changegroup.chunkiter(source)
-                    n = fl.addgroup(chunkiter, revmap, tr)
+                    if fl.addgroup(chunkiter, revmap, tr) is None:
+                        raise util.Abort(_("received file revlog group is empty"))
                     revisions += fl.count() - o
                     files += 1
 

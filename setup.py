@@ -13,6 +13,8 @@ import glob
 from distutils.core import setup, Extension
 from distutils.command.install_data import install_data
 
+# mercurial.packagescan must be the first mercurial module imported
+import mercurial.packagescan
 import mercurial.version
 
 # py2exe needs to be installed to work
@@ -36,7 +38,6 @@ try:
     # Due to the use of demandload py2exe is not finding the modules.
     # packagescan.getmodules creates a list of modules included in
     # the mercurial package plus depdent modules.
-    import mercurial.packagescan
     from py2exe.build_exe import py2exe as build_exe
 
     class py2exe_for_demandload(build_exe):
@@ -54,10 +55,10 @@ try:
                 self.includes = []
             else:
                 self.includes = self.includes.split(',')
-            self.includes += mercurial.packagescan.getmodules(self.build_lib,
-                                                              'mercurial')
-            self.includes += mercurial.packagescan.getmodules(self.build_lib,
-                                                              'hgext')
+            mercurial.packagescan.scan(self.build_lib,'mercurial')
+            mercurial.packagescan.scan(self.build_lib,'mercurial/hgweb')
+            mercurial.packagescan.scan(self.build_lib,'hgext')
+            self.includes += mercurial.packagescan.getmodules()
             build_exe.finalize_options(self)
 except ImportError:
     py2exe_for_demandload = None
@@ -85,7 +86,7 @@ setup(name='mercurial',
         url='http://selenic.com/mercurial',
         description='Scalable distributed SCM',
         license='GNU GPL',
-        packages=['mercurial', 'hgext'],
+        packages=['mercurial', 'mercurial.hgweb', 'hgext'],
         ext_modules=[Extension('mercurial.mpatch', ['mercurial/mpatch.c']),
                     Extension('mercurial.bdiff', ['mercurial/bdiff.c'])],
         data_files=[('mercurial/templates',

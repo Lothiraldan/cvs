@@ -10,9 +10,11 @@ from node import *
 from i18n import gettext as _
 demandload(globals(), "os re sys signal shutil imp urllib pdb")
 demandload(globals(), "fancyopts ui hg util lock revlog templater bundlerepo")
-demandload(globals(), "fnmatch hgweb mdiff random signal tempfile time")
+demandload(globals(), "fnmatch mdiff random signal tempfile time")
 demandload(globals(), "traceback errno socket version struct atexit sets bz2")
 demandload(globals(), "archival changegroup")
+demandload(globals(), "mercurial.hgweb.server:create_server")
+demandload(globals(), "mercurial.hgweb:hgweb,hgwebdir")
 
 class UnknownCommand(Exception):
     """Exception raised if command is not in the command table."""
@@ -179,39 +181,61 @@ def walkchangerevs(ui, repo, pats, opts):
 
 revrangesep = ':'
 
-def revrange(ui, repo, revs, revlog=None):
-    """Yield revision as strings from a list of revision specifications."""
-    if revlog is None:
-        revlog = repo.changelog
-    revcount = revlog.count()
-    def fix(val, defval):
-        if not val:
-            return defval
+def revfix(repo, val, defval):
+    '''turn user-level id of changeset into rev number.
+    user-level id can be tag, changeset, rev number, or negative rev
+    number relative to number of revs (-1 is tip, etc).'''
+    if not val:
+        return defval
+    try:
+        num = int(val)
+        if str(num) != val:
+            raise ValueError
+        if num < 0:
+            num += repo.changelog.count()
+        if num < 0:
+            num = 0
+        elif num >= repo.changelog.count():
+            raise ValueError
+    except ValueError:
         try:
-            num = int(val)
-            if str(num) != val:
-                raise ValueError
-            if num < 0:
-                num += revcount
-            if num < 0:
-                num = 0
-            elif num >= revcount:
-                raise ValueError
-        except ValueError:
-            try:
-                num = repo.changelog.rev(repo.lookup(val))
-            except KeyError:
-                try:
-                    num = revlog.rev(revlog.lookup(val))
-                except KeyError:
-                    raise util.Abort(_('invalid revision identifier %s'), val)
-        return num
+            num = repo.changelog.rev(repo.lookup(val))
+        except KeyError:
+            raise util.Abort(_('invalid revision identifier %s'), val)
+    return num
+
+def revpair(ui, repo, revs):
+    '''return pair of nodes, given list of revisions. second item can
+    be None, meaning use working dir.'''
+    if not revs:
+        return repo.dirstate.parents()[0], None
+    end = None
+    if len(revs) == 1:
+        start = revs[0]
+        if revrangesep in start:
+            start, end = start.split(revrangesep, 1)
+            start = revfix(repo, start, 0)
+            end = revfix(repo, end, repo.changelog.count() - 1)
+        else:
+            start = revfix(repo, start, None)
+    elif len(revs) == 2:
+        if revrangesep in revs[0] or revrangesep in revs[1]:
+            raise util.Abort(_('too many revisions specified'))
+        start = revfix(repo, revs[0], None)
+        end = revfix(repo, revs[1], None)
+    else:
+        raise util.Abort(_('too many revisions specified'))
+    if end is not None: end = repo.lookup(str(end))
+    return repo.lookup(str(start)), end
+
+def revrange(ui, repo, revs):
+    """Yield revision as strings from a list of revision specifications."""
     seen = {}
     for spec in revs:
         if spec.find(revrangesep) >= 0:
             start, end = spec.split(revrangesep, 1)
-            start = fix(start, 0)
-            end = fix(end, revcount - 1)
+            start = revfix(repo, start, 0)
+            end = revfix(repo, end, repo.changelog.count() - 1)
             step = start > end and -1 or 1
             for rev in xrange(start, end+step, step):
                 if rev in seen:
@@ -219,7 +243,7 @@ def revrange(ui, repo, revs, revlog=None):
                 seen[rev] = 1
                 yield str(rev)
         else:
-            rev = fix(spec, None)
+            rev = revfix(repo, spec, None)
             if rev in seen:
                 continue
             seen[rev] = 1
@@ -1361,15 +1385,7 @@ def diff(ui, repo, *pats, **opts):
     it detects as binary. With -a, diff will generate a diff anyway,
     probably with undesirable results.
     """
-    node1, node2 = None, None
-    revs = [repo.lookup(x) for x in opts['rev']]
-
-    if len(revs) > 0:
-        node1 = revs[0]
-    if len(revs) > 1:
-        node2 = revs[1]
-    if len(revs) > 2:
-        raise util.Abort(_("too many revisions to diff"))
+    node1, node2 = revpair(ui, repo, opts['rev'])
 
     fns, matchfn, anypats = matchpats(repo, pats, opts)
 
@@ -1392,6 +1408,7 @@ def doexport(ui, repo, changeset, seqno, total, revwidth, opts):
 
     fp.write("# HG changeset patch\n")
     fp.write("# User %s\n" % change[1])
+    fp.write("# Date %d %d\n" % change[2])
     fp.write("# Node ID %s\n" % hex(node))
     fp.write("# Parent  %s\n" % hex(prev))
     if len(parents) > 1:
@@ -1687,6 +1704,7 @@ def import_(ui, repo, patch1, *patches, **opts):
 
         message = []
         user = None
+        date = None
         hgpatch = False
         for line in file(pf):
             line = line.rstrip()
@@ -1703,27 +1721,29 @@ def import_(ui, repo, patch1, *patches, **opts):
                 if line.startswith("# User "):
                     user = line[7:]
                     ui.debug(_('User: %s\n') % user)
+                elif line.startswith("# Date "):
+                    date = line[7:]
                 elif not line.startswith("# ") and line:
                     message.append(line)
                     hgpatch = False
             elif line == '# HG changeset patch':
                 hgpatch = True
                 message = []       # We may have collected garbage
-            else:
+            elif message or line:
                 message.append(line)
 
         # make sure message isn't empty
         if not message:
             message = _("imported patch %s\n") % patch
         else:
-            message = "%s\n" % '\n'.join(message)
+            message = '\n'.join(message).rstrip()
         ui.debug(_('message:\n%s\n') % message)
 
         files = util.patch(strip, pf, ui)
 
         if len(files) > 0:
             addremove_lock(ui, repo, files, {})
-        repo.commit(files, message, user)
+        repo.commit(files, message, user, date)
 
 def incoming(ui, repo, source="default", **opts):
     """show new changesets found in source
@@ -2185,34 +2205,42 @@ def remove(ui, repo, *pats, **opts):
     entire project history.  If the files still exist in the working
     directory, they will be deleted from it.  If invoked with --after,
     files that have been manually deleted are marked as removed.
+
+    Modified files and added files are not removed by default.  To
+    remove them, use the -f/--force option.
     """
     names = []
     if not opts['after'] and not pats:
         raise util.Abort(_('no files specified'))
-    def okaytoremove(abs, rel, exact):
-        modified, added, removed, deleted, unknown = repo.changes(files=[abs])
+    files, matchfn, anypats = matchpats(repo, pats, opts)
+    exact = dict.fromkeys(files)
+    mardu = map(dict.fromkeys, repo.changes(files=files, match=matchfn))
+    modified, added, removed, deleted, unknown = mardu
+    remove, forget = [], []
+    for src, abs, rel, exact in walk(repo, pats, opts):
         reason = None
-        if not deleted and opts['after']:
+        if abs not in deleted and opts['after']:
             reason = _('is still present')
-        elif modified and not opts['force']:
-            reason = _('is modified')
-        elif added:
-            reason = _('has been marked for add')
-        elif unknown:
+        elif abs in modified and not opts['force']:
+            reason = _('is modified (use -f to force removal)')
+        elif abs in added:
+            if opts['force']:
+                forget.append(abs)
+                continue
+            reason = _('has been marked for add (use -f to force removal)')
+        elif abs in unknown:
             reason = _('is not managed')
-        elif removed:
-            return False
+        elif abs in removed:
+            continue
         if reason:
             if exact:
                 ui.warn(_('not removing %s: file %s\n') % (rel, reason))
         else:
-            return True
-    for src, abs, rel, exact in walk(repo, pats, opts):
-        if okaytoremove(abs, rel, exact):
             if ui.verbose or not exact:
                 ui.status(_('removing %s\n') % rel)
-            names.append(abs)
-    repo.remove(names, unlink=not opts['after'])
+            remove.append(abs)
+    repo.forget(forget)
+    repo.remove(remove, unlink=not opts['after'])
 
 def rename(ui, repo, *pats, **opts):
     """rename files; equivalent of copy + remove
@@ -2404,7 +2432,7 @@ def rollback(ui, repo):
     repository; for example an in-progress pull from the repository
     may fail if a rollback is performed.
     """
-    repo.undo()
+    repo.rollback()
 
 def root(ui, repo):
     """print the root (top) of the current working dir
@@ -2516,7 +2544,7 @@ def serve(ui, repo, **opts):
         os._exit(0)
 
     try:
-        httpd = hgweb.create_server(ui, repo)
+        httpd = create_server(ui, repo, hgwebdir, hgweb)
     except socket.error, inst:
         raise util.Abort(_('cannot start server: ') + inst.args[1])
 
@@ -2729,7 +2757,7 @@ def undo(ui, repo):
     instructions, see the rollback command.
     """
     ui.warn(_('(the undo command is deprecated; use rollback instead)\n'))
-    repo.undo()
+    repo.rollback()
 
 def update(ui, repo, node=None, merge=False, clean=False, force=None,
            branch=None, **opts):
@@ -3273,12 +3301,13 @@ def dispatch(args):
             external.append(mod)
         except Exception, inst:
             u.warn(_("*** failed to import extension %s: %s\n") % (x[0], inst))
-            if u.traceback:
-                traceback.print_exc()
+            if u.print_exc():
                 return 1
-            continue
 
     for x in external:
+        uisetup = getattr(x, 'uisetup', None)
+        if uisetup:
+            uisetup(u)
         cmdtable = getattr(x, 'cmdtable', {})
         for t in cmdtable:
             if t in table:
@@ -3369,8 +3398,7 @@ def dispatch(args):
             # enter the debugger when we hit an exception
             if options['debugger']:
                 pdb.post_mortem(sys.exc_info()[2])
-            if u.traceback:
-                traceback.print_exc()
+            u.print_exc()
             raise
     except ParseError, inst:
         if inst.args[0]:
