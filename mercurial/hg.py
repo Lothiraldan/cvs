@@ -10,6 +10,7 @@ from repo import *
 from demandload import *
 from i18n import gettext as _
 demandload(globals(), "localrepo bundlerepo httprepo sshrepo statichttprepo")
+demandload(globals(), "os util")
 
 def bundle(ui, path):
     if path.startswith('bundle://'):
@@ -28,6 +29,8 @@ def hg(ui, path):
     return httprepo.httprepository(ui, path.replace("hg://", "http://"))
 
 def local_(ui, path, create=0):
+    if path.startswith('file:'):
+        path = path[5:]
     return localrepo.localrepository(ui, path, create)
 
 def old_http(ui, path):
@@ -40,7 +43,7 @@ def static_http(ui, path):
     return statichttprepo.statichttprepository(
         ui, path.replace("static-http://", "http://"))
 
-protocols = {
+schemes = {
     'bundle': bundle,
     'file': local_,
     'hg': hg,
@@ -49,7 +52,6 @@ protocols = {
     'old-http': old_http,
     'ssh': lambda ui, path: sshrepo.sshrepository(ui, path),
     'static-http': static_http,
-    None: local_,
     }
 
 def repository(ui, path=None, create=0):
@@ -57,14 +59,11 @@ def repository(ui, path=None, create=0):
     if scheme:
         c = scheme.find(':')
         scheme = c >= 0 and scheme[:c]
-    if not scheme: scheme = None
     try:
-        ctor = protocols[scheme]
+        ctor = schemes.get(scheme) or schemes['file']
         if create:
             return ctor(ui, path, create)
         return ctor(ui, path)
-    except KeyError:
-        raise util.Abort(_('protocol "%s" not known') % scheme)
     except TypeError:
         raise util.Abort(_('cannot create new repository over "%s" protocol') %
-                         (scheme or 'file'))
+                         scheme)
