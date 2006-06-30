@@ -1083,6 +1083,7 @@ def init(ui, repo, **opts):
     return 0
 
 def commit(ui, repo, *pats, **opts):
+    """commit changes in the queue repository"""
     q = repomap[repo]
     r = q.qrepo()
     if not r: raise util.Abort('no queue repository')
@@ -1264,7 +1265,7 @@ cmdtable = {
          'hg qimport [-e] [-n NAME] [-f] FILE...'),
     "^qinit":
         (init,
-         [('c', 'create-repo', None, 'create patch repository')],
+         [('c', 'create-repo', None, 'create queue repository')],
          'hg qinit [-c]'),
     "qnew":
         (new,
