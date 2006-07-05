@@ -20,16 +20,22 @@ class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def find_user_password(self, realm, authuri):
         authinfo = urllib2.HTTPPasswordMgrWithDefaultRealm.find_user_password(
             self, realm, authuri)
-        if authinfo != (None, None):
-            return authinfo
+        user, passwd = authinfo
+        if user and passwd:
+            return (user, passwd)
 
         if not self.ui.interactive:
             raise util.Abort(_('http authorization required'))
 
         self.ui.write(_("http authorization required\n"))
         self.ui.status(_("realm: %s\n") % realm)
-        user = self.ui.prompt(_("user:"), default=None)
-        passwd = self.ui.getpass()
+        if user:
+            self.ui.status(_("user: %s\n") % user)
+        else:
+            user = self.ui.prompt(_("user:"), default=None)
+
+        if not passwd:
+            passwd = self.ui.getpass()
 
         self.add_password(realm, authuri, user, passwd)
         return (user, passwd)
@@ -84,6 +90,22 @@ class httpconnection(keepalive.HTTPConnection):
 class httphandler(keepalive.HTTPHandler):
     def http_open(self, req):
         return self.do_open(httpconnection, req)
+
+class httpsconnection(httplib.HTTPSConnection):
+    # must be able to send big bundle as stream.
+
+    def send(self, data):
+        if isinstance(data, str):
+            httplib.HTTPSConnection.send(self, data)
+        else:
+            # if auth required, some data sent twice, so rewind here
+            data.seek(0)
+            for chunk in util.filechunkiter(data):
+                httplib.HTTPSConnection.send(self, chunk)
+
+class httpshandler(urllib2.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(httpsconnection, req)
 
 class httprepository(remoterepository):
     def __init__(self, ui, path):
@@ -148,12 +170,13 @@ class httprepository(remoterepository):
 
         passmgr = passwordmgr(ui)
         if user:
-            ui.debug(_('will use user %s, password %s for http auth\n') %
-                     (user, '*' * len(passwd)))
+            ui.debug(_('http auth: user %s, password %s\n') %
+                     (user, passwd and '*' * len(passwd) or 'not set'))
             passmgr.add_password(None, host, user, passwd or '')
 
         opener = urllib2.build_opener(
             handler,
+            httpshandler(),
             urllib2.HTTPBasicAuthHandler(passmgr),
             urllib2.HTTPDigestAuthHandler(passmgr))
 

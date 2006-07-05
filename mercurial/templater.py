@@ -202,7 +202,7 @@ def fill(text, width):
     if para_re is None:
         para_re = re.compile('(\n\n|\n\\s*[-*]\\s*)', re.M)
         space_re = re.compile(r'  +')
-        
+
     def findparas():
         start = 0
         while True:
@@ -221,9 +221,20 @@ def fill(text, width):
         fp.write(rest)
     return fp.getvalue()
 
+def firstline(text):
+    '''return the first line of text'''
+    try:
+        return text.splitlines(1)[0].rstrip('\r\n')
+    except IndexError:
+        return ''
+
 def isodate(date):
     '''turn a (timestamp, tzoff) tuple into an iso 8631 date and time.'''
     return util.datestr(date, format='%Y-%m-%d %H:%M')
+
+def hgdate(date):
+    '''turn a (timestamp, tzoff) tuple into an hg cset timestamp.'''
+    return "%d %d" % date
 
 def nl2br(text):
     '''replace raw newlines with xhtml line breaks.'''
@@ -280,8 +291,9 @@ common_filters = {
     "escape": lambda x: cgi.escape(x, True),
     "fill68": lambda x: fill(x, width=68),
     "fill76": lambda x: fill(x, width=76),
-    "firstline": lambda x: x.splitlines(1)[0].rstrip('\r\n'),
+    "firstline": firstline,
     "tabindent": lambda x: indent(x, '\t'),
+    "hgdate": hgdate,
     "isodate": isodate,
     "obfuscate": obfuscate,
     "permissions": lambda x: x and "-rwxr-xr-x" or "-rw-r--r--",

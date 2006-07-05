@@ -74,6 +74,8 @@ class localrepository(object):
         self.transhandle = None
 
         if create:
+	    if not os.path.exists(path):
+		os.mkdir(path)
             os.mkdir(self.path)
             os.mkdir(self.join("data"))
 
@@ -1651,8 +1653,8 @@ class localrepository(object):
         linear_path = (pa == p1 or pa == p2)
 
         if allow and linear_path:
-            raise util.Abort(_("there is nothing to merge, "
-                               "just use 'hg update'"))
+            raise util.Abort(_("there is nothing to merge, just use "
+                               "'hg update' or look at 'hg heads'"))
         if allow and not forcemerge:
             if modified or added or removed:
                 raise util.Abort(_("outstanding uncommitted changes"))
