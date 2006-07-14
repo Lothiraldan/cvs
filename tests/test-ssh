@@ -1,0 +1,90 @@
+#!/bin/sh
+
+# This test tries to exercise the ssh functionality with a dummy script
+
+cat <<'EOF' > dummyssh
+#!/bin/sh
+# this attempts to deal with relative pathnames
+cd `dirname $0`
+
+# check for proper args
+if [ $1 != "user@dummy" ] ; then
+	exit -1
+fi
+
+# check that we're in the right directory
+if [ ! -x dummyssh ] ; then
+	exit -1
+fi
+
+echo Got arguments 1:$1 2:$2 3:$3 4:$4 5:$5 >> dummylog
+$2
+EOF
+chmod +x dummyssh
+
+echo "# creating 'remote'"
+hg init remote
+cd remote
+echo this > foo
+hg ci -A -m "init" -d "1000000 0" foo
+
+cd ..
+
+echo "# clone remote via stream"
+hg clone -e ./dummyssh ssh://user@dummy/remote local-stream 2>&1 | \
+  sed -e 's/[0-9][0-9.]*/XXX/g'
+cd local-stream
+hg verify
+cd ..
+
+echo "# clone remote via pull"
+hg clone -e ./dummyssh --pull ssh://user@dummy/remote local
+
+echo "# verify"
+cd local
+hg verify
+
+echo "# empty default pull"
+hg paths
+hg pull -e ../dummyssh
+
+echo "# local change"
+echo bleah > foo
+hg ci -m "add" -d "1000000 0"
+
+echo "# updating rc"
+echo "default-push = ssh://user@dummy/remote" >> .hg/hgrc
+echo "[ui]" >> .hg/hgrc
+echo "ssh = ../dummyssh" >> .hg/hgrc
+
+echo "# find outgoing"
+hg out ssh://user@dummy/remote
+
+echo "# find incoming on the remote side"
+hg incoming -R ../remote -e ../dummyssh ssh://user@dummy/local
+
+echo "# push"
+hg push
+
+cd ../remote
+
+echo "# check remote tip"
+hg tip
+hg verify
+hg cat foo
+
+echo z > z
+hg ci -A -m z -d '1000001 0' z
+
+cd ../local
+echo r > r
+hg ci -A -m z -d '1000002 0' r
+
+echo "# push should fail"
+hg push
+
+echo "# push should succeed"
+hg push -f
+
+cd ..
+cat dummylog
