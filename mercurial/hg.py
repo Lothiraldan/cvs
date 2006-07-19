@@ -74,7 +74,8 @@ def repository(ui, path=None, create=0):
                              scheme)
     return ctor(ui, path)
 
-def clone(ui, source, dest=None, pull=False, rev=None, update=True):
+def clone(ui, source, dest=None, pull=False, rev=None, update=True,
+          stream=False):
     """Make a copy of an existing repository.
 
     Create a copy of an existing repository in a new directory.  The
@@ -95,6 +96,9 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True):
     name of source repository)
 
     pull: always pull from source repository, even in local case
+
+    stream: stream raw data uncompressed from repository (fast over
+    LAN, slow over WAN)
 
     rev: revision to clone up to (implies pull=True)
 
@@ -153,9 +157,9 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True):
         # we lock here to avoid premature writing to the target
         dest_lock = lock.lock(os.path.join(dest_path, ".hg", "lock"))
 
-	# we need to remove the (empty) data dir in dest so copyfiles
-	# can do its work
-	os.rmdir(os.path.join(dest_path, ".hg", "data"))
+        # we need to remove the (empty) data dir in dest so copyfiles
+        # can do its work
+        os.rmdir(os.path.join(dest_path, ".hg", "data"))
         files = "data 00manifest.d 00manifest.i 00changelog.d 00changelog.i"
         for f in files.split():
             src = os.path.join(source, ".hg", f)
@@ -166,8 +170,8 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True):
                 if inst.errno != errno.ENOENT:
                     raise
 
-	# we need to re-init the repo after manually copying the data
-	# into it
+        # we need to re-init the repo after manually copying the data
+        # into it
         dest_repo = repository(ui, dest)
 
     else:
@@ -179,7 +183,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True):
             revs = [src_repo.lookup(r) for r in rev]
 
         if dest_repo.local():
-            dest_repo.pull(src_repo, heads=revs)
+            dest_repo.clone(src_repo, heads=revs, stream=stream)
         elif src_repo.local():
             src_repo.push(dest_repo, revs=revs)
         else:

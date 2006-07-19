@@ -171,7 +171,7 @@ function! s:HGCreateCommandBuffer(cmd, cmdName, statusText, origBuffNR)
   endif
 
   let hgCommand = s:HGGetOption("HGCommandHGExec", "hg") . " " . a:cmd
-  echomsg "DBG :".hgCommand
+  "echomsg "DBG :".hgCommand
   let hgOut = system(hgCommand)
   " HACK:  diff command does not return proper error codes
   if v:shell_error && a:cmdName != 'hgdiff'
@@ -315,18 +315,27 @@ endfunction
 
 function! s:HGGetStatusVars(revisionVar, branchVar, repositoryVar)
   let hgBufferCheck=s:HGCurrentBufferCheck()
+  "echomsg "DBG : in HGGetStatusVars"
   if hgBufferCheck == -1 
     return ""
   endif
   let fileName=bufname(hgBufferCheck)
-  let realFileName = fnamemodify(s:HGResolveLink(fileName), ':t')
-  let oldCwd=s:HGChangeToCurrentFileDir(fileName)
+  let fileNameWithoutLink=s:HGResolveLink(fileName)
+  let realFileName = fnamemodify(fileNameWithoutLink, ':t')
+  let oldCwd=s:HGChangeToCurrentFileDir(realFileName)
   try
-     ""TODO
-    "if !filereadable('HG/Root')
-      "return ""
-    "endif
-    let hgCommand = s:HGGetOption("HGCommandHGExec", "hg") . " status -mardui " . fileName
+    let hgCommand = s:HGGetOption("HGCommandHGExec", "hg") . " root  " 
+    let roottext=system(hgCommand)
+    " Suppress ending null char ! Does it work in window ?
+    let roottext=substitute(roottext,'^.*/\([^/\n\r]*\)\n\_.*$','\1','')
+    if match(getcwd()."/".fileNameWithoutLink, roottext) == -1
+      return ""
+    endif
+    let returnExpression = ""
+    if a:repositoryVar != ""
+      let returnExpression=returnExpression . " | let " . a:repositoryVar . "='" . roottext . "'"
+    endif
+    let hgCommand = s:HGGetOption("HGCommandHGExec", "hg") . " status -mardui " . realFileName
     let statustext=system(hgCommand)
     if(v:shell_error)
       return ""
@@ -339,32 +348,23 @@ function! s:HGGetStatusVars(revisionVar, branchVar, repositoryVar)
       let revision="DELETED"
     elseif match(statustext, '^[A]') >= 0 
       let revision="ADDED"
-    endif
-
-    let hgCommand = s:HGGetOption("HGCommandHGExec", "hg") . " parents -b  " 
-    let statustext=system(hgCommand)
-    if(v:shell_error)
-        return ""
-    endif
-    if exists('revision')
-      let returnExpression = "let " . a:revisionVar . "='" . revision . "'"
     else
+      " The file is tracked, we can try to get is revision number
+      let hgCommand = s:HGGetOption("HGCommandHGExec", "hg") . " parents -b  " 
+      let statustext=system(hgCommand)
+      if(v:shell_error)
+	  return ""
+      endif
       let revision=substitute(statustext, '^changeset:\s*\(\d\+\):.*\_$\_.*$', '\1', "")
-      let returnExpression = "let " . a:revisionVar . "='" . revision . "'"
-    endif
 
-    if a:branchVar != "" && match(statustext, '^\_.*\_^branch:') >= 0
-      let branch=substitute(statustext, '^\_.*\_^branch:\s*\(\S\+\)\n\_.*$', '\1', "")
-      let returnExpression=returnExpression . " | let " . a:branchVar . "='" . branch . "'"
+      if a:branchVar != "" && match(statustext, '^\_.*\_^branch:') >= 0
+	let branch=substitute(statustext, '^\_.*\_^branch:\s*\(\S\+\)\n\_.*$', '\1', "")
+	let returnExpression=returnExpression . " | let " . a:branchVar . "='" . branch . "'"
+      endif
     endif
-    if a:repositoryVar != ""
-      let hgCommand = s:HGGetOption("HGCommandHGExec", "hg") . " root  " 
-      let roottext=system(hgCommand)
-      let repository=substitute(roottext,'^.*/\([^/\n\r]*\)\n\_.*$','\1','')
-      let returnExpression=returnExpression . " | let " . a:repositoryVar . "='" . repository . "'"
+    if (exists('revision'))
+      let returnExpression = "let " . a:revisionVar . "='" . revision . "' " . returnExpression
     endif
-
-
 
     return returnExpression
   finally
@@ -432,6 +432,11 @@ function! s:HGMarkOrigBufferForSetup(hgBuffer)
     if origBuffer != a:hgBuffer
       call setbufvar(origBuffer, "HGBufferSetup", 0)
     endif
+  else
+    "We are presumably in the original buffer
+    let b:HGBufferSetup = 0
+    "We do the setup now as now event will be triggered allowing it later.
+    call s:HGSetupBuffer()
   endif
   return a:hgBuffer
 endfunction
@@ -608,6 +613,7 @@ function! HGEnableBufferSetup()
   augroup HGCommandPlugin
     au!
     au BufEnter * call s:HGSetupBuffer()
+    au BufWritePost * call s:HGSetupBuffer()
     " Force resetting up buffer on external file change (HG update)
     au FileChangedShell * call s:HGSetupBuffer(1)
   augroup END
@@ -686,7 +692,7 @@ function! s:HGAnnotate(...)
   endif
 
   let resultBuffer=s:HGDoCommand('annotate -ndu -r ' . revision, 'hgannotate', revision) 
-  echomsg "DBG: ".resultBuffer
+  "echomsg "DBG: ".resultBuffer
   if resultBuffer !=  -1
     set filetype=HGAnnotate
   endif
@@ -754,8 +760,7 @@ function! s:HGCommit(...)
           \ ':call <SID>HGFinishCommit("' . messageFileName . '",' .
           \                             '"' . newCwd . '",' .
           \                             '"' . realFileName . '",' .
-          \                             hgBufferCheck . ')<CR>'.
-          \ ':call <SID>HGBufferSetup(1)<CR>'
+          \                             hgBufferCheck . ')<CR>'
 
     silent 0put ='HG: ----------------------------------------------------------------------'
     silent put =\"HG: Enter Log.  Lines beginning with `HG:' are removed automatically\"
@@ -840,7 +845,7 @@ function! s:HGFinishCommit(messageFile, targetDir, targetFile, origBuffNR)
     if strlen(a:targetDir) > 0
       execute 'cd' escape(a:targetDir, ' ')
     endif
-    let resultBuffer=s:HGCreateCommandBuffer('commit -F "' . a:messageFile . '" "'. a:targetFile . '"', 'hgcommit', '', a:origBuffNR)
+    let resultBuffer=s:HGCreateCommandBuffer('commit -l "' . a:messageFile . '" "'. a:targetFile . '"', 'hgcommit', '', a:origBuffNR)
     execute 'cd' escape(oldCwd, ' ')
     execute 'bw' escape(a:messageFile, ' *?\')
     silent execute 'call delete("' . a:messageFile . '")'
@@ -908,7 +913,6 @@ endfunction
 " Function: s:HGUpdate() {{{2
 function! s:HGUpdate()
   return s:HGMarkOrigBufferForSetup(s:HGDoCommand('update', 'update', ''))
-  call s:HGSetupBuffer(1)
 endfunction
 
 " Function: s:HGVimDiff(...) {{{2
@@ -1672,6 +1676,11 @@ HGVimDiffFinish		This event is fired just after the HGVimDiff command
    when the scratch buffer containing the other version is destroyed.  There 
    may still be bugs in here, depending on many configuration details.
 
+==============================================================================
+
+9. TODO  						      *hgcommand-todo*
+
+   Integrate symlink tracking once HG will support them.
 ==============================================================================
 === END_DOC
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""

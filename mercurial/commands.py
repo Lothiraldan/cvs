@@ -869,11 +869,22 @@ def backout(ui, repo, rev, **opts):
     if op2 != nullid:
         raise util.Abort(_('outstanding uncommitted merge'))
     node = repo.lookup(rev)
-    parent, p2 = repo.changelog.parents(node)
-    if parent == nullid:
+    p1, p2 = repo.changelog.parents(node)
+    if p1 == nullid:
         raise util.Abort(_('cannot back out a change with no parents'))
     if p2 != nullid:
-        raise util.Abort(_('cannot back out a merge'))
+        if not opts['parent']:
+            raise util.Abort(_('cannot back out a merge changeset without '
+                               '--parent'))
+        p = repo.lookup(opts['parent'])
+        if p not in (p1, p2):
+            raise util.Abort(_('%s is not a parent of %s' %
+                               (short(p), short(node))))
+        parent = p
+    else:
+        if opts['parent']:
+            raise util.Abort(_('cannot use --parent on non-merge changeset'))
+        parent = p1
     repo.update(node, force=True, show_stats=False)
     revert_opts = opts.copy()
     revert_opts['rev'] = hex(parent)
@@ -963,6 +974,7 @@ def clone(ui, source, dest=None, **opts):
     ui.setconfig_remoteopts(**opts)
     hg.clone(ui, ui.expandpath(source), dest,
              pull=opts['pull'],
+             stream=opts['uncompressed'],
              rev=opts['rev'],
              update=not opts['noupdate'])
 
@@ -2612,6 +2624,7 @@ def status(ui, repo, *pats, **opts):
     ! = deleted, but still tracked
     ? = not tracked
     I = ignored (not shown by default)
+      = the previous added file was copied from here
     """
 
     show_ignored = opts['ignored'] and True or False
@@ -2640,6 +2653,9 @@ def status(ui, repo, *pats, **opts):
 
         for f in changes:
             ui.write(format % f)
+            if (opts.get('copies') and not opts.get('no_status')
+                and opt == 'added' and repo.dirstate.copies.has_key(f)):
+                ui.write('  %s%s' % (repo.dirstate.copies[f], end))
 
 def tag(ui, repo, name, rev_=None, **opts):
     """add a tag for the current tip or a given revision
@@ -2847,6 +2863,7 @@ table = {
           ('m', 'message', '', _('use <text> as commit message')),
           ('l', 'logfile', '', _('read commit message from <file>')),
           ('d', 'date', '', _('record datecode as commit date')),
+          ('', 'parent', '', _('parent to choose when backing out merge')),
           ('u', 'user', '', _('record user as committer')),
           ('I', 'include', [], _('include names matching the given patterns')),
           ('X', 'exclude', [], _('exclude names matching the given patterns'))],
@@ -2869,6 +2886,8 @@ table = {
           ('r', 'rev', [],
            _('a changeset you would like to have after cloning')),
           ('', 'pull', None, _('use pull protocol to copy metadata')),
+          ('', 'uncompressed', None,
+           _('use uncompressed transfer (fast over LAN)')),
           ('e', 'ssh', '', _('specify ssh command to use')),
           ('', 'remotecmd', '',
            _('specify hg command to run on the remote side'))],
@@ -3127,6 +3146,7 @@ table = {
           ('u', 'unknown', None, _('show only unknown (not tracked) files')),
           ('i', 'ignored', None, _('show ignored files')),
           ('n', 'no-status', None, _('hide status prefix')),
+          ('C', 'copies', None, _('show source of copied files')),
           ('0', 'print0', None,
            _('end filenames with NUL, for use with xargs')),
           ('I', 'include', [], _('include names matching the given patterns')),
