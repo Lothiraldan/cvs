@@ -1,0 +1,26 @@
+#header#
+<div class="page_nav">
+<a href="{url}summary{getentries}">summary</a> |
+<a href="{url}shortlog{getentries}">shortlog</a> |
+<a href="{url}log{getentries}">changelog</a> |
+<a href="{url}tags{getentries}">tags</a> |
+<a href="{url}file/#node|short#{getentries}">manifest</a><br/>
+</div>
+
+<h2>searching for #query|escape#</h2>
+
+<form action="{url}log">
+search:
+<input type="hidden" name="style" value="gitweb">
+<input name="rev" type="text" width="30" value="#query|escape#">
+</form>
+
+#entries#
+
+<form action="{url}log">
+search:
+<input type="hidden" name="style" value="gitweb">
+<input name="rev" type="text" width="30">
+</form>
+
+#footer#
