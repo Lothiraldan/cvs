@@ -287,7 +287,8 @@ def make_filename(repo, pat, node,
         if node:
             expander.update(node_expander)
         if node and revwidth is not None:
-            expander['r'] = lambda: str(r.rev(node)).zfill(revwidth)
+            expander['r'] = (lambda:
+                    str(repo.changelog.rev(node)).zfill(revwidth))
         if total is not None:
             expander['N'] = lambda: str(total)
         if seqno is not None:
@@ -1758,7 +1759,7 @@ def import_(ui, repo, patch1, *patches, **opts):
             if user:
                 ui.debug('From: %s\n' % user)
             diffs_seen = 0
-            ok_types = ('text/plain', 'text/x-patch')
+            ok_types = ('application/x-patch', 'text/plain', 'text/x-patch')
             for part in msg.walk():
                 content_type = part.get_content_type()
                 ui.debug('Content-Type: %s\n' % content_type)
