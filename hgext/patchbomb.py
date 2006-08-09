@@ -38,12 +38,14 @@
 # from = My Name <my@email>
 # to = recipient1, recipient2, ...
 # cc = cc1, cc2, ...
+# bcc = bcc1, bcc2, ...
 
 from mercurial.demandload import *
 demandload(globals(), '''email.MIMEMultipart email.MIMEText email.Utils
                          mercurial:commands,hg,ui
                          os errno popen2 socket sys tempfile time''')
 from mercurial.i18n import gettext as _
+from mercurial.node import *
 
 try:
     # readline gives raw_input editing capabilities, but is not
@@ -129,8 +131,26 @@ def patchbomb(ui, repo, *revs, **opts):
             while patch and not patch[0].strip(): patch.pop(0)
         if opts['diffstat']:
             body += cdiffstat('\n'.join(desc), patch) + '\n\n'
-        body += '\n'.join(patch)
-        msg = email.MIMEText.MIMEText(body)
+        if opts['attach']:
+            msg = email.MIMEMultipart.MIMEMultipart()
+            if body: msg.attach(email.MIMEText.MIMEText(body, 'plain'))
+            p = email.MIMEText.MIMEText('\n'.join(patch), 'x-patch')
+            binnode = bin(node)
+            # if node is mq patch, it will have patch file name as tag
+            patchname = [t for t in repo.nodetags(binnode)
+                         if t.endswith('.patch') or t.endswith('.diff')]
+            if patchname:
+                patchname = patchname[0]
+            elif total > 1:
+                patchname = commands.make_filename(repo, '%b-%n.patch',
+                                                   binnode, idx, total)
+            else:
+                patchname = commands.make_filename(repo, '%b.patch', binnode)
+            p['Content-Disposition'] = 'inline; filename=' + patchname
+            msg.attach(p)
+        else:
+            body += '\n'.join(patch)
+            msg = email.MIMEText.MIMEText(body)
         if total == 1:
             subj = '[PATCH] ' + desc[0].strip()
         else:
@@ -185,11 +205,14 @@ def patchbomb(ui, repo, *revs, **opts):
     to = getaddrs('to', 'To')
     cc = getaddrs('cc', 'Cc', '')
 
+    bcc = opts['bcc'] or (ui.config('email', 'bcc') or
+                          ui.config('patchbomb', 'bcc') or '').split(',')
+    bcc = [a.strip() for a in bcc if a.strip()]
+
     if len(patches) > 1:
         ui.write(_('\nWrite the introductory message for the patch series.\n\n'))
 
-        msg = email.MIMEMultipart.MIMEMultipart()
-        msg['Subject'] = '[PATCH 0 of %d] %s' % (
+        subj = '[PATCH 0 of %d] %s' % (
             len(patches),
             opts['subject'] or
             prompt('Subject:', rest = ' [PATCH 0 of %d] ' % len(patches)))
@@ -204,11 +227,14 @@ def patchbomb(ui, repo, *revs, **opts):
             if l == '.': break
             body.append(l)
 
-        msg.attach(email.MIMEText.MIMEText('\n'.join(body) + '\n'))
-
         if opts['diffstat']:
             d = cdiffstat(_('Final summary:\n'), jumbo)
-            if d: msg.attach(email.MIMEText.MIMEText(d))
+            if d: body.append('\n' + d)
+
+        body = '\n'.join(body) + '\n'
+
+        msg = email.MIMEText.MIMEText(body)
+        msg['Subject'] = subj
 
         msgs.insert(0, msg)
 
@@ -240,7 +266,8 @@ def patchbomb(ui, repo, *revs, **opts):
         start_time += 1
         m['From'] = sender
         m['To'] = ', '.join(to)
-        if cc: m['Cc'] = ', '.join(cc)
+        if cc: m['Cc']  = ', '.join(cc)
+        if bcc: m['Bcc'] = ', '.join(bcc)
         if opts['test']:
             ui.status('Displaying ', m['Subject'], ' ...\n')
             fp = os.popen(os.getenv('PAGER', 'more'), 'w')
@@ -261,12 +288,16 @@ def patchbomb(ui, repo, *revs, **opts):
             fp.close()
         else:
             ui.status('Sending ', m['Subject'], ' ...\n')
-            mail.sendmail(sender, to + cc, m.as_string(0))
+            # Exim does not remove the Bcc field
+            del m['Bcc']
+            mail.sendmail(sender, to + bcc + cc, m.as_string(0))
 
 cmdtable = {
     'email':
     (patchbomb,
-     [('c', 'cc', [], 'email addresses of copy recipients'),
+     [('a', 'attach', None, 'send patches as inline attachments'),
+      ('', 'bcc', [], 'email addresses of blind copy recipients'),
+      ('c', 'cc', [], 'email addresses of copy recipients'),
       ('d', 'diffstat', None, 'add diffstat output to messages'),
       ('f', 'from', '', 'email address of sender'),
       ('', 'plain', None, 'omit hg patch header'),

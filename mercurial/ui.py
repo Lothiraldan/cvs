@@ -197,7 +197,7 @@ class ui(object):
             user = os.environ.get("EMAIL")
         if user is None:
             try:
-                user = '%s@%s' % (getpass.getuser(), socket.getfqdn())
+                user = '%s@%s' % (util.getuser(), socket.getfqdn())
             except KeyError:
                 raise util.Abort(_("Please specify a username."))
         return user
@@ -209,19 +209,13 @@ class ui(object):
 
     def expandpath(self, loc, default=None):
         """Return repository location relative to cwd or from [paths]"""
-        if "://" in loc or os.path.exists(loc):
+        if "://" in loc or os.path.isdir(loc):
             return loc
 
         path = self.config("paths", loc)
         if not path and default is not None:
             path = self.config("paths", default)
         return path or loc
-
-    def setconfig_remoteopts(self, **opts):
-        if opts.get('ssh'):
-            self.setconfig("ui", "ssh", opts['ssh'])
-        if opts.get('remotecmd'):
-            self.setconfig("ui", "remotecmd", opts['remotecmd'])
 
     def write(self, *args):
         if self.header:

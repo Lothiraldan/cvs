@@ -8,7 +8,7 @@
 from demandload import demandload
 from i18n import gettext as _
 from node import *
-demandload(globals(), "os sys tempfile util")
+demandload(globals(), "os streamclone sys tempfile util")
 
 class sshserver(object):
     def __init__(self, ui, repo):
@@ -60,8 +60,10 @@ class sshserver(object):
         capabilities: space separated list of tokens
         '''
 
-        r = "capabilities: unbundle\n"
-        self.respond(r)
+        caps = ['unbundle']
+        if self.ui.configbool('server', 'uncompressed'):
+            caps.append('stream=%d' % self.repo.revlogversion)
+        self.respond("capabilities: %s\n" % (' '.join(caps),))
 
     def do_lock(self):
         '''DEPRECATED - allowing remote client to lock repo is not safe'''
@@ -115,9 +117,13 @@ class sshserver(object):
             return
 
         self.respond("")
-        r = self.repo.addchangegroup(self.fin, 'serve')
+        r = self.repo.addchangegroup(self.fin, 'serve', self.client_url())
         self.respond(str(r))
 
+    def client_url(self):
+        client = os.environ.get('SSH_CLIENT', '').split(' ', 1)[0]
+        return 'remote:ssh:' + client
+        
     def do_unbundle(self):
         their_heads = self.getarg()[1].split()
 
@@ -157,7 +163,7 @@ class sshserver(object):
                 # push can proceed
 
                 fp.seek(0)
-                r = self.repo.addchangegroup(fp, 'serve')
+                r = self.repo.addchangegroup(fp, 'serve', self.client_url())
                 self.respond(str(r))
             finally:
                 if not was_locked:
@@ -167,3 +173,5 @@ class sshserver(object):
             fp.close()
             os.unlink(tempname)
 
+    def do_stream_out(self):
+        streamclone.stream_out(self.repo, self.fout)

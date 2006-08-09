@@ -469,7 +469,8 @@ class revlog(object):
             return self.nodemap[node]
         except KeyError:
             raise RevlogError(_('%s: no node %s') % (self.indexfile, hex(node)))
-    def linkrev(self, node): return self.index[self.rev(node)][-4]
+    def linkrev(self, node):
+        return (node == nullid) and -1 or self.index[self.rev(node)][-4]
     def parents(self, node):
         if node == nullid: return (nullid, nullid)
         r = self.rev(node)
@@ -743,13 +744,8 @@ class revlog(object):
 
     def lookup(self, id):
         """locate a node based on revision number or subset of hex nodeid"""
-        if id in self.nodemap:
-            return id
         if type(id) == type(0):
-            rev = id
-            if rev < 0: rev = self.count() + rev
-            if rev < 0 or rev >= self.count(): return None
-            return self.node(rev)
+            return self.node(id)
         try:
             rev = int(id)
             if str(rev) != id: raise ValueError
@@ -762,10 +758,13 @@ class revlog(object):
                 if hex(n).startswith(id):
                     c.append(n)
             if len(c) > 1: raise RevlogError(_("Ambiguous identifier"))
-            if len(c) < 1: raise RevlogError(_("No match found"))
-            return c[0]
+            if len(c) == 1: return c[0]
 
-        return None
+        # might need fixing if we change hash lengths
+        if len(id) == 20 and id in self.nodemap:
+            return id
+
+        raise RevlogError(_("No match found"))
 
     def diff(self, a, b):
         """return a delta between two revisions"""
