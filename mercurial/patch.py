@@ -1,5 +1,7 @@
 # patch.py - patch file parsing routines
 #
+# Copyright 2006 Brendan Cully <brendan@kublai.com>
+#
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
