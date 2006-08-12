@@ -10,7 +10,7 @@ from node import *
 from i18n import gettext as _
 demandload(globals(), "os re sys signal shutil imp urllib pdb")
 demandload(globals(), "fancyopts ui hg util lock revlog templater bundlerepo")
-demandload(globals(), "fnmatch mdiff patch random signal tempfile time")
+demandload(globals(), "fnmatch mdiff difflib patch random signal tempfile time")
 demandload(globals(), "traceback errno socket version struct atexit sets bz2")
 demandload(globals(), "archival cStringIO changegroup")
 demandload(globals(), "hgweb.server sshserver")
@@ -1644,42 +1644,56 @@ def grep(ui, repo, pattern, *pats, **opts):
             self.linenum = linenum
             self.colstart = colstart
             self.colend = colend
+
         def __eq__(self, other):
             return self.line == other.line
-        def __hash__(self):
-            return hash(self.line)
 
     matches = {}
+    copies = {}
     def grepbody(fn, rev, body):
-        matches[rev].setdefault(fn, {})
+        matches[rev].setdefault(fn, [])
         m = matches[rev][fn]
         for lnum, cstart, cend, line in matchlines(body):
             s = linestate(line, lnum, cstart, cend)
-            m[s] = s
+            m.append(s)
 
-    # FIXME: prev isn't used, why ?
+    def difflinestates(a, b):
+        sm = difflib.SequenceMatcher(None, a, b)
+        for tag, alo, ahi, blo, bhi in sm.get_opcodes():
+            if tag == 'insert':
+                for i in range(blo, bhi):
+                    yield ('+', b[i])
+            elif tag == 'delete':
+                for i in range(alo, ahi):
+                    yield ('-', a[i])
+            elif tag == 'replace':
+                for i in range(alo, ahi):
+                    yield ('-', a[i])
+                for i in range(blo, bhi):
+                    yield ('+', b[i])
+
     prev = {}
     ucache = {}
     def display(fn, rev, states, prevstates):
-        diff = list(sets.Set(states).symmetric_difference(sets.Set(prevstates)))
-        diff.sort(lambda x, y: cmp(x.linenum, y.linenum))
         counts = {'-': 0, '+': 0}
         filerevmatches = {}
-        for l in diff:
+        if incrementing or not opts['all']:
+            a, b = prevstates, states
+        else:
+            a, b = states, prevstates
+        for change, l in difflinestates(a, b):
             if incrementing or not opts['all']:
-                change = ((l in prevstates) and '-') or '+'
                 r = rev
             else:
-                change = ((l in states) and '-') or '+'
                 r = prev[fn]
-            cols = [fn, str(rev)]
+            cols = [fn, str(r)]
             if opts['line_number']:
                 cols.append(str(l.linenum))
             if opts['all']:
                 cols.append(change)
             if opts['user']:
-                cols.append(trimuser(ui, getchange(rev)[1], rev,
-                                                  ucache))
+                cols.append(trimuser(ui, getchange(r)[1], rev,
+                                     ucache))
             if opts['files_with_matches']:
                 c = (fn, rev)
                 if c in filerevmatches:
@@ -1696,10 +1710,12 @@ def grep(ui, repo, pattern, *pats, **opts):
     changeiter, getchange, matchfn = walkchangerevs(ui, repo, pats, opts)
     count = 0
     incrementing = False
+    follow = opts.get('follow')
     for st, rev, fns in changeiter:
         if st == 'window':
             incrementing = rev
             matches.clear()
+            copies.clear()
         elif st == 'add':
             change = repo.changelog.read(repo.lookup(str(rev)))
             mf = repo.manifest.read(change[0])
@@ -1708,22 +1724,34 @@ def grep(ui, repo, pattern, *pats, **opts):
                 if fn in skip:
                     continue
                 fstate.setdefault(fn, {})
+                copies.setdefault(rev, {})
                 try:
                     grepbody(fn, rev, getfile(fn).read(mf[fn]))
+                    if follow:
+                        copied = getfile(fn).renamed(mf[fn])
+                        if copied:
+                            copies[rev][fn] = copied[0]
                 except KeyError:
                     pass
         elif st == 'iter':
             states = matches[rev].items()
             states.sort()
             for fn, m in states:
+                copy = copies[rev].get(fn)
                 if fn in skip:
+                    if copy:
+                        skip[copy] = True
                     continue
                 if incrementing or not opts['all'] or fstate[fn]:
                     pos, neg = display(fn, rev, m, fstate[fn])
                     count += pos + neg
                     if pos and not opts['all']:
                         skip[fn] = True
+                        if copy:
+                            skip[copy] = True
                 fstate[fn] = m
+                if copy:
+                    fstate[copy] = m
                 prev[fn] = rev
 
     if not incrementing:
@@ -1732,7 +1760,8 @@ def grep(ui, repo, pattern, *pats, **opts):
         for fn, state in fstate:
             if fn in skip:
                 continue
-            display(fn, rev, {}, state)
+            if fn not in copies[prev[fn]]:
+                display(fn, rev, {}, state)
     return (count == 0 and 1) or 0
 
 def heads(ui, repo, **opts):
@@ -3061,6 +3090,8 @@ table = {
         (grep,
          [('0', 'print0', None, _('end fields with NUL')),
           ('', 'all', None, _('print all revisions that match')),
+          ('f', 'follow', None,
+           _('follow changeset history, or file history across copies and renames')),
           ('i', 'ignore-case', None, _('ignore case when matching')),
           ('l', 'files-with-matches', None,
            _('print only filenames and revs that match')),
