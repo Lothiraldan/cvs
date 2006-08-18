@@ -400,39 +400,15 @@ class queue:
         '''Apply patchfile  to the working directory.
         patchfile: file name of patch'''
         try:
-            pp = util.find_in_path('gpatch', os.environ.get('PATH', ''), 'patch')
-            f = os.popen("%s -d %s -p1 --no-backup-if-mismatch < %s" %
-                         (pp, util.shellquote(repo.root), util.shellquote(patchfile)))
-        except:
-            self.ui.warn("patch failed, unable to continue (try -v)\n")
-            return (None, [], False)
-        files = []
-        fuzz = False
-        for l in f:
-            l = l.rstrip('\r\n');
-            if self.ui.verbose:
-                self.ui.warn(l + "\n")
-            if l[:14] == 'patching file ':
-                pf = os.path.normpath(util.parse_patch_output(l))
-                if pf not in files:
-                    files.append(pf)
-                printed_file = False
-                file_str = l
-            elif l.find('with fuzz') >= 0:
-                if not printed_file:
-                    self.ui.warn(file_str + '\n')
-                    printed_file = True
-                self.ui.warn(l + '\n')
-                fuzz = True
-            elif l.find('saving rejects to file') >= 0:
-                self.ui.warn(l + '\n')
-            elif l.find('FAILED') >= 0:
-                if not printed_file:
-                    self.ui.warn(file_str + '\n')
-                    printed_file = True
-                self.ui.warn(l + '\n')
+            (files, fuzz) = patch.patch(patchfile, self.ui, strip=1,
+                                        cwd=repo.root)
+        except Exception, inst:
+            self.ui.note(str(inst) + '\n')
+            if not self.ui.verbose:
+                self.ui.warn("patch failed, unable to continue (try -v)\n")
+            return (False, [], False)
 
-        return (not f.close(), files, fuzz)
+        return (True, files.keys(), fuzz)
 
     def apply(self, repo, series, list=False, update_status=True,
               strict=False, patchdir=None, merge=None, wlock=None):
@@ -506,21 +482,28 @@ class queue:
         tr.close()
         return (err, n)
 
-    def delete(self, repo, patch, force=False):
-        patch = self.lookup(patch, strict=True)
-        info = self.isapplied(patch)
-        if info:
-            raise util.Abort(_("cannot delete applied patch %s") % patch)
-        if patch not in self.series:
-            raise util.Abort(_("patch %s not in series file") % patch)
-        if force:
+    def delete(self, repo, patches, keep=False):
+        realpatches = []
+        for patch in patches:
+            patch = self.lookup(patch, strict=True)
+            info = self.isapplied(patch)
+            if info:
+                raise util.Abort(_("cannot delete applied patch %s") % patch)
+            if patch not in self.series:
+                raise util.Abort(_("patch %s not in series file") % patch)
+            realpatches.append(patch)
+
+        if not keep:
             r = self.qrepo()
             if r:
-                r.remove([patch], True)
+                r.remove(realpatches, True)
             else:
                 os.unlink(self.join(patch))
-        i = self.find_series(patch)
-        del self.full_series[i]
+
+        indices = [self.find_series(p) for p in realpatches]
+        indices.sort()
+        for i in indices[-1::-1]:
+            del self.full_series[i]
         self.parse_series()
         self.series_dirty = 1
 
@@ -1300,13 +1283,13 @@ class queue:
         if qrepo:
             qrepo.add(added)
 
-def delete(ui, repo, patch, **opts):
-    """remove a patch from the series file
+def delete(ui, repo, patch, *patches, **opts):
+    """remove patches from queue
 
-    The patch must not be applied.
-    With -f, deletes the patch file as well as the series entry."""
+    The patches must not be applied.
+    With -k, the patch files are preserved in the patch directory."""
     q = repo.mq
-    q.delete(repo, patch, force=opts.get('force'))
+    q.delete(repo, (patch,) + patches, keep=opts.get('keep'))
     q.save_dirty()
     return 0
 
@@ -1464,7 +1447,7 @@ def fold(ui, repo, *files, **opts):
     applied to the current patch in the order given. If all the
     patches apply successfully, the current patch will be refreshed
     with the new cumulative patch, and the folded patches will
-    be deleted. With -f/--force, the folded patch files will
+    be deleted. With -k/--keep, the folded patch files will not
     be removed afterwards.
 
     The header for each folded patch will be concatenated with
@@ -1514,7 +1497,7 @@ def fold(ui, repo, *files, **opts):
     q.refresh(repo, msg=message)
 
     for patch in patches:
-        q.delete(repo, patch, force=opts['force'])
+        q.delete(repo, patch, keep=opts['keep'])
 
     q.save_dirty()
 
@@ -1903,14 +1886,14 @@ cmdtable = {
          commands.table["^commit|ci"][1],
          'hg qcommit [OPTION]... [FILE]...'),
     "^qdiff": (diff, [], 'hg qdiff [FILE]...'),
-    "qdelete":
+    "qdelete|qremove|qrm":
         (delete,
-         [('f', 'force', None, _('delete patch file'))],
-          'hg qdelete [-f] PATCH'),
+         [('k', 'keep', None, _('keep patch file'))],
+          'hg qdelete [-k] PATCH'),
     'qfold':
         (fold,
          [('e', 'edit', None, _('edit patch header')),
-          ('f', 'force', None, _('delete folded patch files')),
+          ('k', 'keep', None, _('keep folded patch files')),
           ('m', 'message', '', _('set patch header to <text>')),
           ('l', 'logfile', '', _('set patch header to contents of <file>'))],
          'hg qfold [-e] [-m <text>] [-l <file] PATCH...'),
