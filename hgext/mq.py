@@ -31,8 +31,9 @@ refresh contents of top applied patch     qrefresh
 
 from mercurial.demandload import *
 from mercurial.i18n import gettext as _
+from mercurial import commands
 demandload(globals(), "os sys re struct traceback errno bz2")
-demandload(globals(), "mercurial:cmdutil,commands,hg,patch,revlog,ui,util")
+demandload(globals(), "mercurial:cmdutil,hg,patch,revlog,ui,util")
 
 commands.norepo += " qclone qversion"
 
@@ -915,7 +916,7 @@ class queue:
     def refresh(self, repo, pats=None, **opts):
         if len(self.applied) == 0:
             self.ui.write("No patches applied\n")
-            return
+            return 1
         wlock = repo.wlock()
         self.check_toppatch(repo)
         (top, patch) = (self.applied[-1].rev, self.applied[-1].name)
@@ -1237,11 +1238,13 @@ class queue:
             self.ui.write(p + '\n')
         else:
             self.ui.write("No patches applied\n")
+            return 1
 
     def next(self, repo):
         end = self.series_end()
         if end == len(self.series):
             self.ui.write("All patches applied\n")
+            return 1
         else:
             p = self.series[end]
             if self.ui.verbose:
@@ -1254,8 +1257,10 @@ class queue:
             self.ui.write(p + '\n')
         elif len(self.applied) == 1:
             self.ui.write("Only one patch applied\n")
+            return 1
         else:
             self.ui.write("No patches applied\n")
+            return 1
 
     def qimport(self, repo, files, patch=None, existing=None, force=None):
         if len(files) > 1 and patch:
@@ -1402,18 +1407,15 @@ def series(ui, repo, **opts):
 
 def top(ui, repo, **opts):
     """print the name of the current patch"""
-    repo.mq.top(repo)
-    return 0
+    return repo.mq.top(repo)
 
 def next(ui, repo, **opts):
     """print the name of the next patch"""
-    repo.mq.next(repo)
-    return 0
+    return repo.mq.next(repo)
 
 def prev(ui, repo, **opts):
     """print the name of the previous patch"""
-    repo.mq.prev(repo)
-    return 0
+    return repo.mq.prev(repo)
 
 def new(ui, repo, patch, **opts):
     """create a new patch
@@ -1449,9 +1451,9 @@ def refresh(ui, repo, *pats, **opts):
         patch = q.applied[-1].name
         (message, comment, user, date, hasdiff) = q.readheaders(patch)
         message = ui.edit('\n'.join(message), user or ui.username())
-    q.refresh(repo, pats, msg=message, **opts)
+    ret = q.refresh(repo, pats, msg=message, **opts)
     q.save_dirty()
-    return 0
+    return ret
 
 def diff(ui, repo, *pats, **opts):
     """diff of the current patch"""
@@ -1571,7 +1573,7 @@ def header(ui, repo, patch=None):
     else:
         if not q.applied:
             ui.write('No patches applied\n')
-            return
+            return 1
         patch = q.lookup('qtip')
     message = repo.mq.readheaders(patch)[0]
 
