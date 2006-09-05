@@ -12,13 +12,14 @@ demandload(globals(), "ConfigParser mdiff templater traceback util")
 
 class ui(object):
     def __init__(self, verbose=False, debug=False, quiet=False,
-                 interactive=True, traceback=False, parentui=None,
-                 readhooks=[]):
+                 interactive=True, traceback=False, parentui=None):
         self.overlay = {}
         if parentui is None:
             # this is the parent of all ui children
             self.parentui = None
-            self.readhooks = list(readhooks)
+            self.readhooks = []
+            self.trusted_users = {}
+            self.trusted_groups = {}
             self.cdata = ConfigParser.SafeConfigParser()
             self.readconfig(util.rcpath())
 
@@ -36,7 +37,9 @@ class ui(object):
         else:
             # parentui may point to an ui object which is already a child
             self.parentui = parentui.parentui or parentui
-            self.readhooks = list(parentui.readhooks or readhooks)
+            self.readhooks = parentui.readhooks[:]
+            self.trusted_users = parentui.trusted_users.copy()
+            self.trusted_groups = parentui.trusted_groups.copy()
             parent_cdata = self.parentui.cdata
             self.cdata = ConfigParser.SafeConfigParser(parent_cdata.defaults())
             # make interpolation work
@@ -51,7 +54,7 @@ class ui(object):
     def updateopts(self, verbose=False, debug=False, quiet=False,
                    interactive=True, traceback=False, config=[]):
         self.quiet = (self.quiet or quiet) and not verbose and not debug
-        self.verbose = (self.verbose or verbose) or debug
+        self.verbose = ((self.verbose or verbose) or debug) and not self.quiet
         self.debugflag = (self.debugflag or debug)
         self.interactive = (self.interactive and interactive)
         self.traceback = self.traceback or traceback
@@ -72,7 +75,22 @@ class ui(object):
             fn = [fn]
         for f in fn:
             try:
-                self.cdata.read(f)
+                fp = open(f)
+            except IOError:
+                continue
+            if ((self.trusted_users or self.trusted_groups) and
+                '*' not in self.trusted_users and
+                '*' not in self.trusted_groups):
+                st = util.fstat(fp)
+                user = util.username(st.st_uid)
+                group = util.groupname(st.st_gid)
+                if (user not in self.trusted_users and
+                    group not in self.trusted_groups):
+                    self.warn(_('not reading file %s from untrusted '
+                                'user %s, group %s\n') % (f, user, group))
+                    continue
+            try:
+                self.cdata.readfp(fp, f)
             except ConfigParser.ParsingError, inst:
                 raise util.Abort(_("Failed to parse %s\n%s") % (f, inst))
         # translate paths relative to root (or home) into absolute paths
@@ -81,8 +99,18 @@ class ui(object):
         for name, path in self.configitems("paths"):
             if path and "://" not in path and not os.path.isabs(path):
                 self.cdata.set("paths", name, os.path.join(root, path))
+        user = util.username()
+        if user is not None:
+            self.trusted_users[user] = 1
+            for user in self.configlist('trusted', 'users'):
+                self.trusted_users[user] = 1
+            for group in self.configlist('trusted', 'groups'):
+                self.trusted_groups[group] = 1
         for hook in self.readhooks:
             hook(self)
+
+    def addreadhook(self, hook):
+        self.readhooks.append(hook)
 
     def setconfig(self, section, name, val):
         self.overlay[(section, name)] = val

@@ -182,7 +182,7 @@ def readgitpatch(patchname):
 
     return (dopatch, gitpatches)
 
-def dogitpatch(patchname, gitpatches):
+def dogitpatch(patchname, gitpatches, cwd=None):
     """Preprocess git patch so that vanilla patch can handle it"""
     pf = file(patchname)
     pfline = 1
@@ -196,7 +196,7 @@ def dogitpatch(patchname, gitpatches):
             if not p.copymod:
                 continue
 
-            copyfile(p.oldpath, p.path)
+            copyfile(p.oldpath, p.path, basedir=cwd)
 
             # rewrite patch hunk
             while pfline < p.lineno:
@@ -227,22 +227,19 @@ def patch(patchname, ui, strip=1, cwd=None):
     """apply the patch <patchname> to the working directory.
     a list of patched files is returned"""
 
-    (dopatch, gitpatches) = readgitpatch(patchname)
+    # helper function
+    def __patch(patchname):
+        """patch and updates the files and fuzz variables"""
+        files = {}
+        fuzz = False
 
-    files = {}
-    fuzz = False
-    if dopatch:
-        if dopatch == 'filter':
-            patchname = dogitpatch(patchname, gitpatches)
-        patcher = util.find_in_path('gpatch', os.environ.get('PATH', ''), 'patch')
+        patcher = util.find_in_path('gpatch', os.environ.get('PATH', ''),
+                                    'patch')
         args = []
         if cwd:
             args.append('-d %s' % util.shellquote(cwd))
         fp = os.popen('%s %s -p%d < %s' % (patcher, ' '.join(args), strip,
                                            util.shellquote(patchname)))
-
-        if dopatch == 'filter':
-            False and os.unlink(patchname)
 
         for line in fp:
             line = line.rstrip()
@@ -264,11 +261,24 @@ def patch(patchname, ui, strip=1, cwd=None):
                     ui.warn(pf + '\n')
                     printed_file = True
                 ui.warn(line + '\n')
-            
         code = fp.close()
         if code:
             raise util.Abort(_("patch command failed: %s") %
                              util.explain_exit(code)[0])
+        return files, fuzz
+
+    (dopatch, gitpatches) = readgitpatch(patchname)
+
+    if dopatch:
+        if dopatch == 'filter':
+            patchname = dogitpatch(patchname, gitpatches, cwd=cwd)
+        try:
+            files, fuzz = __patch(patchname)
+        finally:
+            if dopatch == 'filter':
+                os.unlink(patchname)
+    else:
+        files, fuzz = {}, False
 
     for gp in gitpatches:
         files[gp.path] = (gp.op, gp)
