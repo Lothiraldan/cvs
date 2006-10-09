@@ -1,0 +1,21 @@
+#header#
+<title>#repo|escape#: tags</title>
+<link rel="alternate" type="application/rss+xml"
+   href="#url#rss-tags" title="RSS feed for #repo|escape#: tags">
+</head>
+<body>
+
+<div class="buttons">
+<a href="#url#log{getentries}">changelog</a>
+<a href="#url#shortlog{getentries}">shortlog</a>
+<a href="#url#file/#node|short#/{getentries}">manifest</a>
+<a type="application/rss+xml" href="#url#rss-tags">rss</a>
+</div>
+
+<h2>tags:</h2>
+
+<ul id="tagEntries">
+#entries%tagentry#
+</ul>
+
+#footer#
