@@ -2463,7 +2463,7 @@ def serve(ui, repo, **opts):
                " accesslog errorlog webdir_conf")
     for o in optlist.split():
         if opts[o]:
-            ui.setconfig("web", o, opts[o])
+            ui.setconfig("web", o, str(opts[o]))
 
     if repo is None and not ui.config("web", "webdir_conf"):
         raise hg.RepoError(_("There is no Mercurial repository here"
@@ -3275,6 +3275,20 @@ def load_extensions(ui):
                 ui.warn(_("module %s overrides %s\n") % (name, t))
         table.update(cmdtable)
 
+def parseconfig(config):
+    """parse the --config options from the command line"""
+    parsed = []
+    for cfg in config:
+        try:
+            name, value = cfg.split('=', 1)
+            section, name = name.split('.', 1)
+            if not section or not name:
+                raise IndexError
+            parsed.append((section, name, value))
+        except (IndexError, ValueError):
+            raise util.Abort(_('malformed --config option: %s') % cfg)
+    return parsed
+
 def dispatch(args):
     for name in 'SIGBREAK', 'SIGHUP', 'SIGTERM':
         num = getattr(signal, name, None)
@@ -3304,10 +3318,6 @@ def dispatch(args):
                     (t[4]-s[4], t[0]-s[0], t[2]-s[2], t[1]-s[1], t[3]-s[3]))
             atexit.register(print_time)
 
-        u.updateopts(options["verbose"], options["debug"], options["quiet"],
-                     not options["noninteractive"], options["traceback"],
-                     options["config"])
-
         # enter the debugger before command execution
         if options['debugger']:
             pdb.set_trace()
@@ -3319,6 +3329,10 @@ def dispatch(args):
                 except OSError, inst:
                     raise util.Abort('%s: %s' %
                                      (options['cwd'], inst.strerror))
+
+            u.updateopts(options["verbose"], options["debug"], options["quiet"],
+                         not options["noninteractive"], options["traceback"],
+                         parseconfig(options["config"]))
 
             path = u.expandpath(options["repository"]) or ""
             repo = path and hg.repository(u, path=path) or None
@@ -3348,11 +3362,6 @@ def dispatch(args):
                 d = lambda: func(u, repo, *args, **cmdoptions)
             else:
                 d = lambda: func(u, *args, **cmdoptions)
-
-            # reupdate the options, repo/.hg/hgrc may have changed them
-            u.updateopts(options["verbose"], options["debug"], options["quiet"],
-                         not options["noninteractive"], options["traceback"],
-                         options["config"])
 
             try:
                 if options['profile']:

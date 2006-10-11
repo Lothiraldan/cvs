@@ -10,61 +10,75 @@ from demandload import *
 demandload(globals(), "errno getpass os re socket sys tempfile")
 demandload(globals(), "ConfigParser mdiff templater traceback util")
 
+def dupconfig(orig):
+    new = ConfigParser.SafeConfigParser(orig.defaults())
+    updateconfig(orig, new)
+    return new
+
+def updateconfig(source, dest):
+    for section in source.sections():
+        if not dest.has_section(section):
+            dest.add_section(section)
+        for name, value in source.items(section, raw=True):
+            dest.set(section, name, value)
+
 class ui(object):
     def __init__(self, verbose=False, debug=False, quiet=False,
                  interactive=True, traceback=False, parentui=None):
-        self.overlay = {}
+        self.overlay = None
+        self.header = []
+        self.prev_header = []
         if parentui is None:
             # this is the parent of all ui children
             self.parentui = None
             self.readhooks = []
+            self.quiet = quiet
+            self.verbose = verbose
+            self.debugflag = debug
+            self.interactive = interactive
+            self.traceback = traceback
             self.cdata = ConfigParser.SafeConfigParser()
             self.readconfig(util.rcpath())
-
-            self.quiet = self.configbool("ui", "quiet")
-            self.verbose = self.configbool("ui", "verbose")
-            self.debugflag = self.configbool("ui", "debug")
-            self.interactive = self.configbool("ui", "interactive", True)
-            self.traceback = traceback
-
             self.updateopts(verbose, debug, quiet, interactive)
-            self.diffcache = None
-            self.header = []
-            self.prev_header = []
-            self.revlogopts = self.configrevlog()
         else:
             # parentui may point to an ui object which is already a child
             self.parentui = parentui.parentui or parentui
-            self.readhooks = parentui.readhooks[:]
-            parent_cdata = self.parentui.cdata
-            self.cdata = ConfigParser.SafeConfigParser(parent_cdata.defaults())
-            # make interpolation work
-            for section in parent_cdata.sections():
-                self.cdata.add_section(section)
-                for name, value in parent_cdata.items(section, raw=True):
-                    self.cdata.set(section, name, value)
+            self.readhooks = self.parentui.readhooks[:]
+            self.cdata = dupconfig(self.parentui.cdata)
+            if self.parentui.overlay:
+                self.overlay = dupconfig(self.parentui.overlay)
 
     def __getattr__(self, key):
         return getattr(self.parentui, key)
 
     def updateopts(self, verbose=False, debug=False, quiet=False,
                    interactive=True, traceback=False, config=[]):
-        self.quiet = (self.quiet or quiet) and not verbose and not debug
-        self.verbose = ((self.verbose or verbose) or debug) and not self.quiet
-        self.debugflag = (self.debugflag or debug)
-        self.interactive = (self.interactive and interactive)
+        for section, name, value in config:
+            self.setconfig(section, name, value)
+
+        if quiet or verbose or debug:
+            self.setconfig('ui', 'quiet', str(bool(quiet)))
+            self.setconfig('ui', 'verbose', str(bool(verbose)))
+            self.setconfig('ui', 'debug', str(bool(debug)))
+
+        self.verbosity_constraints()
+
+        if not interactive:
+            self.setconfig('ui', 'interactive', 'False')
+            self.interactive = False
+
         self.traceback = self.traceback or traceback
-        for cfg in config:
-            try:
-                name, value = cfg.split('=', 1)
-                section, name = name.split('.', 1)
-                if not self.cdata.has_section(section):
-                    self.cdata.add_section(section)
-                if not section or not name:
-                    raise IndexError
-                self.cdata.set(section, name, value)
-            except (IndexError, ValueError):
-                raise util.Abort(_('malformed --config option: %s') % cfg)
+
+    def verbosity_constraints(self):
+        self.quiet = self.configbool('ui', 'quiet')
+        self.verbose = self.configbool('ui', 'verbose')
+        self.debugflag = self.configbool('ui', 'debug')
+
+        if self.debugflag:
+            self.verbose = True
+            self.quiet = False
+        elif self.verbose and self.quiet:
+            self.quiet = self.verbose = False
 
     def readconfig(self, fn, root=None):
         if isinstance(fn, basestring):
@@ -74,35 +88,67 @@ class ui(object):
                 self.cdata.read(f)
             except ConfigParser.ParsingError, inst:
                 raise util.Abort(_("Failed to parse %s\n%s") % (f, inst))
-        # translate paths relative to root (or home) into absolute paths
+        # override data from config files with data set with ui.setconfig
+        if self.overlay:
+            updateconfig(self.overlay, self.cdata)
         if root is None:
             root = os.path.expanduser('~')
-        for name, path in self.configitems("paths"):
-            if path and "://" not in path and not os.path.isabs(path):
-                self.cdata.set("paths", name, os.path.join(root, path))
+        self.fixconfig(root=root)
         for hook in self.readhooks:
             hook(self)
 
     def addreadhook(self, hook):
         self.readhooks.append(hook)
 
-    def setconfig(self, section, name, val):
-        self.overlay[(section, name)] = val
+    def fixconfig(self, section=None, name=None, value=None, root=None):
+        # translate paths relative to root (or home) into absolute paths
+        if section is None or section == 'paths':
+            if root is None:
+                root = os.getcwd()
+            items = section and [(name, value)] or []
+            for cdata in self.cdata, self.overlay:
+                if not cdata: continue
+                if not items and cdata.has_section('paths'):
+                    pathsitems = cdata.items('paths')
+                else:
+                    pathsitems = items
+                for n, path in pathsitems:
+                    if path and "://" not in path and not os.path.isabs(path):
+                        cdata.set("paths", n, os.path.join(root, path))
 
-    def config(self, section, name, default=None):
-        if self.overlay.has_key((section, name)):
-            return self.overlay[(section, name)]
+        # update quiet/verbose/debug and interactive status
+        if section is None or section == 'ui':
+            if name is None or name in ('quiet', 'verbose', 'debug'):
+                self.verbosity_constraints()
+
+            if name is None or name == 'interactive':
+                self.interactive = self.configbool("ui", "interactive", True)
+
+    def setconfig(self, section, name, value):
+        if not self.overlay:
+            self.overlay = ConfigParser.SafeConfigParser()
+        for cdata in (self.overlay, self.cdata):
+            if not cdata.has_section(section):
+                cdata.add_section(section)
+            cdata.set(section, name, value)
+        self.fixconfig(section, name, value)
+
+    def _config(self, section, name, default, funcname):
         if self.cdata.has_option(section, name):
             try:
-                return self.cdata.get(section, name)
+                func = getattr(self.cdata, funcname)
+                return func(section, name)
             except ConfigParser.InterpolationError, inst:
                 raise util.Abort(_("Error in configuration section [%s] "
                                    "parameter '%s':\n%s")
                                  % (section, name, inst))
-        if self.parentui is None:
-            return default
-        else:
-            return self.parentui.config(section, name, default)
+        return default
+
+    def config(self, section, name, default=None):
+        return self._config(section, name, default, 'get')
+
+    def configbool(self, section, name, default=False):
+        return self._config(section, name, default, 'getboolean')
 
     def configlist(self, section, name, default=None):
         """Return a list of comma/space separated strings"""
@@ -113,29 +159,12 @@ class ui(object):
             result = result.replace(",", " ").split()
         return result
 
-    def configbool(self, section, name, default=False):
-        if self.overlay.has_key((section, name)):
-            return self.overlay[(section, name)]
-        if self.cdata.has_option(section, name):
-            try:
-                return self.cdata.getboolean(section, name)
-            except ConfigParser.InterpolationError, inst:
-                raise util.Abort(_("Error in configuration section [%s] "
-                                   "parameter '%s':\n%s")
-                                 % (section, name, inst))
-        if self.parentui is None:
-            return default
-        else:
-            return self.parentui.configbool(section, name, default)
-
     def has_config(self, section):
         '''tell whether section exists in config.'''
         return self.cdata.has_section(section)
 
     def configitems(self, section):
         items = {}
-        if self.parentui is not None:
-            items = dict(self.parentui.configitems(section))
         if self.cdata.has_section(section):
             try:
                 items.update(dict(self.cdata.items(section)))
@@ -146,24 +175,12 @@ class ui(object):
         x.sort()
         return x
 
-    def walkconfig(self, seen=None):
-        if seen is None:
-            seen = {}
-        for (section, name), value in self.overlay.iteritems():
-            yield section, name, value
-            seen[section, name] = 1
-        for section in self.cdata.sections():
-            try:
-                for name, value in self.cdata.items(section):
-                    if (section, name) in seen: continue
-                    yield section, name, value.replace('\n', '\\n')
-                    seen[section, name] = 1
-            except ConfigParser.InterpolationError, inst:
-                raise util.Abort(_("Error in configuration section [%s]:\n%s")
-                                 % (section, inst))
-        if self.parentui is not None:
-            for parent in self.parentui.walkconfig(seen):
-                yield parent
+    def walkconfig(self):
+        sections = self.cdata.sections()
+        sections.sort()
+        for section in sections:
+            for name, value in self.configitems(section):
+                yield section, name, value.replace('\n', '\\n')
 
     def extensions(self):
         result = self.configitems("extensions")
