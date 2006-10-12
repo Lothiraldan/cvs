@@ -1,0 +1,39 @@
+#header#
+<title>#repo|escape#: Summary</title>
+<link rel="alternate" type="application/rss+xml"
+   href="{url}rss-log" title="RSS feed for #repo|escape#">
+</head>
+<body>
+
+<div class="page_header">
+<a href="http://www.selenic.com/mercurial/" title="Mercurial"><div style="float:right;">Mercurial</div></a><a href="{url}summary{sessionvars%urlparameter}">#repo|escape#</a> / summary
+</div>
+<div class="page_nav">
+summary |
+<a href="{url}shortlog{sessionvars%urlparameter}">shortlog</a> |
+<a href="{url}log{sessionvars%urlparameter}">changelog</a> |
+<a href="{url}tags{sessionvars%urlparameter}">tags</a> |
+<a href="{url}file/#node|short#{sessionvars%urlparameter}">manifest</a>#archives%archiveentry#
+<br/>
+</div>
+
+<div class="title">&nbsp;</div>
+<table cellspacing="0">
+<tr><td>description</td><td>#desc#</td></tr>
+<tr><td>owner</td><td>#owner|escape#</td></tr>
+<tr><td>last change</td><td>#lastchange|rfc822date#</td></tr>
+</table>
+
+<div><a  class="title" href="{url}log{sessionvars%urlparameter}">changes</a></div>
+<table cellspacing="0">
+#shortlog#
+<tr class="light"><td colspan="3"><a class="list" href="{url}log{sessionvars%urlparameter}">...</a></td></tr>
+</table>
+
+<div><a class="title" href="{url}tags{sessionvars%urlparameter}">tags</a></div>
+<table cellspacing="0">
+#tags#
+<tr class="light"><td colspan="3"><a class="list" href="{url}tags{sessionvars%urlparameter}">...</a></td></tr>
+</table>
+
+#footer#
