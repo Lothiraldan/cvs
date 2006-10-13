@@ -1,0 +1,41 @@
+#header#
+<title>#repo|escape#: Changeset</title>
+<link rel="alternate" type="application/rss+xml"
+   href="{url}rss-log" title="RSS feed for #repo|escape#">
+</head>
+<body>
+
+<div class="page_header">
+<a href="http://www.selenic.com/mercurial/" title="Mercurial"><div style="float:right;">Mercurial</div></a><a href="#url#summary{sessionvars%urlparameter}">#repo|escape#</a> / changeset
+</div>
+
+<div class="page_nav">
+<a href="{url}summary{sessionvars%urlparameter}">summary</a> | <a href="{url}shortlog/#rev#{sessionvars%urlparameter}">shortlog</a> | <a href="{url}log/#rev#{sessionvars%urlparameter}">changelog</a> | <a href="{url}tags{sessionvars%urlparameter}">tags</a> | <a href="{url}file/#node|short#{sessionvars%urlparameter}">manifest</a> | changeset | <a href="{url}raw-rev/#node|short#">raw</a> #archives%archiveentry#<br/>
+</div>
+
+<div>
+<a class="title" href="{url}raw-rev/#node|short#">#desc|strip|escape|firstline#</a>
+</div>
+<div class="title_text">
+<table cellspacing="0">
+<tr><td>author</td><td>#author|obfuscate#</td></tr>
+<tr><td></td><td>#date|date# (#date|age# ago)</td></tr>
+<tr><td>changeset</td><td style="font-family:monospace">#node|short#</td></tr>
+<tr><td>manifest</td><td style="font-family:monospace"><a class="list" href="{url}file/#node|short#{sessionvars%urlparameter}">#node|short#</a></td></tr>
+#parent%changesetparent#
+#child%changesetchild#
+#changesettag#
+</table></div>
+
+<div class="page_body">
+#desc|strip|escape|addbreaks#
+</div>
+<div class="list_head"></div>
+<div class="title_text">
+<table cellspacing="0">
+#files#
+</table></div>
+
+<div class="page_body">#diff#</div>
+
+#footer#
