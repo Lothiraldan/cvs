@@ -1840,6 +1840,9 @@ def log(ui, repo, *pats, **opts):
                     break
         if rev in rcache[fn]:
             return rcache[fn][rev]
+        mr = repo.manifest.rev(man)
+        if repo.manifest.parentrevs(mr) != (mr - 1, -1):
+            return ncache[fn].get(repo.manifest.find(man, fn)[0])
         if not dcache or dcache[0] != man:
             dcache[:] = [man, repo.manifest.readdelta(man)]
         if fn in dcache[1]:
