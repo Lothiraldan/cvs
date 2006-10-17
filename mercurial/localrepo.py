@@ -79,6 +79,7 @@ class localrepository(repo.repository):
         self.revlogversion = v
 
         self.tagscache = None
+        self.branchcache = None
         self.nodetagscache = None
         self.encodepats = None
         self.decodepats = None
@@ -288,18 +289,57 @@ class localrepository(repo.repository):
                 self.nodetagscache.setdefault(n, []).append(t)
         return self.nodetagscache.get(node, [])
 
-    def lookup(self, key):
+    def branchtags(self):
+        if self.branchcache != None:
+            return self.branchcache
+
+        self.branchcache = {}
+
         try:
+            f = self.opener("branches.cache")
+            last, lrev = f.readline().rstrip().split(" ", 1)
+            last, lrev = bin(last), int(lrev)
+            if self.changelog.node(lrev) == last: # sanity check
+                for l in f:
+                    node, label = l.rstrip().split(" ", 1)
+                    self.branchcache[label] = bin(node)
+            f.close()
+        except IOError:
+            last, lrev = nullid, -1
+            lrev = self.changelog.rev(last)
+
+        tip = self.changelog.count() - 1
+        if lrev != tip:
+            for r in range(lrev + 1, tip + 1):
+                n = self.changelog.node(r)
+                c = self.changelog.read(n)
+                b = c[5].get("branch")
+                if b:
+                    self.branchcache[b] = n
+            self._writebranchcache()
+
+        return self.branchcache
+
+    def _writebranchcache(self):
+        f = self.opener("branches.cache", "w")
+        t = self.changelog.tip()
+        f.write("%s %s\n" % (hex(t), self.changelog.count() - 1))
+        for label, node in self.branchcache.iteritems():
+            f.write("%s %s\n" % (hex(node), label))
+
+    def lookup(self, key):
+        if key == '.':
+            key = self.dirstate.parents()[0]
+            if key == nullid:
+                raise repo.RepoError(_("no revision checked out"))
+        if key in self.tags():
             return self.tags()[key]
-        except KeyError:
-            if key == '.':
-                key = self.dirstate.parents()[0]
-                if key == nullid:
-                    raise repo.RepoError(_("no revision checked out"))
-            try:
-                return self.changelog.lookup(key)
-            except:
-                raise repo.RepoError(_("unknown revision '%s'") % key)
+        if key in self.branchtags():
+            return self.branchtags()[key]
+        try:
+            return self.changelog.lookup(key)
+        except:
+            raise repo.RepoError(_("unknown revision '%s'") % key)
 
     def dev(self):
         return os.lstat(self.path).st_dev
@@ -571,7 +611,14 @@ class localrepository(repo.repository):
         m1 = self.manifest.read(c1[0]).copy()
         m2 = self.manifest.read(c2[0])
 
-        if not commit and not remove and not force and p2 == nullid:
+        try:
+            branchname = self.opener("branch").read().rstrip()
+        except IOError:
+            branchname = ""
+        oldname = c1[5].get("branch", "")
+
+        if not commit and not remove and not force and p2 == nullid and \
+               branchname == oldname:
             self.ui.status(_("nothing changed\n"))
             return None
 
@@ -636,7 +683,11 @@ class localrepository(repo.repository):
         if not lines:
             return None
         text = '\n'.join(lines)
-        n = self.changelog.add(mn, changed + remove, text, tr, p1, p2, user, date)
+        extra = {}
+        if branchname:
+            extra["branch"] = branchname
+        n = self.changelog.add(mn, changed + remove, text, tr, p1, p2,
+                               user, date, extra)
         self.hook('pretxncommit', throw=True, node=hex(n), parent1=xp1,
                   parent2=xp2)
         tr.close()
