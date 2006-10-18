@@ -1,0 +1,50 @@
+#!/bin/sh
+
+http_proxy= hg clone static-http://localhost:20059/ copy
+echo $?
+test -e copy || echo copy: No such file or directory
+
+# This server doesn't do range requests so it's basically only good for
+# one pull
+cat > dumb.py <<EOF
+import BaseHTTPServer, SimpleHTTPServer, signal
+
+def run(server_class=BaseHTTPServer.HTTPServer,
+        handler_class=SimpleHTTPServer.SimpleHTTPRequestHandler):
+    server_address = ('localhost', 20059)
+    httpd = server_class(server_address, handler_class)
+    httpd.serve_forever()
+
+signal.signal(signal.SIGTERM, lambda x: sys.exit(0))
+run()
+EOF
+
+python dumb.py 2>/dev/null &
+echo $! >> $DAEMON_PIDS
+
+mkdir remote
+cd remote
+hg init
+echo foo > bar
+hg add bar
+hg commit -m"test" -d "1000000 0"
+hg tip
+
+cd ..
+
+http_proxy= hg clone static-http://localhost:20059/remote local
+
+cd local
+hg verify
+cat bar
+
+cd ../remote
+echo baz > quux
+hg commit -A -mtest2 -d '100000000 0'
+
+cd ../local
+echo '[hooks]' >> .hg/hgrc
+echo 'changegroup = echo changegroup: u=$HG_URL' >> .hg/hgrc
+http_proxy= hg pull
+
+kill $!
