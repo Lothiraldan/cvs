@@ -326,6 +326,7 @@ class changeset_printer(object):
 
         changes = log.read(changenode)
         date = util.datestr(changes[2])
+        branch = changes[5].get("branch")
 
         hexfunc = self.ui.debugflag and hex or short
 
@@ -337,6 +338,8 @@ class changeset_printer(object):
 
         self.ui.write(_("changeset:   %d:%s\n") % (rev, hexfunc(changenode)))
 
+        if branch:
+            self.ui.status(_("branch:      %s\n") % branch)
         for tag in self.repo.nodetags(changenode):
             self.ui.status(_("tag:         %s\n") % tag)
         for parent in parents:
@@ -1574,6 +1577,11 @@ def identify(ui, repo):
               (modified or added or removed or deleted) and "+" or "")]
 
     if not ui.quiet:
+
+        branch = repo.workingctx().branch()
+        if branch:
+            output.append("(%s)" % branch)
+
         # multiple tags for a single parent separated by '/'
         parenttags = ['/'.join(tags)
                       for tags in map(repo.nodetags, parents) if tags]
