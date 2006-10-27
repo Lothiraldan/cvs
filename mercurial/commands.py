@@ -1196,7 +1196,7 @@ def debugcheckstate(ui, repo):
         error = _(".hg/dirstate inconsistent with current parent's manifest")
         raise util.Abort(error)
 
-def showconfig(ui, repo, *values):
+def showconfig(ui, repo, *values, **opts):
     """show combined config settings from all hgrc files
 
     With no args, print names and values of all config items.
@@ -1207,10 +1207,11 @@ def showconfig(ui, repo, *values):
     With multiple args, print names and values of all config items
     with matching section names."""
 
+    untrusted = bool(opts.get('untrusted'))
     if values:
         if len([v for v in values if '.' in v]) > 1:
             raise util.Abort(_('only one config item permitted'))
-    for section, name, value in ui.walkconfig():
+    for section, name, value in ui.walkconfig(untrusted=untrusted):
         sectname = section + '.' + name
         if values:
             for v in values:
@@ -2091,10 +2092,17 @@ def pull(ui, repo, source="default", **opts):
 
     Valid URLs are of the form:
 
-      local/filesystem/path
+      local/filesystem/path (or file://local/filesystem/path)
       http://[user@]host[:port]/[path]
       https://[user@]host[:port]/[path]
       ssh://[user@]host[:port]/[path]
+      static-http://host[:port]/[path]
+
+    Paths in the local filesystem can either point to Mercurial
+    repositories or to bundle files (as created by 'hg bundle' or
+    'hg incoming --bundle'). The static-http:// protocol, albeit slow,
+    allows access to a Mercurial repository where you simply use a web
+    server to publish the .hg directory as static content.
 
     Some notes about using SSH with Mercurial:
     - SSH requires an accessible shell account on the destination machine
@@ -2142,14 +2150,16 @@ def push(ui, repo, dest=None, **opts):
 
     Valid URLs are of the form:
 
-      local/filesystem/path
+      local/filesystem/path (or file://local/filesystem/path)
       ssh://[user@]host[:port]/[path]
+      http://[user@]host[:port]/[path]
+      https://[user@]host[:port]/[path]
 
     Look at the help text for the pull command for important details
     about ssh:// URLs.
 
-    Pushing to http:// and https:// URLs is possible, too, if this
-    feature is enabled on the remote Mercurial server.
+    Pushing to http:// and https:// URLs is only possible, if this
+    feature is explicitly enabled on the remote Mercurial server.
     """
     dest = ui.expandpath(dest or 'default-push', dest or 'default')
     setremoteconfig(ui, opts)
@@ -3074,7 +3084,10 @@ table = {
          _('hg revert [-r REV] [NAME]...')),
     "rollback": (rollback, [], _('hg rollback')),
     "root": (root, [], _('hg root')),
-    "showconfig|debugconfig": (showconfig, [], _('showconfig [NAME]...')),
+    "showconfig|debugconfig":
+        (showconfig,
+         [('u', 'untrusted', None, _('show untrusted configuration options'))],
+         _('showconfig [-u] [NAME]...')),
     "^serve":
         (serve,
          [('A', 'accesslog', '', _('name of access log file to write to')),
@@ -3486,6 +3499,15 @@ def dispatch(args):
             u.warn(_("abort: %s: %s\n") % (inst.strerror, inst.filename))
         else:
             u.warn(_("abort: %s\n") % inst.strerror)
+    except util.UnexpectedOutput, inst:
+        u.warn(_("abort: %s") % inst[0])
+        if not isinstance(inst[1], basestring):
+            u.warn(" %r\n" % (inst[1],))
+        elif not inst[1]:
+            u.warn(_(" empty string\n"))
+        else:
+            u.warn("\n%r%s\n" %
+                    (inst[1][:400], len(inst[1]) > 400 and '...' or ''))
     except util.Abort, inst:
         u.warn(_("abort: %s\n") % inst)
     except TypeError, inst:

@@ -218,9 +218,15 @@ class httprepository(remoterepository):
         self.ui.debug(_("sending %s command\n") % cmd)
         q = {"cmd": cmd}
         q.update(args)
-        qs = urllib.urlencode(q)
-        cu = "%s?%s" % (self._url, qs)
+        qs = '?%s' % urllib.urlencode(q)
+        cu = "%s%s" % (self._url, qs)
         try:
+            if data:
+                if isinstance(data, file):
+                    # urllib2 needs string or buffer when using a proxy
+                    data.seek(0)
+                    data = data.read()
+                self.ui.debug(_("sending %d bytes\n") % len(data))
             resp = urllib2.urlopen(urllib2.Request(cu, data, headers))
         except urllib2.HTTPError, inst:
             if inst.code == 401:
@@ -233,6 +239,8 @@ class httprepository(remoterepository):
         except IndexError:
             # this only happens with Python 2.3, later versions raise URLError
             raise util.Abort(_('http error, possibly caused by proxy setting'))
+        # record the url we got redirected to
+        self._url = resp.geturl().rstrip(qs)
         try:
             proto = resp.getheader('content-type')
         except AttributeError:
@@ -273,8 +281,7 @@ class httprepository(remoterepository):
         try:
             return map(bin, d[:-1].split(" "))
         except:
-            self.ui.warn(_("unexpected response:\n") + d[:400] + "\n...\n")
-            raise
+            raise util.UnexpectedOutput(_("unexpected response:"), d)
 
     def branches(self, nodes):
         n = " ".join(map(hex, nodes))
@@ -283,8 +290,7 @@ class httprepository(remoterepository):
             br = [ tuple(map(bin, b.split(" "))) for b in d.splitlines() ]
             return br
         except:
-            self.ui.warn(_("unexpected response:\n") + d[:400] + "\n...\n")
-            raise
+            raise util.UnexpectedOutput(_("unexpected response:"), d)
 
     def between(self, pairs):
         n = "\n".join(["-".join(map(hex, p)) for p in pairs])
@@ -293,8 +299,7 @@ class httprepository(remoterepository):
             p = [ l and map(bin, l.split(" ")) or [] for l in d.splitlines() ]
             return p
         except:
-            self.ui.warn(_("unexpected response:\n") + d[:400] + "\n...\n")
-            raise
+            raise util.UnexpectedOutput(_("unexpected response:"), d)
 
     def changegroup(self, nodes, kind):
         n = " ".join(map(hex, nodes))
@@ -340,7 +345,7 @@ class httprepository(remoterepository):
             try:
                 rfp = self.do_cmd(
                     'unbundle', data=fp,
-                    headers={'content-length': length,
+                    headers={'content-length': str(length),
                              'content-type': 'application/octet-stream'},
                     heads=' '.join(map(hex, heads)))
                 try:
