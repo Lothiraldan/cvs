@@ -1,0 +1,161 @@
+hg status in repo root:
+? a/1/in_a_1
+? a/in_a
+? b/1/in_b_1
+? b/2/in_b_2
+? b/in_b
+? in_root
+hg status . in repo root:
+? a/1/in_a_1
+? a/in_a
+? b/1/in_b_1
+? b/2/in_b_2
+? b/in_b
+? in_root
+hg status in a:
+? a/1/in_a_1
+? a/in_a
+? b/1/in_b_1
+? b/2/in_b_2
+? b/in_b
+? in_root
+hg status . in a:
+? 1/in_a_1
+? in_a
+hg status .. in a:
+? 1/in_a_1
+? in_a
+? ../b/1/in_b_1
+? ../b/2/in_b_2
+? ../b/in_b
+? ../in_root
+hg status in b:
+? a/1/in_a_1
+? a/in_a
+? b/1/in_b_1
+? b/2/in_b_2
+? b/in_b
+? in_root
+hg status . in b:
+? 1/in_b_1
+? 2/in_b_2
+? in_b
+hg status .. in b:
+? ../a/1/in_a_1
+? ../a/in_a
+? 1/in_b_1
+? 2/in_b_2
+? in_b
+? ../in_root
+hg status in a/1:
+? a/1/in_a_1
+? a/in_a
+? b/1/in_b_1
+? b/2/in_b_2
+? b/in_b
+? in_root
+hg status . in a/1:
+? in_a_1
+hg status .. in a/1:
+? in_a_1
+? ../in_a
+hg status in b/1:
+? a/1/in_a_1
+? a/in_a
+? b/1/in_b_1
+? b/2/in_b_2
+? b/in_b
+? in_root
+hg status . in b/1:
+? in_b_1
+hg status .. in b/1:
+? in_b_1
+? ../2/in_b_2
+? ../in_b
+hg status in b/2:
+? a/1/in_a_1
+? a/in_a
+? b/1/in_b_1
+? b/2/in_b_2
+? b/in_b
+? in_root
+hg status . in b/2:
+? in_b_2
+hg status .. in b/2:
+? ../1/in_b_1
+? in_b_2
+? ../in_b
+adding .hgignore
+adding deleted
+adding modified
+adding removed
+hg status:
+A added
+R removed
+! deleted
+? unknown
+hg status modified added removed deleted unknown never-existed ignored:
+never-existed: No such file or directory
+A added
+R removed
+! deleted
+? ignored
+? unknown
+hg status -C:
+A added
+A copied
+  modified
+R removed
+! deleted
+? unknown
+hg status -t:
+hg status: option -t not recognized
+hg status [OPTION]... [FILE]...
+
+show changed files in the working directory
+
+    Show status of files in the repository.  If names are given, only
+    files that match are shown.  Files that are clean or ignored, are
+    not listed unless -c (clean), -i (ignored) or -A is given.
+
+    If one revision is given, it is used as the base revision.
+    If two revisions are given, the difference between them is shown.
+
+    The codes used to show the status of files are:
+    M = modified
+    A = added
+    R = removed
+    C = clean
+    ! = deleted, but still tracked
+    ? = not tracked
+    I = ignored (not shown by default)
+      = the previous added file was copied from here
+
+aliases: st
+
+options:
+
+ -A --all        show status of all files
+ -m --modified   show only modified files
+ -a --added      show only added files
+ -r --removed    show only removed files
+ -d --deleted    show only deleted (but tracked) files
+ -c --clean      show only files without changes
+ -u --unknown    show only unknown (not tracked) files
+ -i --ignored    show ignored files
+ -n --no-status  hide status prefix
+ -C --copies     show source of copied files
+ -0 --print0     end filenames with NUL, for use with xargs
+    --rev        show difference from revision
+ -I --include    include names matching the given patterns
+ -X --exclude    exclude names matching the given patterns
+hg status -A:
+A added
+A copied
+  modified
+R removed
+! deleted
+? unknown
+I ignored
+C .hgignore
+C modified
