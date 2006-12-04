@@ -15,7 +15,61 @@ platform-specific details from the core.
 from i18n import gettext as _
 from demandload import *
 demandload(globals(), "cStringIO errno getpass popen2 re shutil sys tempfile")
-demandload(globals(), "os threading time calendar ConfigParser")
+demandload(globals(), "os threading time calendar ConfigParser locale")
+
+_encoding = os.environ.get("HGENCODING") or locale.getpreferredencoding()
+_encodingmode = os.environ.get("HGENCODINGMODE", "strict")
+
+def tolocal(s):
+    """
+    Convert a string from internal UTF-8 to local encoding
+
+    All internal strings should be UTF-8 but some repos before the
+    implementation of locale support may contain latin1 or possibly
+    other character sets. We attempt to decode everything strictly
+    using UTF-8, then Latin-1, and failing that, we use UTF-8 and
+    replace unknown characters.
+    """
+    for e in "utf-8 latin1".split():
+        try:
+            u = s.decode(e) # attempt strict decoding
+            return u.encode(_encoding, "replace")
+        except UnicodeDecodeError:
+            pass
+    u = s.decode("utf-8", "replace") # last ditch
+    return u.encode(_encoding, "replace")
+
+def fromlocal(s):
+    """
+    Convert a string from the local character encoding to UTF-8
+
+    We attempt to decode strings using the encoding mode set by
+    HG_ENCODINGMODE, which defaults to 'strict'. In this mode, unknown
+    characters will cause an error message. Other modes include
+    'replace', which replaces unknown characters with a special
+    Unicode character, and 'ignore', which drops the character.
+    """
+    try:
+        return s.decode(_encoding, _encodingmode).encode("utf-8")
+    except UnicodeDecodeError, inst:
+        sub = s[max(0, inst.start-10):inst.start+10]
+        raise Abort("decoding near '%s': %s!\n" % (sub, inst))
+
+def locallen(s):
+    """Find the length in characters of a local string"""
+    return len(s.decode(_encoding, "replace"))
+
+def localsub(s, a, b=None):
+    try:
+        u = s.decode(_encoding, _encodingmode)
+        if b is not None:
+            u = u[a:b]
+        else:
+            u = u[:a]
+        return u.encode(_encoding, _encodingmode)
+    except UnicodeDecodeError, inst:
+        sub = s[max(0, inst.start-10), inst.start+10]
+        raise Abort("decoding near '%s': %s!\n" % (sub, inst))
 
 # used by parsedate
 defaultdateformats = ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M',
@@ -578,6 +632,28 @@ def groupname(gid=None):
             return str(gid)
     except ImportError:
         return None
+
+# File system features
+
+def checkfolding(path):
+    """
+    Check whether the given path is on a case-sensitive filesystem
+
+    Requires a path (like /foo/.hg) ending with a foldable final
+    directory component.
+    """
+    s1 = os.stat(path)
+    d, b = os.path.split(path)
+    p2 = os.path.join(d, b.upper())
+    if path == p2:
+        p2 = os.path.join(d, b.lower())
+    try:
+        s2 = os.stat(p2)
+        if s2 == s1:
+            return False
+        return True
+    except:
+        return True
 
 # Platform specific variants
 if os.name == 'nt':
