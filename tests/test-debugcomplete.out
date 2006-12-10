@@ -61,8 +61,10 @@ debugcheckstate
 debugcomplete
 debugconfig
 debugdata
+debugdate
 debugindex
 debugindexdot
+debuginstall
 debugrawcommit
 debugrebuildstate
 debugrename

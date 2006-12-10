@@ -10,7 +10,7 @@ from node import *
 from i18n import gettext as _
 demandload(globals(), "bisect os re sys signal imp urllib pdb shlex stat")
 demandload(globals(), "fancyopts ui hg util lock revlog bundlerepo")
-demandload(globals(), "difflib patch time")
+demandload(globals(), "difflib patch time help mdiff tempfile")
 demandload(globals(), "traceback errno version atexit")
 demandload(globals(), "archival changegroup cmdutil hgweb.server sshserver")
 
@@ -57,7 +57,8 @@ def add(ui, repo, *pats, **opts):
 
     Schedule files to be version controlled and added to the repository.
 
-    The files will be added to the repository at the next commit.
+    The files will be added to the repository at the next commit. To
+    undo an add before that, see hg revert.
 
     If no names are given, add all files in the repository.
     """
@@ -222,6 +223,7 @@ def backout(ui, repo, rev, **opts):
         parent = p1
     hg.clean(repo, node, show_stats=False)
     revert_opts = opts.copy()
+    revert_opts['date'] = None
     revert_opts['all'] = True
     revert_opts['rev'] = hex(parent)
     revert(ui, repo, **revert_opts)
@@ -649,7 +651,8 @@ def copy(ui, repo, *pats, **opts):
     stand in the working directory.  If invoked with --after, the
     operation is recorded, but no copying is performed.
 
-    This command takes effect in the next commit.
+    This command takes effect in the next commit. To undo a copy
+    before that, see hg revert.
     """
     wlock = repo.wlock(0)
     errs, copied = docopy(ui, repo, pats, opts, wlock)
@@ -788,6 +791,18 @@ def debugdata(ui, file_, rev):
     except KeyError:
         raise util.Abort(_('invalid revision identifier %s') % rev)
 
+def debugdate(ui, date, range=None, **opts):
+    """parse and display a date"""
+    if opts["extended"]:
+        d = util.parsedate(date, util.extendeddateformats)
+    else:
+        d = util.parsedate(date)
+    ui.write("internal: %s %s\n" % d)
+    ui.write("standard: %s\n" % util.datestr(d))
+    if range:
+        m = util.matchdate(range)
+        ui.write("match: %s\n" % m(d[0]))
+
 def debugindex(ui, file_):
     """dump the contents of an index file"""
     r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_, "", 0)
@@ -811,6 +826,156 @@ def debugindexdot(ui, file_):
         if pp[1] != nullid:
             ui.write("\t%d -> %d\n" % (r.rev(pp[1]), i))
     ui.write("}\n")
+
+def debuginstall(ui):
+    '''test Mercurial installation'''
+
+    def writetemp(contents):
+        (fd, name) = tempfile.mkstemp()
+        f = os.fdopen(fd, "wb")
+        f.write(contents)
+        f.close()
+        return name
+
+    problems = 0
+
+    # encoding
+    ui.status(_("Checking encoding (%s)...\n") % util._encoding)
+    try:
+        util.fromlocal("test")
+    except util.Abort, inst:
+        ui.write(" %s\n" % inst)
+        ui.write(_(" (check that your locale is properly set)\n"))
+        problems += 1
+
+    # compiled modules
+    ui.status(_("Checking extensions...\n"))
+    try:
+        import bdiff, mpatch, base85
+    except Exception, inst:
+        ui.write(" %s\n" % inst)
+        ui.write(_(" One or more extensions could not be found"))
+        ui.write(_(" (check that you compiled the extensions)\n"))
+        problems += 1
+
+    # templates
+    ui.status(_("Checking templates...\n"))
+    try:
+        import templater
+        t = templater.templater(templater.templatepath("map-cmdline.default"))
+    except Exception, inst:
+        ui.write(" %s\n" % inst)
+        ui.write(_(" (templates seem to have been installed incorrectly)\n"))
+        problems += 1
+
+    # patch
+    ui.status(_("Checking patch...\n"))
+    path = os.environ.get('PATH', '')
+    patcher = util.find_in_path('gpatch', path,
+                                util.find_in_path('patch', path, None))
+    if not patcher:
+        ui.write(_(" Can't find patch or gpatch in PATH\n"))
+        ui.write(_(" (specify a patch utility in your .hgrc file)\n"))
+        problems += 1
+    else:
+        # actually attempt a patch here
+        a = "1\n2\n3\n4\n"
+        b = "1\n2\n3\ninsert\n4\n"
+        d = mdiff.unidiff(a, None, b, None, "a")
+        fa = writetemp(a)
+        fd = writetemp(d)
+        fp = os.popen('%s %s %s' % (patcher, fa, fd))
+        files = []
+        output = ""
+        for line in fp:
+            output += line
+            if line.startswith('patching file '):
+                pf = util.parse_patch_output(line.rstrip())
+                files.append(pf)
+        if files != [fa]:
+            ui.write(_(" unexpected patch output!"))
+            ui.write(_(" (you may have an incompatible version of patch)\n"))
+            ui.write(data)
+            problems += 1
+        a = file(fa).read()
+        if a != b:
+            ui.write(_(" patch test failed!"))
+            ui.write(_(" (you may have an incompatible version of patch)\n"))
+            problems += 1
+        os.unlink(fa)
+        os.unlink(fd)
+
+    # merge helper
+    ui.status(_("Checking merge helper...\n"))
+    cmd = (os.environ.get("HGMERGE") or ui.config("ui", "merge")
+           or "hgmerge")
+    cmdpath = util.find_in_path(cmd, path)
+    if not cmdpath:
+        cmdpath = util.find_in_path(cmd.split()[0], path)
+    if not cmdpath:
+        if cmd == 'hgmerge':
+            ui.write(_(" No merge helper set and can't find default"
+                       " hgmerge script in PATH\n"))
+            ui.write(_(" (specify a merge helper in your .hgrc file)\n"))
+        else:
+            ui.write(_(" Can't find merge helper '%s' in PATH\n") % cmd)
+            ui.write(_(" (specify a merge helper in your .hgrc file)\n"))
+            problems += 1
+    else:
+        # actually attempt a patch here
+        fa = writetemp("1\n2\n3\n4\n")
+        fl = writetemp("1\n2\n3\ninsert\n4\n")
+        fr = writetemp("begin\n1\n2\n3\n4\n")
+        r = os.system('%s %s %s %s' % (cmd, fl, fa, fr))
+        if r:
+            ui.write(_(" got unexpected merge error %d!") % r)
+            problems += 1
+        m = file(fl).read()
+        if m != "begin\n1\n2\n3\ninsert\n4\n":
+            ui.write(_(" got unexpected merge results!") % r)
+            ui.write(_(" (your merge helper may have the"
+                       " wrong argument order)\n"))
+            ui.write(m)
+        os.unlink(fa)
+        os.unlink(fl)
+        os.unlink(fr)
+
+    # editor
+    ui.status(_("Checking commit editor...\n"))
+    editor = (os.environ.get("HGEDITOR") or
+              ui.config("ui", "editor") or
+              os.environ.get("EDITOR", "vi"))
+    cmdpath = util.find_in_path(editor, path)
+    if not cmdpath:
+        cmdpath = util.find_in_path(editor.split()[0], path)
+    if not cmdpath:
+        if cmd == 'vi':
+            ui.write(_(" No commit editor set and can't find vi in PATH\n"))
+            ui.write(_(" (specify a commit editor in your .hgrc file)\n"))
+        else:
+            ui.write(_(" Can't find editor '%s' in PATH\n") % editor)
+            ui.write(_(" (specify a commit editor in your .hgrc file)\n"))
+            problems += 1
+
+    # check username
+    ui.status(_("Checking username...\n"))
+    user = os.environ.get("HGUSER")
+    if user is None:
+        user = ui.config("ui", "username")
+    if user is None:
+        user = os.environ.get("EMAIL")
+    if not user:
+        ui.warn(" ")
+        ui.username()
+        ui.write(_(" (specify a username in your .hgrc file)\n"))
+
+    if not problems:
+        ui.status(_("No problems detected\n"))
+    else:
+        ui.write(_("%s problems detected,"
+                   " please check your install!\n") % problems)
+
+    return problems
 
 def debugrename(ui, repo, file1, *pats, **opts):
     """dump rename information"""
@@ -843,6 +1008,10 @@ def diff(ui, repo, *pats, **opts):
 
     Differences between files are shown using the unified diff format.
 
+    NOTE: diff may generate unexpected results for merges, as it will
+    default to comparing against the working directory's first parent
+    changeset if no revisions are specified.
+
     When two revision arguments are given, then changes are shown
     between those revisions. If only one revision is specified then
     that revision is compared to the working directory, and, when no
@@ -866,7 +1035,10 @@ def export(ui, repo, *changesets, **opts):
     Print the changeset header and diffs for one or more revisions.
 
     The information shown in the changeset header is: author,
-    changeset hash, parent and commit comment.
+    changeset hash, parent(s) and commit comment.
+
+    NOTE: export may generate unexpected diff output for merge changesets,
+    as it will compare the merge changeset against its first parent only.
 
     Output may be to a file, in which case the name of the file is
     given using a format string.  The formatting rules are as follows:
@@ -1141,6 +1313,26 @@ def help_(ui, name=None, with_version=False):
             else:
                 ui.write(' %-*s   %s\n' % (m, f, h[f]))
 
+    def helptopic(name):
+        v = None
+        for i in help.helptable:
+            l = i.split('|')
+            if name in l:
+                v = i
+                header = l[-1]
+        if not v:
+            raise UnknownCommand(name)
+
+        # description
+        doc = help.helptable[v]
+        if not doc:
+            doc = _("(No help text available)")
+        if callable(doc):
+            doc = doc()
+
+        ui.write("%s\n" % header)
+        ui.write("%s\n" % doc.rstrip())
+
     def helpext(name):
         try:
             mod = findext(name)
@@ -1163,10 +1355,16 @@ def help_(ui, name=None, with_version=False):
         helplist(modcmds.has_key)
 
     if name and name != 'shortlist':
-        try:
-            helpcmd(name)
-        except UnknownCommand:
-            helpext(name)
+        i = None
+        for f in (helpcmd, helptopic, helpext):
+            try:
+                f(name)
+                i = None
+                break
+            except UnknownCommand, inst:
+                i = inst
+        if i:
+            raise i
 
     else:
         # program name
@@ -1438,6 +1636,12 @@ def log(ui, repo, *pats, **opts):
     non-trivial parents, user, date and time, and a summary for each
     commit. When the -v/--verbose switch is used, the list of changed
     files and full commit message is shown.
+
+    NOTE: log -p may generate unexpected diff output for merge
+    changesets, as it will compare the merge changeset against its
+    first parent only. Also, the files: list will only reflect files
+    that are different from BOTH parents.
+
     """
 
     get = util.cachefunc(lambda r: repo.changectx(r).changeset())
@@ -1489,7 +1693,12 @@ def log(ui, repo, *pats, **opts):
             return ncache[fn].get(dcache[1][fn])
         return None
 
-    displayer = cmdutil.show_changeset(ui, repo, opts, buffered=True)
+    df = False
+    if opts["date"]:
+        df = util.matchdate(opts["date"])
+
+
+    displayer = cmdutil.show_changeset(ui, repo, opts, True, matchfn)
     for st, rev, fns in changeiter:
         if st == 'add':
             changenode = repo.changelog.node(rev)
@@ -1499,6 +1708,11 @@ def log(ui, repo, *pats, **opts):
                 continue
             if opts['only_merges'] and len(parents) != 2:
                 continue
+
+            if df:
+                changes = get(rev)
+                if not df(changes[2][0]):
+                    continue
 
             if opts['keyword']:
                 changes = get(rev)
@@ -1799,11 +2013,13 @@ def remove(ui, repo, *pats, **opts):
 
     Schedule the indicated files for removal from the repository.
 
-    This command schedules the files to be removed at the next commit.
     This only removes files from the current branch, not from the
     entire project history.  If the files still exist in the working
     directory, they will be deleted from it.  If invoked with --after,
     files that have been manually deleted are marked as removed.
+
+    This command schedules the files to be removed at the next commit.
+    To undo a remove before that, see hg revert.
 
     Modified files and added files are not removed by default.  To
     remove them, use the -f/--force option.
@@ -1852,7 +2068,8 @@ def rename(ui, repo, *pats, **opts):
     stand in the working directory.  If invoked with --after, the
     operation is recorded, but no copying is performed.
 
-    This command takes effect in the next commit.
+    This command takes effect in the next commit. To undo a rename
+    before that, see hg revert.
     """
     wlock = repo.wlock(0)
     errs, copied = docopy(ui, repo, pats, opts, wlock)
@@ -1871,8 +2088,9 @@ def revert(ui, repo, *pats, **opts):
     With no revision specified, revert the named files or directories
     to the contents they had in the parent of the working directory.
     This restores the contents of the affected files to an unmodified
-    state.  If the working directory has two parents, you must
-    explicitly specify the revision to revert to.
+    state and unschedules adds, removes, copies, and renames. If the
+    working directory has two parents, you must explicitly specify the
+    revision to revert to.
 
     Modified files are saved with a .orig suffix before reverting.
     To disable these backups, use --no-backup.
@@ -1894,6 +2112,11 @@ def revert(ui, repo, *pats, **opts):
 
     If no arguments are given, no files are reverted.
     """
+
+    if opts["date"]:
+        if opts["rev"]:
+            raise util.Abort(_("you can't specify a revision and a date"))
+        opts["rev"] = cmdutil.finddate(ui, repo, opts["date"])
 
     if not pats and not opts['all']:
         raise util.Abort(_('no files or directories specified; '
@@ -2120,6 +2343,11 @@ def status(ui, repo, *pats, **opts):
     files that match are shown.  Files that are clean or ignored, are
     not listed unless -c (clean), -i (ignored) or -A is given.
 
+    NOTE: status may appear to disagree with diff if permissions have
+    changed or a merge has occurred. The standard diff format does not
+    report permission changes and diff only reports changes relative
+    to one merge parent.
+
     If one revision is given, it is used as the base revision.
     If two revisions are given, the difference between them is shown.
 
@@ -2249,7 +2477,7 @@ def unbundle(ui, repo, fname, **opts):
     modheads = repo.addchangegroup(gen, 'unbundle', 'bundle:' + fname)
     return postincoming(ui, repo, modheads, opts['update'])
 
-def update(ui, repo, node=None, clean=False, branch=None):
+def update(ui, repo, node=None, clean=False, branch=None, date=None):
     """update or merge working directory
 
     Update the working directory to the specified revision.
@@ -2264,6 +2492,11 @@ def update(ui, repo, node=None, clean=False, branch=None):
     By default, update will refuse to run if doing so would require
     merging or discarding local changes.
     """
+    if date:
+        if node:
+            raise util.Abort(_("you can't specify a revision and a date"))
+        node = cmdutil.finddate(ui, repo, date)
+
     node = _lookup(repo, node, branch)
     if clean:
         return hg.clean(repo, node)
@@ -2354,10 +2587,7 @@ walkopts = [
 ]
 
 table = {
-    "^add":
-        (add,
-         walkopts + dryrunopts,
-         _('hg add [OPTION]... [FILE]...')),
+    "^add": (add, walkopts + dryrunopts, _('hg add [OPTION]... [FILE]...')),
     "addremove":
         (addremove,
          [('s', 'similarity', '',
@@ -2444,6 +2674,7 @@ table = {
         (debugcomplete,
          [('o', 'options', None, _('show the command options'))],
          _('debugcomplete [-o] CMD')),
+    "debuginstall": (debuginstall, [], _('debuginstall')),
     "debugrebuildstate":
         (debugrebuildstate,
          [('r', 'rev', '', _('revision to rebuild to'))],
@@ -2451,12 +2682,15 @@ table = {
     "debugcheckstate": (debugcheckstate, [], _('debugcheckstate')),
     "debugsetparents": (debugsetparents, [], _('debugsetparents REV1 [REV2]')),
     "debugstate": (debugstate, [], _('debugstate')),
+    "debugdate":
+        (debugdate,
+         [('e', 'extended', None, _('try extended date formats'))],
+         _('debugdate [-e] DATE [RANGE]')),
     "debugdata": (debugdata, [], _('debugdata FILE REV')),
     "debugindex": (debugindex, [], _('debugindex FILE')),
     "debugindexdot": (debugindexdot, [], _('debugindexdot FILE')),
     "debugrename": (debugrename, [], _('debugrename FILE [REV]')),
-    "debugwalk":
-        (debugwalk, walkopts, _('debugwalk [OPTION]... [FILE]...')),
+    "debugwalk": (debugwalk, walkopts, _('debugwalk [OPTION]... [FILE]...')),
     "^diff":
         (diff,
          [('r', 'rev', [], _('revision')),
@@ -2545,6 +2779,7 @@ table = {
            _('follow changeset history, or file history across copies and renames')),
           ('', 'follow-first', None,
            _('only follow the first parent of merge changesets')),
+          ('d', 'date', '', _('show revs matching date spec')),
           ('C', 'copies', None, _('show copied files')),
           ('k', 'keyword', [], _('search for a keyword')),
           ('l', 'limit', '', _('limit number of changes displayed')),
@@ -2624,6 +2859,7 @@ table = {
     "^revert":
         (revert,
          [('a', 'all', None, _('revert all changes when no arguments given')),
+          ('d', 'date', '', _('tipmost revision matching date')),
           ('r', 'rev', '', _('revision to revert to')),
           ('', 'no-backup', None, _('do not save backup copies of files')),
          ] + walkopts + dryrunopts,
@@ -2694,14 +2930,15 @@ table = {
         (update,
          [('b', 'branch', '',
            _('checkout the head of a specific branch (DEPRECATED)')),
-          ('C', 'clean', None, _('overwrite locally modified files'))],
+          ('C', 'clean', None, _('overwrite locally modified files')),
+          ('d', 'date', '', _('tipmost revision matching date'))],
          _('hg update [-C] [REV]')),
     "verify": (verify, [], _('hg verify')),
     "version": (version_, [], _('hg version')),
 }
 
 norepo = ("clone init version help debugancestor debugcomplete debugdata"
-          " debugindex debugindexdot")
+          " debugindex debugindexdot debugdate debuginstall")
 optionalrepo = ("paths serve showconfig")
 
 def findpossible(ui, cmd):
@@ -2905,11 +3142,7 @@ def dispatch(args):
 
         try:
             if options['cwd']:
-                try:
-                    os.chdir(options['cwd'])
-                except OSError, inst:
-                    raise util.Abort('%s: %s' %
-                                     (options['cwd'], inst.strerror))
+                os.chdir(options['cwd'])
 
             u.updateopts(options["verbose"], options["debug"], options["quiet"],
                          not options["noninteractive"], options["traceback"],

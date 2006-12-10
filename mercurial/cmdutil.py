@@ -18,7 +18,7 @@ def revpair(repo, revs):
     be None, meaning use working dir.'''
 
     def revfix(repo, val, defval):
-        if not val and val != 0:
+        if not val and val != 0 and defval is not None:
             val = defval
         return repo.lookup(val)
 
@@ -261,6 +261,7 @@ class changeset_printer(object):
         self.ui.write(_("changeset:   %d:%s\n") % (rev, hexfunc(changenode)))
 
         if branch:
+            branch = util.tolocal(branch)
             self.ui.write(_("branch:      %s\n") % branch)
         for tag in self.repo.nodetags(changenode):
             self.ui.write(_("tag:         %s\n") % tag)
@@ -313,7 +314,7 @@ class changeset_printer(object):
     def showpatch(self, node):
         if self.patch:
             prev = self.repo.changelog.parents(node)[0]
-            patch.diff(self.repo, prev, node, fp=self.ui)
+            patch.diff(self.repo, prev, node, match=self.patch, fp=self.ui)
             self.ui.write("\n")
 
 class changeset_templater(changeset_printer):
@@ -404,6 +405,7 @@ class changeset_templater(changeset_printer):
         def showbranches(**args):
             branch = changes[5].get("branch")
             if branch:
+                branch = util.tolocal(branch)
                 return showlist('branch', [branch], plural='branches', **args)
             # add old style branches if requested
             if self.brinfo:
@@ -508,7 +510,7 @@ class changeset_templater(changeset_printer):
         except SyntaxError, inst:
             raise util.Abort(_('%s: %s') % (self.t.mapfile, inst.args[0]))
 
-def show_changeset(ui, repo, opts, buffered=False):
+def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
     """show one changeset using template or regular display.
 
     Display format will be the first non-empty hit of:
@@ -520,7 +522,10 @@ def show_changeset(ui, repo, opts, buffered=False):
     regular display via changeset_printer() is done.
     """
     # options
-    patch = opts.get('patch')
+    patch = False
+    if opts.get('patch'):
+        patch = matchfn or util.always
+
     br = None
     if opts.get('branches'):
         ui.warn(_("the --branches option is deprecated, "
@@ -553,6 +558,25 @@ def show_changeset(ui, repo, opts, buffered=False):
         if tmpl: t.use_template(tmpl)
         return t
     return changeset_printer(ui, repo, patch, br, buffered)
+
+def finddate(ui, repo, date):
+    """Find the tipmost changeset that matches the given date spec"""
+    df = util.matchdate(date + " to " + date)
+    get = util.cachefunc(lambda r: repo.changectx(r).changeset())
+    changeiter, matchfn = walkchangerevs(ui, repo, [], get, {'rev':None})
+    results = {}
+    for st, rev, fns in changeiter:
+        if st == 'add':
+            d = get(rev)[2]
+            if df(d[0]):
+                results[rev] = d
+        elif st == 'iter':
+            if rev in results:
+                ui.status("Found revision %s from %s\n" %
+                          (rev, util.datestr(results[rev])))
+                return str(rev)
+
+    raise util.Abort(_("revision matching date not found"))
 
 def walkchangerevs(ui, repo, pats, change, opts):
     '''Iterate over files and the revs they changed in.

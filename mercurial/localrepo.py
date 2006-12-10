@@ -100,6 +100,10 @@ class localrepository(repo.repository):
         self.manifest = manifest.manifest(self.sopener, v)
         self.changelog = changelog.changelog(self.sopener, v)
 
+        fallback = self.ui.config('ui', 'fallbackencoding')
+        if fallback:
+            util._fallbackencoding = fallback
+
         # the changelog might not have the inline index flag
         # on.  If the format of the changelog is the same as found in
         # .hgrc, apply any flags found in the .hgrc as well.
@@ -340,18 +344,22 @@ class localrepository(repo.repository):
                 self.nodetagscache.setdefault(n, []).append(t)
         return self.nodetagscache.get(node, [])
 
-    def branchtags(self):
-        if self.branchcache != None:
-            return self.branchcache
-
-        self.branchcache = {} # avoid recursion in changectx
-
+    def _branchtags(self):
         partial, last, lrev = self._readbranchcache()
 
         tiprev = self.changelog.count() - 1
         if lrev != tiprev:
             self._updatebranchcache(partial, lrev+1, tiprev+1)
             self._writebranchcache(partial, self.changelog.tip(), tiprev)
+
+        return partial
+
+    def branchtags(self):
+        if self.branchcache is not None:
+            return self.branchcache
+
+        self.branchcache = {} # avoid recursion in changectx
+        partial = self._branchtags()
 
         # the branch cache is stored on disk as UTF-8, but in the local
         # charset internally
