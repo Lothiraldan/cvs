@@ -1,0 +1,78 @@
+#!/bin/sh
+
+mkdir t
+cd t
+hg init
+hg id
+echo a > a
+hg add a
+hg commit -m "test" -d "1000000 0"
+hg co
+hg identify
+T=`hg tip --debug | head -n 1 | cut -d : -f 3`
+echo "$T first" > .hgtags
+cat .hgtags
+hg add .hgtags
+hg commit -m "add tags" -d "1000000 0"
+hg tags
+hg identify
+echo bb > a
+hg status
+hg identify
+hg co first
+hg id
+hg -v id
+hg status
+echo 1 > b
+hg add b
+hg commit -m "branch" -d "1000000 0"
+hg id
+hg merge 1
+hg id
+hg status
+
+hg commit -m "merge" -d "1000000 0"
+
+# create fake head, make sure tag not visible afterwards
+cp .hgtags tags
+hg tag -d "1000000 0" last
+hg rm .hgtags
+hg commit -m "remove" -d "1000000 0"
+
+mv tags .hgtags
+hg add .hgtags
+hg commit -m "readd" -d "1000000 0"
+
+hg tags
+
+# invalid tags
+echo "spam" >> .hgtags
+echo >> .hgtags
+echo "foo bar" >> .hgtags
+echo "$T invalid" | sed "s/..../a5a5/" >> .hg/localtags
+hg commit -m "tags" -d "1000000 0"
+
+# report tag parse error on other head
+hg up 3
+echo 'x y' >> .hgtags
+hg commit -m "head" -d "1000000 0"
+
+hg tags
+hg tip
+
+# tags from later heads override previous ones
+cd ..
+hg init t2
+cd t2
+echo foo > foo
+hg add foo
+hg ci -m 'add foo' -d '1000000 0'      # rev 0
+hg tag -d '1000000 0' bar              # rev 1
+echo >> foo
+hg ci -m 'change foo 1' -d '1000000 0' # rev 2
+hg up -C 1
+hg tag -r 1 -d '1000000 0' bar         # rev 3
+hg up -C 1
+echo >> foo
+hg ci -m 'change foo 2' -d '1000000 0' # rev 4
+hg tags

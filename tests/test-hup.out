@@ -1,0 +1,14 @@
+0
+0
+adding changesets
+killed!
+transaction abort!
+rollback completed
+.hg:
+00changelog.i
+journal.dirstate
+requires
+store
+
+.hg/store:
+00changelog.i
