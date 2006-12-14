@@ -1,0 +1,34 @@
+#header#
+<title>#repo|escape#: Shortlog</title>
+<link rel="alternate" type="application/rss+xml"
+   href="{url}rss-log" title="RSS feed for #repo|escape#">
+</head>
+<body>
+
+<div class="page_header">
+<a href="http://www.selenic.com/mercurial/" title="Mercurial"><div style="float:right;">Mercurial</div></a><a href="{url}summary{sessionvars%urlparameter}">#repo|escape#</a> / shortlog
+</div>
+
+<form action="{url}log">
+{sessionvars%hiddenformentry}
+<div class="search">
+<input type="text" name="rev"  />
+</div>
+</form>
+</div>
+<div class="page_nav">
+<a href="{url}summary{sessionvars%urlparameter}">summary</a> |
+shortlog |
+<a href="{url}log/#rev#{sessionvars%urlparameter}">changelog</a> |
+<a href="{url}tags{sessionvars%urlparameter}">tags</a> |
+<a href="{url}file/#node|short#{sessionvars%urlparameter}">manifest</a>#archives%archiveentry#<br/>
+<br/>
+
+#changenav%navshortentry#<br/>
+</div>
+
+<table cellspacing="0">
+#entries%shortlogentry#
+</table>
+
+#footer#
