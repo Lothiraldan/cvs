@@ -40,6 +40,40 @@ echo % qnew implies add
 hg -R c qnew test.patch
 hg -R c/.hg/patches st
 
+echo '% qinit; qinit -c'
+hg init d
+cd d
+hg qinit
+hg qinit -c
+# qinit -c should create both files if they don't exist
+echo '  .hgignore:'
+cat .hg/patches/.hgignore
+echo '  series:'
+cat .hg/patches/series
+hg qinit -c 2>&1 | sed -e 's/repository.*already/repository already/'
+cd ..
+
+echo '% qinit; <stuff>; qinit -c'
+hg init e
+cd e
+hg qnew A
+echo foo > foo
+hg add foo
+hg qrefresh
+hg qnew B
+echo >> foo
+hg qrefresh
+echo status >> .hg/patches/.hgignore
+echo bleh >> .hg/patches/.hgignore
+hg qinit -c
+hg -R .hg/patches status
+# qinit -c shouldn't touch these files if they already exist
+echo '  .hgignore:'
+cat .hg/patches/.hgignore
+echo '  series:'
+cat .hg/patches/series
+cd ..
+
 cd a
 
 echo % qnew -m
@@ -146,6 +180,46 @@ hg qpush test1b.patch+1
 echo % push should succeed
 hg qpop -a
 hg push ../../k
+
+echo % qpush/qpop error codes
+errorcode()
+{
+    hg "$@" && echo "  $@ succeeds" || echo "  $@ fails"
+}
+
+# we want to start with some patches applied
+hg qpush -a
+echo "  % pops all patches and succeeds"
+errorcode qpop -a
+echo "  % does nothing and succeeds"
+errorcode qpop -a
+echo "  % fails - nothing else to pop"
+errorcode qpop
+echo "  % pushes a patch and succeeds"
+errorcode qpush
+echo "  % pops a patch and succeeds"
+errorcode qpop
+echo "  % pushes up to test1b.patch and succeeds"
+errorcode qpush test1b.patch
+echo "  % does nothing and succeeds"
+errorcode qpush test1b.patch
+echo "  % does nothing and succeeds"
+errorcode qpop test1b.patch
+echo "  % fails - can't push to this patch"
+errorcode qpush test.patch
+echo "  % fails - can't pop to this patch"
+errorcode qpop test2.patch
+echo "  % pops up to test.patch and succeeds"
+errorcode qpop test.patch
+echo "  % pushes all patches and succeeds"
+errorcode qpush -a
+echo "  % does nothing and succeeds"
+errorcode qpush -a
+echo "  % fails - nothing else to push"
+errorcode qpush
+echo "  % does nothing and succeeds"
+errorcode qpush test2.patch
+
 
 echo % strip
 cd ../../b

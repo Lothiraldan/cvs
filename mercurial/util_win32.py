@@ -13,10 +13,10 @@
 
 import win32api
 
-from demandload import *
-from i18n import gettext as _
-demandload(globals(), 'errno os pywintypes win32con win32file win32process')
-demandload(globals(), 'cStringIO win32com.shell:shell,shellcon winerror')
+from i18n import _
+import errno, os, pywintypes, win32con, win32file, win32process
+import cStringIO, winerror
+from win32com.shell import shell,shellcon
 
 class WinError:
     winerror_map = {
@@ -187,7 +187,7 @@ def system_rcpath_win32():
         filename = win32api.GetModuleFileName(0)
     return [os.path.join(os.path.dirname(filename), 'mercurial.ini')]
 
-def user_rcpath():
+def user_rcpath_win32():
     '''return os-specific hgrc search path to the user dir'''
     userdir = os.path.expanduser('~')
     if userdir == '~':

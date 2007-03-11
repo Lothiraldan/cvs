@@ -8,9 +8,8 @@ of the GNU General Public License, incorporated herein by reference.
 """
 
 from node import *
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "struct os time bisect stat strutil util re errno")
+from i18n import _
+import struct, os, time, bisect, stat, strutil, util, re, errno
 
 class dirstate(object):
     format = ">cllll"
@@ -338,14 +337,13 @@ class dirstate(object):
         return ret
 
     def supported_type(self, f, st, verbose=False):
-        if stat.S_ISREG(st.st_mode):
+        if stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode):
             return True
         if verbose:
             kind = 'unknown'
             if stat.S_ISCHR(st.st_mode): kind = _('character device')
             elif stat.S_ISBLK(st.st_mode): kind = _('block device')
             elif stat.S_ISFIFO(st.st_mode): kind = _('fifo')
-            elif stat.S_ISLNK(st.st_mode): kind = _('symbolic link')
             elif stat.S_ISSOCK(st.st_mode): kind = _('socket')
             elif stat.S_ISDIR(st.st_mode): kind = _('directory')
             self.ui.warn(_('%s: unsupported file type (type is %s)\n') % (
@@ -359,7 +357,7 @@ class dirstate(object):
             yield src, f
 
     def statwalk(self, files=None, match=util.always, ignored=False,
-                 badmatch=None):
+                 badmatch=None, directories=False):
         '''
         walk recursively through the directory tree, finding all files
         matched by the match function
@@ -367,6 +365,7 @@ class dirstate(object):
         results are yielded in a tuple (src, filename, st), where src
         is one of:
         'f' the file was found in the directory tree
+        'd' the file is a directory of the tree
         'm' the file was only in the dirstate and not in the tree
         'b' file was not found and matched badmatch
 
@@ -399,6 +398,8 @@ class dirstate(object):
         # recursion free walker, faster than os.walk.
         def findfiles(s):
             work = [s]
+            if directories:
+                yield 'd', util.normpath(s[common_prefix_len:]), os.lstat(s)
             while work:
                 top = work.pop()
                 names = os.listdir(top)
@@ -425,6 +426,8 @@ class dirstate(object):
                     if stat.S_ISDIR(st.st_mode):
                         if not ignore(p):
                             work.append(p)
+                            if directories:
+                                yield 'd', np, st
                         if imatch(np) and np in dc:
                             yield 'm', np, st
                     elif imatch(np):

@@ -6,13 +6,12 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os
-from mercurial.demandload import demandload
-demandload(globals(), "mimetools cStringIO")
-demandload(globals(), "mercurial:ui,hg,util,templater")
-demandload(globals(), "mercurial.hgweb.hgweb_mod:hgweb")
-demandload(globals(), "mercurial.hgweb.common:get_mtime,staticfile,style_map")
+from mercurial import demandimport; demandimport.enable()
+import os, mimetools, cStringIO
 from mercurial.i18n import gettext as _
+from mercurial import ui, hg, util, templater
+from common import get_mtime, staticfile, style_map
+from hgweb_mod import hgweb
 
 # This is a stopgap
 class hgwebdir(object):
@@ -31,8 +30,11 @@ class hgwebdir(object):
             self.repos = cleannames(config.items())
             self.repos.sort()
         else:
-            cp = util.configparser()
-            cp.read(config)
+            if isinstance(config, util.configparser):
+                cp = config
+            else:
+                cp = util.configparser()
+                cp.read(config)
             self.repos = []
             if cp.has_section('web'):
                 if cp.has_option('web', 'motd'):
@@ -86,6 +88,10 @@ class hgwebdir(object):
         if not url.endswith('/'):
             url += '/'
 
+        staticurl = config('web', 'staticurl') or url + 'static/'
+        if not staticurl.endswith('/'):
+            staticurl += '/'
+
         style = self.style
         if style is None:
             style = config('web', 'style', '')
@@ -96,7 +102,8 @@ class hgwebdir(object):
                                    defaults={"header": header,
                                              "footer": footer,
                                              "motd": motd,
-                                             "url": url})
+                                             "url": url,
+                                             "staticurl": staticurl})
 
         def archivelist(ui, nodeid, url):
             allowed = ui.configlist("web", "allow_archive", untrusted=True)

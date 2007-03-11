@@ -5,11 +5,9 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from demandload import demandload
 from node import *
-from i18n import gettext as _
-demandload(globals(), 'os sys')
-demandload(globals(), 'mdiff util templater patch')
+from i18n import _
+import os, sys, mdiff, bdiff, util, templater, patch
 
 revrangesep = ':'
 
@@ -143,21 +141,29 @@ def walk(repo, pats=[], opts={}, node=None, badmatch=None, globbed=False,
         yield src, fn, util.pathto(repo.getcwd(), fn), fn in exact
 
 def findrenames(repo, added=None, removed=None, threshold=0.5):
+    '''find renamed files -- yields (before, after, score) tuples'''
     if added is None or removed is None:
         added, removed = repo.status()[1:3]
-    changes = repo.changelog.read(repo.dirstate.parents()[0])
-    mf = repo.manifest.read(changes[0])
+    ctx = repo.changectx()
     for a in added:
         aa = repo.wread(a)
-        bestscore, bestname = None, None
+        bestname, bestscore = None, threshold
         for r in removed:
-            rr = repo.file(r).read(mf[r])
-            delta = mdiff.textdiff(aa, rr)
-            if len(delta) < len(aa):
-                myscore = 1.0 - (float(len(delta)) / len(aa))
-                if bestscore is None or myscore > bestscore:
-                    bestscore, bestname = myscore, r
-        if bestname and bestscore >= threshold:
+            rr = ctx.filectx(r).data()
+
+            # bdiff.blocks() returns blocks of matching lines
+            # count the number of bytes in each
+            equal = 0
+            alines = mdiff.splitnewlines(aa)
+            matches = bdiff.blocks(aa, rr)
+            for x1,x2,y1,y2 in matches:
+                for line in alines[x1:x2]:
+                    equal += len(line)
+
+            myscore = equal*2.0 / (len(aa)+len(rr))
+            if myscore >= bestscore:
+                bestname, bestscore = r, myscore
+        if bestname:
             yield bestname, a, bestscore
 
 def addremove(repo, pats=[], opts={}, wlock=None, dry_run=None,
@@ -174,7 +180,8 @@ def addremove(repo, pats=[], opts={}, wlock=None, dry_run=None,
             mapping[abs] = rel, exact
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        if repo.dirstate.state(abs) != 'r' and not os.path.exists(rel):
+        islink = os.path.islink(rel)
+        if repo.dirstate.state(abs) != 'r' and not islink and not os.path.exists(rel):
             remove.append(abs)
             mapping[abs] = rel, exact
             if repo.ui.verbose or not exact:
@@ -196,12 +203,11 @@ def addremove(repo, pats=[], opts={}, wlock=None, dry_run=None,
 class changeset_printer(object):
     '''show changeset information when templating not requested.'''
 
-    def __init__(self, ui, repo, patch, brinfo, buffered):
+    def __init__(self, ui, repo, patch, buffered):
         self.ui = ui
         self.repo = repo
         self.buffered = buffered
         self.patch = patch
-        self.brinfo = brinfo
         self.header = {}
         self.hunk = {}
         self.lastheader = None
@@ -265,11 +271,6 @@ class changeset_printer(object):
         for parent in parents:
             self.ui.write(_("parent:      %d:%s\n") % parent)
 
-        if self.brinfo:
-            br = self.repo.branchlookup([changenode])
-            if br:
-                self.ui.write(_("branch:      %s\n") % " ".join(br[changenode]))
-
         if self.ui.debugflag:
             self.ui.write(_("manifest:    %d:%s\n") %
                           (self.repo.manifest.rev(changes[0]), hex(changes[0])))
@@ -317,8 +318,8 @@ class changeset_printer(object):
 class changeset_templater(changeset_printer):
     '''format changeset information.'''
 
-    def __init__(self, ui, repo, patch, brinfo, mapfile, buffered):
-        changeset_printer.__init__(self, ui, repo, patch, brinfo, buffered)
+    def __init__(self, ui, repo, patch, mapfile, buffered):
+        changeset_printer.__init__(self, ui, repo, patch, buffered)
         self.t = templater.templater(mapfile, templater.common_filters,
                                      cache={'parent': '{rev}:{node|short} ',
                                             'manifest': '{rev}:{node|short}',
@@ -404,12 +405,6 @@ class changeset_templater(changeset_printer):
             if branch:
                 branch = util.tolocal(branch)
                 return showlist('branch', [branch], plural='branches', **args)
-            # add old style branches if requested
-            if self.brinfo:
-                br = self.repo.branchlookup([changenode])
-                if changenode in br:
-                    return showlist('branch', br[changenode],
-                                    plural='branches', **args)
 
         def showparents(**args):
             parents = [[('rev', log.rev(p)), ('node', hex(p))]
@@ -523,11 +518,6 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
     if opts.get('patch'):
         patch = matchfn or util.always
 
-    br = None
-    if opts.get('branches'):
-        ui.warn(_("the --branches option is deprecated, "
-                  "please use 'hg branches' instead\n"))
-        br = True
     tmpl = opts.get('template')
     mapfile = None
     if tmpl:
@@ -549,12 +539,12 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
                            or templater.templatepath(mapfile))
                 if mapname: mapfile = mapname
         try:
-            t = changeset_templater(ui, repo, patch, br, mapfile, buffered)
+            t = changeset_templater(ui, repo, patch, mapfile, buffered)
         except SyntaxError, inst:
             raise util.Abort(inst.args[0])
         if tmpl: t.use_template(tmpl)
         return t
-    return changeset_printer(ui, repo, patch, br, buffered)
+    return changeset_printer(ui, repo, patch, buffered)
 
 def finddate(ui, repo, date):
     """Find the tipmost changeset that matches the given date spec"""

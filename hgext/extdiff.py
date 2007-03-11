@@ -48,16 +48,15 @@
 # needed files, so running the external diff program will actually be
 # pretty fast (at least faster than having to compare the entire tree).
 
-from mercurial.demandload import demandload
-from mercurial.i18n import gettext as _
+from mercurial.i18n import _
 from mercurial.node import *
-demandload(globals(), 'mercurial:cmdutil,util os shutil tempfile')
+from mercurial import cmdutil, util
+import os, shutil, tempfile
 
 def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
     def snapshot_node(files, node):
         '''snapshot files as of some revision'''
-        changes = repo.changelog.read(node)
-        mf = repo.manifest.read(changes[0])
+        mf = repo.changectx(node).manifest()
         dirname = os.path.basename(repo.root)
         if dirname == "":
             dirname = "root"
@@ -77,7 +76,8 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
             destdir = os.path.dirname(dest)
             if not os.path.isdir(destdir):
                 os.makedirs(destdir)
-            repo.wwrite(wfn, repo.file(fn).read(mf[fn]), open(dest, 'wb'))
+            data = repo.wwritedata(wfn, repo.file(wfn).read(mf[wfn]))
+            open(dest, 'wb').write(data)
         return dirname
 
     def snapshot_wdir(files):

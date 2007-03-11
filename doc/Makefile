@@ -2,7 +2,7 @@ SOURCES=$(wildcard *.[0-9].txt)
 MAN=$(SOURCES:%.txt=%)
 HTML=$(SOURCES:%.txt=%.html)
 PREFIX=/usr/local
-MANDIR=$(PREFIX)/man
+MANDIR=$(PREFIX)/share/man
 INSTALL=install -c
 
 all: man html
@@ -36,8 +36,8 @@ MANIFEST: man html
 install: man
 	for i in $(MAN) ; do \
 	  subdir=`echo $$i | sed -n 's/..*\.\([0-9]\)$$/man\1/p'` ; \
-	  mkdir -p $(MANDIR)/$$subdir ; \
-	  $(INSTALL) $$i $(MANDIR)/$$subdir ; \
+	  mkdir -p $(DESTDIR)/$(MANDIR)/$$subdir ; \
+	  $(INSTALL) $$i $(DESTDIR)/$(MANDIR)/$$subdir ; \
 	done
 
 clean:

@@ -12,10 +12,9 @@ This contains helper routines that are independent of the SCM core and hide
 platform-specific details from the core.
 """
 
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "cStringIO errno getpass popen2 re shutil sys tempfile")
-demandload(globals(), "os threading time calendar ConfigParser locale glob")
+from i18n import _
+import cStringIO, errno, getpass, popen2, re, shutil, sys, tempfile
+import os, threading, time, calendar, ConfigParser, locale, glob
 
 try:
     _encoding = os.environ.get("HGENCODING") or locale.getpreferredencoding() \
@@ -117,10 +116,22 @@ extendeddateformats = defaultdateformats + (
 class SignalInterrupt(Exception):
     """Exception raised on SIGTERM and SIGHUP."""
 
-# like SafeConfigParser but with case-sensitive keys
+# differences from SafeConfigParser:
+# - case-sensitive keys
+# - allows values that are not strings (this means that you may not
+#   be able to save the configuration to a file)
 class configparser(ConfigParser.SafeConfigParser):
     def optionxform(self, optionstr):
         return optionstr
+
+    def set(self, section, option, value):
+        return ConfigParser.ConfigParser.set(self, section, option, value)
+
+    def _interpolate(self, section, option, rawval, vars):
+        if not isinstance(rawval, basestring):
+            return rawval
+        return ConfigParser.SafeConfigParser._interpolate(self, section,
+                                                          option, rawval, vars)
 
 def cachefunc(func):
     '''cache the result of function calls'''
@@ -729,9 +740,47 @@ def checkfolding(path):
     except:
         return True
 
+def checkexec(path):
+    """
+    Check whether the given path is on a filesystem with UNIX-like exec flags
+
+    Requires a directory (like /foo/.hg)
+    """
+    fh, fn = tempfile.mkstemp("", "", path)
+    os.close(fh)
+    m = os.stat(fn).st_mode
+    os.chmod(fn, m ^ 0111)
+    r = (os.stat(fn).st_mode != m)
+    os.unlink(fn)
+    return r
+
+def execfunc(path, fallback):
+    '''return an is_exec() function with default to fallback'''
+    if checkexec(path):
+        return lambda x: is_exec(os.path.join(path, x))
+    return fallback
+
+def checklink(path):
+    """check whether the given path is on a symlink-capable filesystem"""
+    # mktemp is not racy because symlink creation will fail if the
+    # file already exists
+    name = tempfile.mktemp(dir=path)
+    try:
+        os.symlink(".", name)
+        os.unlink(name)
+        return True
+    except (OSError, AttributeError):
+        return False
+
+def linkfunc(path, fallback):
+    '''return an is_link() function with default to fallback'''
+    if checklink(path):
+        return lambda x: is_link(os.path.join(path, x))
+    return fallback
+
 # Platform specific variants
 if os.name == 'nt':
-    demandload(globals(), "msvcrt")
+    import msvcrt
     nulldev = 'NUL:'
 
     class winstdout:
@@ -772,18 +821,17 @@ if os.name == 'nt':
         except:
             return [r'c:\mercurial\mercurial.ini']
 
-    def os_rcpath():
-        '''return default os-specific hgrc search path'''
-        path = system_rcpath()
-        path.append(user_rcpath())
+    def user_rcpath():
+        '''return os-specific hgrc search path to the user dir'''
+        try:
+            userrc = user_rcpath_win32()
+        except:
+            userrc = os.path.join(os.path.expanduser('~'), 'mercurial.ini')
+        path = [userrc]
         userprofile = os.environ.get('USERPROFILE')
         if userprofile:
             path.append(os.path.join(userprofile, 'mercurial.ini'))
         return path
-
-    def user_rcpath():
-        '''return os-specific hgrc search path to the user dir'''
-        return os.path.join(os.path.expanduser('~'), 'mercurial.ini')
 
     def parse_patch_output(output_line):
         """parses the output produced by patch and returns the file name"""
@@ -796,10 +844,10 @@ if os.name == 'nt':
         '''return False if pid dead, True if running or not known'''
         return True
 
-    def is_exec(f, last):
-        return last
-
     def set_exec(f, mode):
+        pass
+
+    def set_link(f, mode):
         pass
 
     def set_binary(fd):
@@ -856,6 +904,8 @@ if os.name == 'nt':
 
 else:
     nulldev = '/dev/null'
+    _umask = os.umask(0)
+    os.umask(_umask)
 
     def rcfiles(path):
         rcs = [os.path.join(path, 'hgrc')]
@@ -867,17 +917,17 @@ else:
             pass
         return rcs
 
-    def os_rcpath():
-        '''return default os-specific hgrc search path'''
+    def system_rcpath():
         path = []
         # old mod_python does not set sys.argv
         if len(getattr(sys, 'argv', [])) > 0:
             path.extend(rcfiles(os.path.dirname(sys.argv[0]) +
                                   '/../etc/mercurial'))
         path.extend(rcfiles('/etc/mercurial'))
-        path.append(os.path.expanduser('~/.hgrc'))
-        path = [os.path.normpath(f) for f in path]
         return path
+
+    def user_rcpath():
+        return [os.path.expanduser('~/.hgrc')]
 
     def parse_patch_output(output_line):
         """parses the output produced by patch and returns the file name"""
@@ -886,7 +936,7 @@ else:
             pf = pf[1:-1] # Remove the quotes
         return pf
 
-    def is_exec(f, last):
+    def is_exec(f):
         """check whether a file is executable"""
         return (os.lstat(f).st_mode & 0100 != 0)
 
@@ -897,11 +947,33 @@ else:
         if mode:
             # Turn on +x for every +r bit when making a file executable
             # and obey umask.
-            umask = os.umask(0)
-            os.umask(umask)
-            os.chmod(f, s | (s & 0444) >> 2 & ~umask)
+            os.chmod(f, s | (s & 0444) >> 2 & ~_umask)
         else:
             os.chmod(f, s & 0666)
+
+    def is_link(f):
+        """check whether a file is a symlink"""
+        return (os.lstat(f).st_mode & 0120000 == 0120000)
+
+    def set_link(f, mode):
+        """make a file a symbolic link/regular file
+
+        if a file is changed to a link, its contents become the link data
+        if a link is changed to a file, its link data become its contents
+        """
+
+        m = is_link(f)
+        if m == bool(mode):
+            return
+
+        if mode: # switch file to link
+            data = file(f).read()
+            os.unlink(f)
+            os.symlink(data, f)
+        else:
+            data = os.readlink(f)
+            os.unlink(f)
+            file(f, "w").write(data)
 
     def set_binary(fd):
         pass
@@ -1330,6 +1402,13 @@ def walkrepos(path):
                 break
 
 _rcpath = None
+
+def os_rcpath():
+    '''return default os-specific hgrc search path'''
+    path = system_rcpath()
+    path.extend(user_rcpath())
+    path = [os.path.normpath(f) for f in path]
+    return path
 
 def rcpath():
     '''return hgrc search path. if env var HGRCPATH is set, use it.
