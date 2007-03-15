@@ -1,0 +1,25 @@
+adding a
+adding b
+adding t.h
+adding t/x
+a
+locate succeeded
+locate failed
+a
+b
+t.h
+t/x
+b
+t.h
+t/x
+a
+a
+b
+t.h
+t/x
+% -I/-X with relative path should work
+b
+t.h
+t/x
+t/x
+t/x
