@@ -8,10 +8,9 @@
 
 from node import *
 from remoterepo import *
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "hg os urllib urllib2 urlparse zlib util httplib")
-demandload(globals(), "errno keepalive tempfile socket changegroup")
+from i18n import _
+import hg, os, urllib, urllib2, urlparse, zlib, util, httplib
+import errno, keepalive, tempfile, socket, changegroup
 
 class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def __init__(self, ui):
@@ -75,6 +74,14 @@ def netlocunsplit(host, port, user=None, passwd=None):
             userpass = urllib.quote(user)
         return userpass + '@' + hostport
     return hostport
+
+# work around a bug in Python < 2.4.2
+# (it leaves a "\n" at the end of Proxy-authorization headers)
+class request(urllib2.Request):
+    def add_header(self, key, val):
+        if key.lower() == 'proxy-authorization':
+            val = val.strip()
+        return urllib2.Request.add_header(self, key, val)
 
 class httpsendfile(file):
     def __len__(self):
@@ -239,7 +246,7 @@ class httprepository(remoterepository):
             if data:
                 self.ui.debug(_("sending %s bytes\n") %
                               headers.get('content-length', 'X'))
-            resp = urllib2.urlopen(urllib2.Request(cu, data, headers))
+            resp = urllib2.urlopen(request(cu, data, headers))
         except urllib2.HTTPError, inst:
             if inst.code == 401:
                 raise util.Abort(_('authorization failed'))

@@ -8,9 +8,8 @@ of the GNU General Public License, incorporated herein by reference.
 """
 
 from node import *
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "struct os time bisect stat strutil util re errno")
+from i18n import _
+import struct, os, time, bisect, stat, strutil, util, re, errno
 
 class dirstate(object):
     format = ">cllll"
@@ -25,6 +24,7 @@ class dirstate(object):
         self.dirs = None
         self.copymap = {}
         self.ignorefunc = None
+        self._branch = None
 
     def wjoin(self, f):
         return os.path.join(self.root, f)
@@ -33,10 +33,14 @@ class dirstate(object):
         cwd = os.getcwd()
         if cwd == self.root: return ''
         # self.root ends with a path separator if self.root is '/' or 'C:\'
-        common_prefix_len = len(self.root)
-        if not self.root.endswith(os.sep):
-            common_prefix_len += 1
-        return cwd[common_prefix_len:]
+        rootsep = self.root
+        if not rootsep.endswith(os.sep):
+            rootsep += os.sep
+        if cwd.startswith(rootsep):
+            return cwd[len(rootsep):]
+        else:
+            # we're outside the repo. return an absolute path.
+            return cwd
 
     def hgignore(self):
         '''return the contents of .hgignore files as a list of patterns.
@@ -137,6 +141,15 @@ class dirstate(object):
         self.lazyread()
         return self.pl
 
+    def branch(self):
+        if not self._branch:
+            try:
+                self._branch = self.opener("branch").read().strip()\
+                               or "default"
+            except IOError:
+                self._branch = "default"
+        return self._branch
+
     def markdirty(self):
         if not self.dirty:
             self.dirty = 1
@@ -145,6 +158,10 @@ class dirstate(object):
         self.lazyread()
         self.markdirty()
         self.pl = p1, p2
+
+    def setbranch(self, branch):
+        self._branch = branch
+        self.opener("branch", "w").write(branch + '\n')
 
     def state(self, key):
         try:
@@ -338,18 +355,17 @@ class dirstate(object):
         return ret
 
     def supported_type(self, f, st, verbose=False):
-        if stat.S_ISREG(st.st_mode):
+        if stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode):
             return True
         if verbose:
             kind = 'unknown'
             if stat.S_ISCHR(st.st_mode): kind = _('character device')
             elif stat.S_ISBLK(st.st_mode): kind = _('block device')
             elif stat.S_ISFIFO(st.st_mode): kind = _('fifo')
-            elif stat.S_ISLNK(st.st_mode): kind = _('symbolic link')
             elif stat.S_ISSOCK(st.st_mode): kind = _('socket')
             elif stat.S_ISDIR(st.st_mode): kind = _('directory')
             self.ui.warn(_('%s: unsupported file type (type is %s)\n') % (
-                util.pathto(self.getcwd(), f),
+                util.pathto(self.root, self.getcwd(), f),
                 kind))
         return False
 
@@ -359,7 +375,7 @@ class dirstate(object):
             yield src, f
 
     def statwalk(self, files=None, match=util.always, ignored=False,
-                 badmatch=None):
+                 badmatch=None, directories=False):
         '''
         walk recursively through the directory tree, finding all files
         matched by the match function
@@ -367,6 +383,7 @@ class dirstate(object):
         results are yielded in a tuple (src, filename, st), where src
         is one of:
         'f' the file was found in the directory tree
+        'd' the file is a directory of the tree
         'm' the file was only in the dirstate and not in the tree
         'b' file was not found and matched badmatch
 
@@ -399,6 +416,8 @@ class dirstate(object):
         # recursion free walker, faster than os.walk.
         def findfiles(s):
             work = [s]
+            if directories:
+                yield 'd', util.normpath(s[common_prefix_len:]), os.lstat(s)
             while work:
                 top = work.pop()
                 names = os.listdir(top)
@@ -425,6 +444,8 @@ class dirstate(object):
                     if stat.S_ISDIR(st.st_mode):
                         if not ignore(p):
                             work.append(p)
+                            if directories:
+                                yield 'd', np, st
                         if imatch(np) and np in dc:
                             yield 'm', np, st
                     elif imatch(np):
@@ -454,7 +475,7 @@ class dirstate(object):
                 if not found:
                     if inst.errno != errno.ENOENT or not badmatch:
                         self.ui.warn('%s: %s\n' % (
-                            util.pathto(self.getcwd(), ff),
+                            util.pathto(self.root, self.getcwd(), ff),
                             inst.strerror))
                     elif badmatch and badmatch(ff) and imatch(nf):
                         yield 'b', ff, None
