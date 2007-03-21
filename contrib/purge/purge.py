@@ -3,6 +3,16 @@
 # This is a small extension for Mercurial (http://www.selenic.com/mercurial)
 # that removes files not known to mercurial
 #
+# This program was inspired by the "cvspurge" script contained in CVS utilities
+# (http://www.red-bean.com/cvsutils/).
+#
+# To enable the "purge" extension put these lines in your ~/.hgrc:
+#  [extensions]
+#  purge = /path/to/purge.py
+#
+# For help on the usage of "hg purge" use:
+#  hg help purge
+#
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
@@ -18,118 +28,46 @@
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
 from mercurial import hg, util
+from mercurial.i18n import _
 import os
 
-def _(s):
-    return s
-
-class Purge(object):
-    def __init__(self, act=True, abort_on_err=False, eol='\n'):
-        self._repo = None
-        self._ui = None
-        self._hg_root = None
-        self._act = act
-        self._abort_on_err = abort_on_err
-        self._eol = eol
-
-    def purge(self, ui, repo, dirs=None):
-        self._repo = repo
-        self._ui = ui
-        self._hg_root = self._split_path(repo.root)
-
-        if not dirs:
-            dirs = [repo.root]
-
-        for path in dirs:
-            path = os.path.abspath(path)
-            for root, dirs, files in os.walk(path, topdown=False):
-                if '.hg' in self._split_path(root):
-                    # Skip files in the .hg directory.
-                    # Note that if the repository is in a directory
-                    # called .hg this command does not work.
-                    continue
-                for name in files:
-                    self._remove_file(os.path.join(root, name))
-                if not os.listdir(root):
-                    # Remove this directory if it is empty.
-                    self._remove_dir(root)
-
-        self._repo = None
-        self._ui = None
-        self._hg_root = None
-
-    def _error(self, msg):
-        if self._abort_on_err:
+def dopurge(ui, repo, dirs=None, act=True, abort_on_err=False, eol='\n'):
+    def error(msg):
+        if abort_on_err:
             raise util.Abort(msg)
         else:
-            self._ui.warn(_('warning: %s\n') % msg)
+            ui.warn(_('warning: %s\n') % msg)
 
-    def _remove_file(self, name):
-        relative_name = self._relative_name(name)
-        # dirstate.state() requires a path relative to the root
-        # directory.
-        if self._repo.dirstate.state(relative_name) != '?':
-            return
-        self._ui.note(_('Removing file %s\n') % name)
-        if self._act:
+    def remove(remove_func, name):
+        if act:
             try:
-                os.remove(name)
+                remove_func(os.path.join(repo.root, name))
             except OSError, e:
-                self._error(_('%s cannot be removed') % name)
+                error(_('%s cannot be removed') % name)
         else:
-            self._ui.write('%s%s' % (name, self._eol))
+            ui.write('%s%s' % (name, eol))
 
-    def _remove_dir(self, name):
-        self._ui.note(_('Removing directory %s\n') % name)
-        if self._act:
-            try:
-                os.rmdir(name)
-            except OSError, e:
-                self._error(_('%s cannot be removed') % name)
-        else:
-            self._ui.write('%s%s' % (name, self._eol))
+    directories = []
+    files = []
+    roots, match, anypats = util.cmdmatcher(repo.root, repo.getcwd(), dirs)
+    for src, f, st in repo.dirstate.statwalk(files=roots, match=match,
+                                             ignored=True, directories=True):
+        if src == 'd':
+            directories.append(f)
+        elif src == 'f' and f not in repo.dirstate:
+            files.append(f)
 
-    def _relative_name(self, path):
-        '''
-        Returns "path" but relative to the root directory of the
-        repository and with '\\' replaced with '/'.
-        This is needed because this is the format required by
-        self._repo.dirstate.state().
-        '''
-        splitted_path = self._split_path(path)[len(self._hg_root):]
-        # Even on Windows self._repo.dirstate.state() wants '/'.
-        return self._join_path(splitted_path).replace('\\', '/')
+    directories.sort()
 
-    def _split_path(self, path):
-        '''
-        Returns a list of the single files/directories in "path".
-        For instance:
-          '/home/user/test' -> ['/', 'home', 'user', 'test']
-          'C:\\Mercurial'   -> ['C:\\', 'Mercurial']
-        '''
-        ret = []
-        while True:
-            head, tail = os.path.split(path)
-            if tail:
-                ret.append(tail)
-            if head == path:
-                ret.append(head)
-                break
-            path = head
-        ret.reverse()
-        return ret
+    for f in files:
+        if f not in repo.dirstate:
+            ui.note(_('Removing file %s\n') % f)
+            remove(os.remove, f)
 
-    def _join_path(self, splitted_path):
-        '''
-        Joins a list returned by _split_path().
-        '''
-        ret = ''
-        for part in splitted_path:
-            if ret:
-                ret = os.path.join(ret, part)
-            else:
-                ret = part
-        return ret
+    for f in directories[::-1]:
+        if not os.listdir(repo.wjoin(f)):
+            ui.note(_('Removing directory %s\n') % f)
+            remove(os.rmdir, f)
 
 
 def purge(ui, repo, *dirs, **opts):
@@ -162,8 +100,7 @@ def purge(ui, repo, *dirs, **opts):
     if eol == '\0':
         # --print0 implies --print
         act = False
-    p = Purge(act, abort_on_err, eol)
-    p.purge(ui, repo, dirs)
+    dopurge(ui, repo, dirs, act, abort_on_err, eol)
 
 
 cmdtable = {
