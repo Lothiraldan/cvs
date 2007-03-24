@@ -7,7 +7,7 @@
 
 from node import *
 from i18n import _
-import repo, appendfile, changegroup
+import repo, changegroup
 import changelog, dirstate, filelog, manifest, context
 import re, lock, transaction, tempfile, stat, mdiff, errno, ui
 import os, revlog, time, util
@@ -88,33 +88,13 @@ class localrepository(repo.repository):
         except IOError:
             pass
 
-        v = self.ui.configrevlog()
-        self.revlogversion = int(v.get('format', revlog.REVLOG_DEFAULT_FORMAT))
-        self.revlogv1 = self.revlogversion != revlog.REVLOGV0
-        fl = v.get('flags', None)
-        flags = 0
-        if fl != None:
-            for x in fl.split():
-                flags |= revlog.flagstr(x)
-        elif self.revlogv1:
-            flags = revlog.REVLOG_DEFAULT_FLAGS
-
-        v = self.revlogversion | flags
-        self.manifest = manifest.manifest(self.sopener, v)
-        self.changelog = changelog.changelog(self.sopener, v)
+        self.changelog = changelog.changelog(self.sopener)
+        self.sopener.defversion = self.changelog.version
+        self.manifest = manifest.manifest(self.sopener)
 
         fallback = self.ui.config('ui', 'fallbackencoding')
         if fallback:
             util._fallbackencoding = fallback
-
-        # the changelog might not have the inline index flag
-        # on.  If the format of the changelog is the same as found in
-        # .hgrc, apply any flags found in the .hgrc as well.
-        # Otherwise, just version from the changelog
-        v = self.changelog.version
-        if v == self.revlogversion:
-            v |= flags
-        self.revlogversion = v
 
         self.tagscache = None
         self.branchcache = None
@@ -304,10 +284,10 @@ class localrepository(repo.repository):
                     warn(_("tag '%s' refers to unknown node") % key)
                     continue
 
-                h = {}
+                h = []
                 if key in filetags:
                     n, h = filetags[key]
-                    h[n] = True
+                    h.append(n)
                 filetags[key] = (bin_n, h)
 
             for k,nh in filetags.items():
@@ -323,7 +303,7 @@ class localrepository(repo.repository):
                 if bn != an and an in bh and \
                    (bn not in ah or len(bh) > len(ah)):
                     an = bn
-                ah.update(bh)
+                ah.append([n for n in bh if n not in ah])
                 globaltags[k] = an, ah
 
         # read the tags file from each head, ending with the tip
@@ -488,7 +468,7 @@ class localrepository(repo.repository):
     def file(self, f):
         if f[0] == '/':
             f = f[1:]
-        return filelog.filelog(self.sopener, f, self.revlogversion)
+        return filelog.filelog(self.sopener, f)
 
     def changectx(self, changeid=None):
         return context.changectx(self, changeid)
@@ -1801,55 +1781,45 @@ class localrepository(repo.repository):
 
         # write changelog data to temp files so concurrent readers will not see
         # inconsistent view
-        cl = None
-        try:
-            cl = appendfile.appendchangelog(self.sopener,
-                                            self.changelog.version)
+        cl = self.changelog
+        cl.delayupdate()
+        oldheads = len(cl.heads())
 
-            oldheads = len(cl.heads())
+        # pull off the changeset group
+        self.ui.status(_("adding changesets\n"))
+        cor = cl.count() - 1
+        chunkiter = changegroup.chunkiter(source)
+        if cl.addgroup(chunkiter, csmap, tr, 1) is None:
+            raise util.Abort(_("received changelog group is empty"))
+        cnr = cl.count() - 1
+        changesets = cnr - cor
 
-            # pull off the changeset group
-            self.ui.status(_("adding changesets\n"))
-            cor = cl.count() - 1
+        # pull off the manifest group
+        self.ui.status(_("adding manifests\n"))
+        chunkiter = changegroup.chunkiter(source)
+        # no need to check for empty manifest group here:
+        # if the result of the merge of 1 and 2 is the same in 3 and 4,
+        # no new manifest will be created and the manifest group will
+        # be empty during the pull
+        self.manifest.addgroup(chunkiter, revmap, tr)
+
+        # process the files
+        self.ui.status(_("adding file changes\n"))
+        while 1:
+            f = changegroup.getchunk(source)
+            if not f:
+                break
+            self.ui.debug(_("adding %s revisions\n") % f)
+            fl = self.file(f)
+            o = fl.count()
             chunkiter = changegroup.chunkiter(source)
-            if cl.addgroup(chunkiter, csmap, tr, 1) is None:
-                raise util.Abort(_("received changelog group is empty"))
-            cnr = cl.count() - 1
-            changesets = cnr - cor
-
-            # pull off the manifest group
-            self.ui.status(_("adding manifests\n"))
-            chunkiter = changegroup.chunkiter(source)
-            # no need to check for empty manifest group here:
-            # if the result of the merge of 1 and 2 is the same in 3 and 4,
-            # no new manifest will be created and the manifest group will
-            # be empty during the pull
-            self.manifest.addgroup(chunkiter, revmap, tr)
-
-            # process the files
-            self.ui.status(_("adding file changes\n"))
-            while 1:
-                f = changegroup.getchunk(source)
-                if not f:
-                    break
-                self.ui.debug(_("adding %s revisions\n") % f)
-                fl = self.file(f)
-                o = fl.count()
-                chunkiter = changegroup.chunkiter(source)
-                if fl.addgroup(chunkiter, revmap, tr) is None:
-                    raise util.Abort(_("received file revlog group is empty"))
-                revisions += fl.count() - o
-                files += 1
-
-            cl.writedata()
-        finally:
-            if cl:
-                cl.cleanup()
+            if fl.addgroup(chunkiter, revmap, tr) is None:
+                raise util.Abort(_("received file revlog group is empty"))
+            revisions += fl.count() - o
+            files += 1
 
         # make changelog see real files again
-        self.changelog = changelog.changelog(self.sopener,
-                                             self.changelog.version)
-        self.changelog.checkinlinesize(tr)
+        cl.finalize(tr)
 
         newheads = len(self.changelog.heads())
         heads = ""
