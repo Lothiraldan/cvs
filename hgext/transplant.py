@@ -5,11 +5,10 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from mercurial.demandload import *
-from mercurial.i18n import gettext as _
-demandload(globals(), 'os tempfile')
-demandload(globals(), 'mercurial:bundlerepo,cmdutil,commands,hg,merge,patch')
-demandload(globals(), 'mercurial:revlog,util')
+from mercurial.i18n import _
+import os, tempfile
+from mercurial import bundlerepo, changegroup, cmdutil, commands, hg, merge
+from mercurial import patch, revlog, util
 
 '''patch transplanting tool
 
@@ -120,7 +119,8 @@ class transplanter:
                     if pulls:
                         if source != repo:
                             repo.pull(source, heads=pulls, lock=lock)
-                        merge.update(repo, pulls[-1], wlock=wlock)
+                        merge.update(repo, pulls[-1], False, False, None,
+                                     wlock=wlock)
                         p1, p2 = repo.dirstate.parents()
                         pulls = []
 
@@ -151,10 +151,10 @@ class transplanter:
                                           log=opts.get('log'),
                                           filter=opts.get('filter'),
                                           lock=lock, wlock=wlock)
-                        if domerge:
+                        if n and domerge:
                             self.ui.status(_('%s merged at %s\n') % (revstr,
                                       revlog.short(n)))
-                        else:
+                        elif n:
                             self.ui.status(_('%s transplanted to %s\n') % (revlog.short(node),
                                                                        revlog.short(n)))
                     finally:
@@ -162,7 +162,7 @@ class transplanter:
                             os.unlink(patchfile)
             if pulls:
                 repo.pull(source, heads=pulls, lock=lock)
-                merge.update(repo, pulls[-1], wlock=wlock)
+                merge.update(repo, pulls[-1], False, False, None, wlock=wlock)
         finally:
             self.saveseries(revmap, merges)
             self.transplants.write()
@@ -217,7 +217,7 @@ class transplanter:
                                        files=files)
                     if not files:
                         self.ui.warn(_('%s: empty changeset') % revlog.hex(node))
-                        return
+                        return None
                 finally:
                     files = patch.updatedir(self.ui, repo, files, wlock=wlock)
             except Exception, inst:
@@ -473,7 +473,7 @@ def transplant(ui, repo, *revs, **opts):
         bundle = None
         if not source.local():
             cg = source.changegroup(incoming, 'incoming')
-            bundle = commands.write_bundle(cg, compress=False)
+            bundle = changegroup.writebundle(cg, None, 'HG10UN')
             source = bundlerepo.bundlerepository(ui, repo.root, bundle)
 
         return (source, incoming, bundle)
@@ -575,6 +575,7 @@ def transplant(ui, repo, *revs, **opts):
         tp.apply(repo, source, revmap, merges, opts)
     finally:
         if bundle:
+            source.close()
             os.unlink(bundle)
 
 cmdtable = {
@@ -588,5 +589,5 @@ cmdtable = {
           ('', 'log', None, _('append transplant info to log message')),
           ('c', 'continue', None, _('continue last transplant session after repair')),
           ('', 'filter', '', _('filter changesets through FILTER'))],
-         _('hg transplant [-s REPOSITORY] [-b BRANCH] [-p REV] [-m REV] [-n] REV...'))
+         _('hg transplant [-s REPOSITORY] [-b BRANCH [-a]] [-p REV] [-m REV] [REV]...'))
 }

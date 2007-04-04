@@ -7,7 +7,6 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 import os, mimetypes
-import os.path
 
 def get_mtime(repo_path):
     store_path = os.path.join(repo_path, ".hg")
@@ -39,7 +38,7 @@ def staticfile(directory, fname, req):
         os.stat(path)
         ct = mimetypes.guess_type(path)[0] or "text/plain"
         req.header([('Content-type', ct),
-                    ('Content-length', os.path.getsize(path))])
+                    ('Content-length', str(os.path.getsize(path)))])
         return file(path, 'rb').read()
     except (TypeError, OSError):
         # illegal fname or unreadable file

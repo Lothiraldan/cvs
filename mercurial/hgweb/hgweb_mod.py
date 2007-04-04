@@ -6,17 +6,13 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os
-import os.path
-import mimetypes
-from mercurial.demandload import demandload
-demandload(globals(), "re zlib ConfigParser mimetools cStringIO sys tempfile")
-demandload(globals(), 'urllib bz2')
-demandload(globals(), "mercurial:mdiff,ui,hg,util,archival,streamclone,patch")
-demandload(globals(), "mercurial:revlog,templater")
-demandload(globals(), "mercurial.hgweb.common:get_mtime,staticfile,style_map")
+import os, mimetypes, re, zlib, mimetools, cStringIO, sys
+import tempfile, urllib, bz2
 from mercurial.node import *
 from mercurial.i18n import gettext as _
+from mercurial import mdiff, ui, hg, util, archival, streamclone, patch
+from mercurial import revlog, templater
+from common import get_mtime, staticfile, style_map
 
 def _up(p):
     if p[0] != "/":
@@ -172,14 +168,10 @@ class hgweb(object):
                     yield self.t("diffline", line=l)
 
         r = self.repo
-        cl = r.changelog
-        mf = r.manifest
-        change1 = cl.read(node1)
-        change2 = cl.read(node2)
-        mmap1 = mf.read(change1[0])
-        mmap2 = mf.read(change2[0])
-        date1 = util.datestr(change1[2])
-        date2 = util.datestr(change2[2])
+        c1 = r.changectx(node1)
+        c2 = r.changectx(node2)
+        date1 = util.datestr(c1.date())
+        date2 = util.datestr(c2.date())
 
         modified, added, removed, deleted, unknown = r.status(node1, node2)[:5]
         if files:
@@ -188,17 +180,17 @@ class hgweb(object):
 
         diffopts = patch.diffopts(self.repo.ui, untrusted=True)
         for f in modified:
-            to = r.file(f).read(mmap1[f])
-            tn = r.file(f).read(mmap2[f])
+            to = c1.filectx(f).data()
+            tn = c2.filectx(f).data()
             yield diffblock(mdiff.unidiff(to, date1, tn, date2, f,
                                           opts=diffopts), f, tn)
         for f in added:
             to = None
-            tn = r.file(f).read(mmap2[f])
+            tn = c2.filectx(f).data()
             yield diffblock(mdiff.unidiff(to, date1, tn, date2, f,
                                           opts=diffopts), f, tn)
         for f in removed:
-            to = r.file(f).read(mmap1[f])
+            to = c1.filectx(f).data()
             tn = None
             yield diffblock(mdiff.unidiff(to, date1, tn, date2, f,
                                           opts=diffopts), f, tn)
@@ -497,8 +489,6 @@ class hgweb(object):
                      archives=self.archivelist(hex(node)))
 
     def tags(self):
-        cl = self.repo.changelog
-
         i = self.repo.tagslist()
         i.reverse()
 
@@ -509,7 +499,7 @@ class hgweb(object):
                     continue
                 yield {"parity": self.stripes(parity),
                        "tag": k,
-                       "date": cl.read(n)[2],
+                       "date": self.repo.changectx(n).date(),
                        "node": hex(n)}
                 parity += 1
 
@@ -519,8 +509,6 @@ class hgweb(object):
                      entriesnotip=lambda **x: entries(True, **x))
 
     def summary(self):
-        cl = self.repo.changelog
-
         i = self.repo.tagslist()
         i.reverse()
 
@@ -535,69 +523,64 @@ class hgweb(object):
                 if count > 10: # limit to 10 tags
                     break;
 
-                c = cl.read(n)
-                t = c[2]
-
                 yield self.t("tagentry",
-                             parity = self.stripes(parity),
-                             tag = k,
-                             node = hex(n),
-                             date = t)
+                             parity=self.stripes(parity),
+                             tag=k,
+                             node=hex(n),
+                             date=self.repo.changectx(n).date())
                 parity += 1
 
-        def heads(**map):
+
+        def branches(**map):
             parity = 0
-            count = 0
 
-            for node in self.repo.heads():
-                count += 1
-                if count > 10:
-                    break;
+            b = self.repo.branchtags()
+            l = [(-self.repo.changelog.rev(n), n, t) for t, n in b.items()]
+            l.sort()
 
-                ctx = self.repo.changectx(node)
+            for r,n,t in l:
+                ctx = self.repo.changectx(n)
 
                 yield {'parity': self.stripes(parity),
-                       'branch': ctx.branch(),
-                       'node': hex(node),
+                       'branch': t,
+                       'node': hex(n),
                        'date': ctx.date()}
                 parity += 1
 
         def changelist(**map):
             parity = 0
-            cl = self.repo.changelog
             l = [] # build a list in forward order for efficiency
             for i in xrange(start, end):
-                n = cl.node(i)
-                changes = cl.read(n)
-                hn = hex(n)
-                t = changes[2]
+                ctx = self.repo.changectx(i)
+                hn = hex(ctx.node())
 
                 l.insert(0, self.t(
                     'shortlogentry',
-                    parity = parity,
-                    author = changes[1],
-                    desc = changes[4],
-                    date = t,
-                    rev = i,
-                    node = hn))
+                    parity=parity,
+                    author=ctx.user(),
+                    desc=ctx.description(),
+                    date=ctx.date(),
+                    rev=i,
+                    node=hn))
                 parity = 1 - parity
 
             yield l
 
+        cl = self.repo.changelog
         count = cl.count()
         start = max(0, count - self.maxchanges)
         end = min(count, start + self.maxchanges)
 
         yield self.t("summary",
-                 desc = self.config("web", "description", "unknown"),
-                 owner = (self.config("ui", "username") or # preferred
-                          self.config("web", "contact") or # deprecated
-                          self.config("web", "author", "unknown")), # also
-                 lastchange = cl.read(cl.tip())[2],
-                 tags = tagentries,
-                 heads = heads,
-                 shortlog = changelist,
-                 node = hex(cl.tip()),
+                 desc=self.config("web", "description", "unknown"),
+                 owner=(self.config("ui", "username") or # preferred
+                        self.config("web", "contact") or # deprecated
+                        self.config("web", "author", "unknown")), # also
+                 lastchange=cl.read(cl.tip())[2],
+                 tags=tagentries,
+                 branches=branches,
+                 shortlog=changelist,
+                 node=hex(cl.tip()),
                  archives=self.archivelist("tip"))
 
     def filediff(self, fctx):
@@ -623,9 +606,13 @@ class hgweb(object):
         'zip': ('application/zip', 'zip', '.zip', None),
         }
 
-    def archive(self, req, cnode, type_):
+    def archive(self, req, id, type_):
         reponame = re.sub(r"\W+", "-", os.path.basename(self.reponame))
-        name = "%s-%s" % (reponame, short(cnode))
+        cnode = self.repo.lookup(id)
+        arch_version = id
+        if cnode == id or id == 'tip':
+            arch_version = short(cnode)
+        name = "%s-%s" % (reponame, arch_version)
         mimetype, artype, extension, encoding = self.archive_specs[type_]
         headers = [('Content-type', mimetype),
                    ('Content-disposition', 'attachment; filename=%s%s' %
@@ -789,6 +776,9 @@ class hgweb(object):
         port = req.env["SERVER_PORT"]
         port = port != "80" and (":" + port) or ""
         urlbase = 'http://%s%s' % (req.env['SERVER_NAME'], port)
+        staticurl = self.config("web", "staticurl") or req.url + 'static/'
+        if not staticurl.endswith('/'):
+            staticurl += '/'
 
         if not self.reponame:
             self.reponame = (self.config("web", "name")
@@ -797,6 +787,7 @@ class hgweb(object):
 
         self.t = templater.templater(mapfile, templater.common_filters,
                                      defaults={"url": req.url,
+                                               "staticurl": staticurl,
                                                "urlbase": urlbase,
                                                "repo": self.reponame,
                                                "header": header,
@@ -806,19 +797,22 @@ class hgweb(object):
                                                "sessionvars": sessionvars
                                                })
 
-        if not req.form.has_key('cmd'):
-            req.form['cmd'] = [self.t.cache['default']]
+        try:
+            if not req.form.has_key('cmd'):
+                req.form['cmd'] = [self.t.cache['default']]
 
-        cmd = req.form['cmd'][0]
+            cmd = req.form['cmd'][0]
 
-        method = getattr(self, 'do_' + cmd, None)
-        if method:
-            try:
-                method(req)
-            except (hg.RepoError, revlog.RevlogError), inst:
-                req.write(self.t("error", error=str(inst)))
-        else:
-            req.write(self.t("error", error='No such method: ' + cmd))
+            method = getattr(self, 'do_' + cmd, None)
+            if method:
+                try:
+                    method(req)
+                except (hg.RepoError, revlog.RevlogError), inst:
+                    req.write(self.t("error", error=str(inst)))
+            else:
+                req.write(self.t("error", error='No such method: ' + cmd))
+        finally:
+            self.t = None
 
     def changectx(self, req):
         if req.form.has_key('node'):
@@ -873,7 +867,7 @@ class hgweb(object):
             try:
                 req.write(self.filerevision(self.filectx(req)))
                 return
-            except hg.RepoError:
+            except revlog.LookupError:
                 pass
 
         req.write(self.manifest(self.changectx(req), path))
@@ -1002,12 +996,11 @@ class hgweb(object):
         req.write(z.flush())
 
     def do_archive(self, req):
-        changeset = self.repo.lookup(req.form['node'][0])
         type_ = req.form['type'][0]
         allowed = self.configlist("web", "allow_archive")
         if (type_ in self.archives and (type_ in allowed or
             self.configbool("web", "allow" + type_, False))):
-            self.archive(req, changeset, type_)
+            self.archive(req, req.form['node'][0], type_)
             return
 
         req.write(self.t("error"))
@@ -1025,7 +1018,7 @@ class hgweb(object):
     def do_capabilities(self, req):
         caps = ['lookup', 'changegroupsubset']
         if self.configbool('server', 'uncompressed'):
-            caps.append('stream=%d' % self.repo.revlogversion)
+            caps.append('stream=%d' % self.repo.changelog.version)
         # XXX: make configurable and/or share code with do_unbundle:
         unbundleversions = ['HG10GZ', 'HG10BZ', 'HG10UN']
         if unbundleversions:
@@ -1076,8 +1069,6 @@ class hgweb(object):
                  headers={'status': '401 Unauthorized'})
             return
 
-        req.httphdr("application/mercurial-0.1")
-
         their_heads = req.form['heads'][0].split(' ')
 
         def check_heads():
@@ -1089,6 +1080,8 @@ class hgweb(object):
             bail(_('unsynced changes\n'))
             return
 
+        req.httphdr("application/mercurial-0.1")
+
         # do not lock repo until all changegroup data is
         # streamed. save to temporary file.
 
@@ -1099,67 +1092,78 @@ class hgweb(object):
             for s in util.filechunkiter(req, limit=length):
                 fp.write(s)
 
-            lock = self.repo.lock()
             try:
-                if not check_heads():
-                    req.write('0\n')
-                    req.write(_('unsynced changes\n'))
-                    return
-
-                fp.seek(0)
-                header = fp.read(6)
-                if not header.startswith("HG"):
-                    # old client with uncompressed bundle
-                    def generator(f):
-                        yield header
-                        for chunk in f:
-                            yield chunk
-                elif not header.startswith("HG10"):
-                    req.write("0\n")
-                    req.write(_("unknown bundle version\n"))
-                    return
-                elif header == "HG10GZ":
-                    def generator(f):
-                        zd = zlib.decompressobj()
-                        for chunk in f:
-                            yield zd.decompress(chunk)
-                elif header == "HG10BZ":
-                    def generator(f):
-                        zd = bz2.BZ2Decompressor()
-                        zd.decompress("BZ")
-                        for chunk in f:
-                            yield zd.decompress(chunk)
-                elif header == "HG10UN":
-                    def generator(f):
-                        for chunk in f:
-                            yield chunk
-                else:
-                    req.write("0\n")
-                    req.write(_("unknown bundle compression type\n"))
-                    return
-                gen = generator(util.filechunkiter(fp, 4096))
-
-                # send addchangegroup output to client
-
-                old_stdout = sys.stdout
-                sys.stdout = cStringIO.StringIO()
-
+                lock = self.repo.lock()
                 try:
-                    url = 'remote:%s:%s' % (proto,
-                                            req.env.get('REMOTE_HOST', ''))
+                    if not check_heads():
+                        req.write('0\n')
+                        req.write(_('unsynced changes\n'))
+                        return
+
+                    fp.seek(0)
+                    header = fp.read(6)
+                    if not header.startswith("HG"):
+                        # old client with uncompressed bundle
+                        def generator(f):
+                            yield header
+                            for chunk in f:
+                                yield chunk
+                    elif not header.startswith("HG10"):
+                        req.write("0\n")
+                        req.write(_("unknown bundle version\n"))
+                        return
+                    elif header == "HG10GZ":
+                        def generator(f):
+                            zd = zlib.decompressobj()
+                            for chunk in f:
+                                yield zd.decompress(chunk)
+                    elif header == "HG10BZ":
+                        def generator(f):
+                            zd = bz2.BZ2Decompressor()
+                            zd.decompress("BZ")
+                            for chunk in f:
+                                yield zd.decompress(chunk)
+                    elif header == "HG10UN":
+                        def generator(f):
+                            for chunk in f:
+                                yield chunk
+                    else:
+                        req.write("0\n")
+                        req.write(_("unknown bundle compression type\n"))
+                        return
+                    gen = generator(util.filechunkiter(fp, 4096))
+
+                    # send addchangegroup output to client
+
+                    old_stdout = sys.stdout
+                    sys.stdout = cStringIO.StringIO()
+
                     try:
-                        ret = self.repo.addchangegroup(util.chunkbuffer(gen),
-                                                       'serve', url)
-                    except util.Abort, inst:
-                        sys.stdout.write("abort: %s\n" % inst)
-                        ret = 0
+                        url = 'remote:%s:%s' % (proto,
+                                                req.env.get('REMOTE_HOST', ''))
+                        try:
+                            ret = self.repo.addchangegroup(
+                                        util.chunkbuffer(gen), 'serve', url)
+                        except util.Abort, inst:
+                            sys.stdout.write("abort: %s\n" % inst)
+                            ret = 0
+                    finally:
+                        val = sys.stdout.getvalue()
+                        sys.stdout = old_stdout
+                    req.write('%d\n' % ret)
+                    req.write(val)
                 finally:
-                    val = sys.stdout.getvalue()
-                    sys.stdout = old_stdout
-                req.write('%d\n' % ret)
-                req.write(val)
-            finally:
-                lock.release()
+                    lock.release()
+            except (OSError, IOError), inst:
+                req.write('0\n')
+                filename = getattr(inst, 'filename', '')
+                # Don't send our filesystem layout to the client
+                if filename.startswith(self.repo.root):
+                    filename = filename[len(self.repo.root)+1:]
+                else:
+                    filename = ''
+                error = getattr(inst, 'strerror', 'Unknown error')
+                req.write('%s: %s\n' % (error, filename))
         finally:
             fp.close()
             os.unlink(tempname)

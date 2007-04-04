@@ -7,10 +7,9 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from demandload import *
-from i18n import gettext as _
-demandload(globals(), "changelog filelog httprangereader")
-demandload(globals(), "repo localrepo manifest os urllib urllib2 util")
+from i18n import _
+import changelog, filelog, httprangereader
+import repo, localrepo, manifest, os, urllib, urllib2, util
 
 class rangereader(httprangereader.httprangereader):
     def read(self, size=None):
@@ -33,7 +32,6 @@ class statichttprepository(localrepo.localrepository):
     def __init__(self, ui, path):
         self._url = path
         self.ui = ui
-        self.revlogversion = 0
 
         self.path = (path + "/.hg")
         self.opener = opener(self.path)

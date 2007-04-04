@@ -6,11 +6,11 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from mercurial.demandload import demandload
-import os, sys, errno
-demandload(globals(), "urllib BaseHTTPServer socket SocketServer traceback")
-demandload(globals(), "mercurial:ui,hg,util,templater")
-demandload(globals(), "hgweb_mod:hgweb hgwebdir_mod:hgwebdir request:wsgiapplication")
+import os, sys, errno, urllib, BaseHTTPServer, socket, SocketServer, traceback
+from mercurial import ui, hg, util, templater
+from hgweb_mod import hgweb
+from hgwebdir_mod import hgwebdir
+from request import wsgiapplication
 from mercurial.i18n import gettext as _
 
 def _splitURI(uri):
@@ -206,12 +206,17 @@ def create_server(ui, repo):
             BaseHTTPServer.HTTPServer.__init__(self, *args, **kargs)
             self.accesslog = accesslog
             self.errorlog = errorlog
-            self.repo = repo
-            self.webdir_conf = webdir_conf
-            self.webdirmaker = hgwebdir
-            self.repoviewmaker = hgweb
-            self.reqmaker = wsgiapplication(self.make_handler)
             self.daemon_threads = True
+            def make_handler():
+                if webdir_conf:
+                    hgwebobj = hgwebdir(webdir_conf, ui)
+                elif repo is not None:
+                    hgwebobj = hgweb(hg.repository(repo.ui, repo.root))
+                else:
+                    raise hg.RepoError(_("There is no Mercurial repository here"
+                                         " (.hg not found)"))
+                return hgwebobj
+            self.reqmaker = wsgiapplication(make_handler)
 
             addr, port = self.socket.getsockname()[:2]
             if addr in ('0.0.0.0', '::'):
@@ -222,17 +227,6 @@ def create_server(ui, repo):
                 except socket.error:
                     pass
             self.addr, self.port = addr, port
-
-        def make_handler(self):
-            if self.webdir_conf:
-                hgwebobj = self.webdirmaker(self.webdir_conf, ui)
-            elif self.repo is not None:
-                hgwebobj = self.repoviewmaker(hg.repository(repo.ui,
-                                                            repo.root))
-            else:
-                raise hg.RepoError(_("There is no Mercurial repository here"
-                                     " (.hg not found)"))
-            return hgwebobj
 
     class IPv6HTTPServer(MercurialHTTPServer):
         address_family = getattr(socket, 'AF_INET6', None)

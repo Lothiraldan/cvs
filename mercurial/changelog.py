@@ -6,9 +6,8 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from revlog import *
-from i18n import gettext as _
-from demandload import demandload
-demandload(globals(), "os time util")
+from i18n import _
+import os, time, util
 
 def _string_escape(text):
     """
@@ -27,10 +26,100 @@ def _string_escape(text):
 def _string_unescape(text):
     return text.decode('string_escape')
 
+class appender:
+    '''the changelog index must be update last on disk, so we use this class
+    to delay writes to it'''
+    def __init__(self, fp, buf):
+        self.data = buf
+        self.fp = fp
+        self.offset = fp.tell()
+        self.size = util.fstat(fp).st_size
+
+    def end(self):
+        return self.size + len("".join(self.data))
+    def tell(self):
+        return self.offset
+    def flush(self):
+        pass
+    def close(self):
+        close(self.fp)
+
+    def seek(self, offset, whence=0):
+        '''virtual file offset spans real file and data'''
+        if whence == 0:
+            self.offset = offset
+        elif whence == 1:
+            self.offset += offset
+        elif whence == 2:
+            self.offset = self.end() + offset
+        if self.offset < self.size:
+            self.fp.seek(self.offset)
+
+    def read(self, count=-1):
+        '''only trick here is reads that span real file and data'''
+        ret = ""
+        old_offset = self.offset
+        if self.offset < self.size:
+            s = self.fp.read(count)
+            ret = s
+            self.offset += len(s)
+            if count > 0:
+                count -= len(s)
+        if count != 0:
+            doff = self.offset - self.size
+            self.data.insert(0, "".join(self.data))
+            del self.data[1:]
+            s = self.data[0][doff:doff+count]
+            self.offset += len(s)
+            ret += s
+        return ret
+
+    def write(self, s):
+        self.data.append(s)
+        self.offset += len(s)
+
 class changelog(revlog):
-    def __init__(self, opener, defversion=REVLOGV0):
-        revlog.__init__(self, opener, "00changelog.i", "00changelog.d",
-                        defversion)
+    def __init__(self, opener):
+        revlog.__init__(self, opener, "00changelog.i")
+
+    def delayupdate(self):
+        "delay visibility of index updates to other readers"
+        self._realopener = self.opener
+        self.opener = self._delayopener
+        self._delaycount = self.count()
+        self._delaybuf = []
+        self._delayname = None
+
+    def finalize(self, tr):
+        "finalize index updates"
+        self.opener = self._realopener
+        # move redirected index data back into place
+        if self._delayname:
+            util.rename(self._delayname + ".a", self._delayname)
+        elif self._delaybuf:
+            fp = self.opener(self.indexfile, 'a')
+            fp.write("".join(self._delaybuf))
+            fp.close()
+            del self._delaybuf
+        # split when we're done
+        self.checkinlinesize(tr)
+
+    def _delayopener(self, name, mode='r'):
+        fp = self._realopener(name, mode)
+        # only divert the index
+        if not name == self.indexfile:
+            return fp
+        # if we're doing an initial clone, divert to another file
+        if self._delaycount == 0:
+            self._delayname = fp.name
+            return self._realopener(name + ".a", mode)
+        # otherwise, divert to memory
+        return appender(fp, self._delaybuf)
+
+    def checkinlinesize(self, tr, fp=None):
+        if self.opener == self._delayopener:
+            return
+        return revlog.checkinlinesize(self, tr, fp)
 
     def decode_extra(self, text):
         extra = {}
@@ -59,7 +148,7 @@ class changelog(revlog):
         changelog v0 doesn't use extra
         """
         if not text:
-            return (nullid, "", (0, 0), [], "", {})
+            return (nullid, "", (0, 0), [], "", {'branch': 'default'})
         last = text.index("\n\n")
         desc = util.tolocal(text[last + 2:])
         l = text[:last].split('\n')
@@ -79,6 +168,8 @@ class changelog(revlog):
             time, timezone, extra = extra_data
             time, timezone = float(time), int(timezone)
             extra = self.decode_extra(extra)
+        if not extra.get('branch'):
+            extra['branch'] = 'default'
         files = l[3:]
         return (manifest, user, (time, timezone), files, desc, extra)
 
@@ -94,6 +185,8 @@ class changelog(revlog):
             parseddate = "%d %d" % util.parsedate(date)
         else:
             parseddate = "%d %d" % util.makedate()
+        if extra and extra.get("branch") in ("default", ""):
+            del extra["branch"]
         if extra:
             extra = self.encode_extra(extra)
             parseddate = "%s %s" % (parseddate, extra)

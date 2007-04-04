@@ -11,10 +11,9 @@ of the GNU General Public License, incorporated herein by reference.
 """
 
 from node import *
-from i18n import gettext as _
-from demandload import demandload
-demandload(globals(), "binascii changegroup errno ancestor mdiff os")
-demandload(globals(), "sha struct util zlib")
+from i18n import _
+import binascii, changegroup, errno, ancestor, mdiff, os
+import sha, struct, util, zlib
 
 # revlog version strings
 REVLOGV0 = 0
@@ -26,11 +25,6 @@ REVLOG_DEFAULT_FLAGS = REVLOGNGINLINEDATA
 
 REVLOG_DEFAULT_FORMAT = REVLOGNG
 REVLOG_DEFAULT_VERSION = REVLOG_DEFAULT_FORMAT | REVLOG_DEFAULT_FLAGS
-
-def flagstr(flag):
-    if flag == "inline":
-        return REVLOGNGINLINEDATA
-    raise RevlogError(_("unknown revlog flag %s") % flag)
 
 def hash(text, p1, p2):
     """generate a hash from the given text and its parent hashes
@@ -147,6 +141,9 @@ class lazyparser(object):
         lend = len(data) / self.s
         i = blockstart / self.s
         off = 0
+        # lazyindex supports __delitem__
+        if lend > len(self.index) - i:
+            lend = len(self.index) - i
         for x in xrange(lend):
             if self.index[i + x] == None:
                 b = data[off : off + self.s]
@@ -282,6 +279,7 @@ class lazymap(object):
         del self.p.map[key]
 
 class RevlogError(Exception): pass
+class LookupError(RevlogError): pass
 
 class revlog(object):
     """
@@ -308,8 +306,7 @@ class revlog(object):
     remove data, and can use some simple techniques to avoid the need
     for locking while reading.
     """
-    def __init__(self, opener, indexfile, datafile,
-                 defversion=REVLOG_DEFAULT_VERSION):
+    def __init__(self, opener, indexfile):
         """
         create a revlog object
 
@@ -317,13 +314,17 @@ class revlog(object):
         and can be used to implement COW semantics or the like.
         """
         self.indexfile = indexfile
-        self.datafile = datafile
+        self.datafile = indexfile[:-2] + ".d"
         self.opener = opener
 
         self.indexstat = None
         self.cache = None
         self.chunkcache = None
-        self.defversion = defversion
+        self.defversion = REVLOG_DEFAULT_VERSION
+        if hasattr(opener, "defversion"):
+            self.defversion = opener.defversion
+            if self.defversion & REVLOGNG:
+                self.defversion |= REVLOGNGINLINEDATA
         self.load()
 
     def load(self):
@@ -425,10 +426,13 @@ class revlog(object):
                 self.nodemap[e[-1]] = n
                 n += 1
                 if inline:
+                    if e[1] < 0:
+                        break
                     off += e[1]
                     if off > l:
                         # some things don't seek well, just read it
                         fp.read(off - l)
+                        break
             if not st:
                 break
 
@@ -472,7 +476,7 @@ class revlog(object):
         try:
             return self.nodemap[node]
         except KeyError:
-            raise RevlogError(_('%s: no node %s') % (self.indexfile, hex(node)))
+            raise LookupError(_('%s: no node %s') % (self.indexfile, hex(node)))
     def linkrev(self, node):
         return (node == nullid) and nullrev or self.index[self.rev(node)][-4]
     def parents(self, node):
@@ -767,7 +771,7 @@ class revlog(object):
                 node = id
                 r = self.rev(node) # quick search the index
                 return node
-            except RevlogError:
+            except LookupError:
                 pass # may be partial hex id
         try:
             # str(rev)
@@ -796,7 +800,7 @@ class revlog(object):
                 for n in self.nodemap:
                     if n.startswith(bin_id) and hex(n).startswith(id):
                         if node is not None:
-                            raise RevlogError(_("Ambiguous identifier"))
+                            raise LookupError(_("Ambiguous identifier"))
                         node = n
                 if node is not None:
                     return node
@@ -816,7 +820,7 @@ class revlog(object):
         if n:
             return n
 
-        raise RevlogError(_("No match found"))
+        raise LookupError(_("No match found"))
 
     def cmp(self, node, text):
         """compare text with a given file revision"""
@@ -1156,13 +1160,13 @@ class revlog(object):
 
             for p in (p1, p2):
                 if not p in self.nodemap:
-                    raise RevlogError(_("unknown parent %s") % short(p))
+                    raise LookupError(_("unknown parent %s") % short(p))
 
             if not chain:
                 # retrieve the parent revision of the delta chain
                 chain = p1
                 if not chain in self.nodemap:
-                    raise RevlogError(_("unknown base %s") % short(chain[:4]))
+                    raise LookupError(_("unknown base %s") % short(chain[:4]))
 
             # full versions are inserted when the needed deltas become
             # comparable to the uncompressed text or when the previous
