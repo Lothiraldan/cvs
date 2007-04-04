@@ -1,0 +1,22 @@
+#!/bin/bash
+# http://www.selenic.com/mercurial/bts/issue352
+
+hg init foo
+cd foo
+
+A=`echo -e -n 'he\rllo'`
+
+echo foo > "$A"
+hg add
+hg ci -A -m m
+rm "$A"
+
+echo foo > "hell
+o"
+hg add
+hg ci -A -m m
+
+echo foo > "$A"
+hg debugwalk
+
+exit 0
