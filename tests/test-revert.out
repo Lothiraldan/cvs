@@ -1,0 +1,64 @@
+%% should show b unknown
+? b
+%% should show b unknown and c modified
+M c
+? b
+%% should show b added and c modified
+M c
+A b
+%% should show a removed, b added and c modified
+M c
+A b
+R a
+%% should show b added, copy saved, and c modified
+M c
+A b
+%% should show b unknown, and c modified
+M c
+? b
+%% should show unknown: b
+? b
+%% should show a b c e
+a
+b
+c
+e
+%% should verbosely save backup to e.orig
+saving current version of e as e.orig
+reverting e
+resolving manifests
+getting e
+%% should say no changes needed
+no changes needed to a
+%% should say file not managed
+file not managed: q
+%% should say file not found
+notfound: No such file in rev 095eacd0c0d7
+A z
+? b
+? e.orig
+%% should add a, forget z
+adding a
+forgetting z
+%% should forget a
+forgetting a
+%% should silently add a
+A a
+0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+reverting c
+%% should print non-executable
+non-executable
+reverting c
+%% should print executable
+executable
+%% issue 241
+adding a
+1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+% should fail - no arguments
+abort: no files or directories specified; use --all to revert the whole repo
+% should succeed
+reverting a
+%% issue332
+adding b/b
+reverting b/b
+forgetting newdir/newfile

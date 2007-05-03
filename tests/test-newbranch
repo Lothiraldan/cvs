@@ -1,0 +1,52 @@
+#!/bin/sh
+
+hg init t
+cd t
+hg branches
+
+echo foo > a
+hg add a
+hg ci -m "initial" -d "1000000 0"
+hg branch foo
+hg branch
+hg ci -m "add branch name" -d "1000000 0"
+hg branch bar
+hg ci -m "change branch name" -d "1000000 0"
+hg branch default
+hg ci -m "clear branch name" -d "1000000 0"
+
+hg co foo
+hg branch
+echo bleah > a
+hg ci -m "modify a branch" -d "1000000 0"
+
+hg merge
+hg branch
+hg ci -m "merge" -d "1000000 0"
+hg log
+
+hg branches
+hg branches -q
+
+echo % test for invalid branch cache
+hg rollback
+cp .hg/branch.cache .hg/bc-invalid
+hg log -r foo
+cp .hg/bc-invalid .hg/branch.cache
+hg --debug log -r foo
+rm .hg/branch.cache
+echo corrupted > .hg/branch.cache
+hg log -qr foo
+cat .hg/branch.cache
+
+echo % update with no arguments: tipmost revision of the current branch
+hg up -q -C 0
+hg up -q
+hg id
+hg up -q 1
+hg up -q
+hg id
+hg branch foobar
+hg up
+
+exit 0
