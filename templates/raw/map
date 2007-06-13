@@ -1,0 +1,16 @@
+header = header.tmpl
+footer = ''
+changeset = changeset.tmpl
+difflineplus = '#line#'
+difflineminus = '#line#'
+difflineat = '#line#'
+diffline = '#line#'
+changesetparent = '# Parent #node#'
+changesetchild = '# Child #node#'
+filenodelink = ''
+filerevision = '#rawfileheader##raw#'
+fileline = '#line#'
+diffblock = '#lines#'
+filediff = filediff.tmpl
+fileannotate = fileannotate.tmpl
+annotateline = '#author#@#rev#: #line#'
