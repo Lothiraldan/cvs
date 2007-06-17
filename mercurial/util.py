@@ -12,14 +12,20 @@ This contains helper routines that are independent of the SCM core and hide
 platform-specific details from the core.
 """
 
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "cStringIO errno getpass popen2 re shutil sys tempfile")
-demandload(globals(), "os threading time calendar ConfigParser locale glob")
+from i18n import _
+import cStringIO, errno, getpass, popen2, re, shutil, sys, tempfile
+import os, threading, time, calendar, ConfigParser, locale, glob
 
 try:
-    _encoding = os.environ.get("HGENCODING") or locale.getpreferredencoding() \
-                or "ascii"
+    _encoding = os.environ.get("HGENCODING")
+    if sys.platform == 'darwin' and not _encoding:
+        # On darwin, getpreferredencoding ignores the locale environment and
+        # always returns mac-roman. We override this if the environment is
+        # not C (has been customized by the user).
+        locale.setlocale(locale.LC_CTYPE, '')
+        _encoding = locale.getlocale()[1]
+    if not _encoding:
+        _encoding = locale.getpreferredencoding() or 'ascii'
 except locale.Error:
     _encoding = 'ascii'
 _encodingmode = os.environ.get("HGENCODINGMODE", "strict")
@@ -78,7 +84,7 @@ def localsub(s, a, b=None):
         return u.encode(_encoding, _encodingmode)
     except UnicodeDecodeError, inst:
         sub = s[max(0, inst.start-10), inst.start+10]
-        raise Abort(_("decoding near '%s': %s!\n") % (sub, inst))
+        raise Abort(_("decoding near '%s': %s!") % (sub, inst))
 
 # used by parsedate
 defaultdateformats = (
@@ -117,10 +123,22 @@ extendeddateformats = defaultdateformats + (
 class SignalInterrupt(Exception):
     """Exception raised on SIGTERM and SIGHUP."""
 
-# like SafeConfigParser but with case-sensitive keys
+# differences from SafeConfigParser:
+# - case-sensitive keys
+# - allows values that are not strings (this means that you may not
+#   be able to save the configuration to a file)
 class configparser(ConfigParser.SafeConfigParser):
     def optionxform(self, optionstr):
         return optionstr
+
+    def set(self, section, option, value):
+        return ConfigParser.ConfigParser.set(self, section, option, value)
+
+    def _interpolate(self, section, option, rawval, vars):
+        if not isinstance(rawval, basestring):
+            return rawval
+        return ConfigParser.SafeConfigParser._interpolate(self, section,
+                                                          option, rawval, vars)
 
 def cachefunc(func):
     '''cache the result of function calls'''
@@ -199,18 +217,6 @@ def filter(s, cmd):
         if cmd.startswith(name):
             return fn(s, cmd[len(name):].lstrip())
     return pipefilter(s, cmd)
-
-def find_in_path(name, path, default=None):
-    '''find name in search path. path can be string (will be split
-    with os.pathsep), or iterable thing that returns strings.  if name
-    found, return path to name. else return default.'''
-    if isinstance(path, str):
-        path = path.split(os.pathsep)
-    for p in path:
-        p_name = os.path.join(p, name)
-        if os.path.exists(p_name):
-            return p_name
-    return default
 
 def binary(s):
     """return true if a string is binary data using diff's heuristic"""
@@ -387,16 +393,17 @@ def canonpath(root, cwd, myname):
 
         raise Abort('%s not under root' % myname)
 
-def matcher(canonroot, cwd='', names=['.'], inc=[], exc=[], head='', src=None):
-    return _matcher(canonroot, cwd, names, inc, exc, head, 'glob', src)
+def matcher(canonroot, cwd='', names=[], inc=[], exc=[], src=None):
+    return _matcher(canonroot, cwd, names, inc, exc, 'glob', src)
 
-def cmdmatcher(canonroot, cwd='', names=['.'], inc=[], exc=[], head='',
-               src=None, globbed=False):
-    if not globbed:
+def cmdmatcher(canonroot, cwd='', names=[], inc=[], exc=[], src=None,
+               globbed=False, default=None):
+    default = default or 'relpath'
+    if default == 'relpath' and not globbed:
         names = expand_glob(names)
-    return _matcher(canonroot, cwd, names, inc, exc, head, 'relpath', src)
+    return _matcher(canonroot, cwd, names, inc, exc, default, src)
 
-def _matcher(canonroot, cwd, names, inc, exc, head, dflt_pat, src):
+def _matcher(canonroot, cwd, names, inc, exc, dflt_pat, src):
     """build a function to match a set of file patterns
 
     arguments:
@@ -405,26 +412,30 @@ def _matcher(canonroot, cwd, names, inc, exc, head, dflt_pat, src):
     names - patterns to find
     inc - patterns to include
     exc - patterns to exclude
-    head - a regex to prepend to patterns to control whether a match is rooted
+    dflt_pat - if a pattern in names has no explicit type, assume this one
+    src - where these patterns came from (e.g. .hgignore)
 
     a pattern is one of:
-    'glob:<rooted glob>'
-    're:<rooted regexp>'
-    'path:<rooted path>'
-    'relglob:<relative glob>'
-    'relpath:<relative path>'
-    'relre:<relative regexp>'
-    '<rooted path or regexp>'
+    'glob:<glob>' - a glob relative to cwd
+    're:<regexp>' - a regular expression
+    'path:<path>' - a path relative to canonroot
+    'relglob:<glob>' - an unrooted glob (*.c matches C files in all dirs)
+    'relpath:<path>' - a path relative to cwd
+    'relre:<regexp>' - a regexp that doesn't have to match the start of a name
+    '<something>' - one of the cases above, selected by the dflt_pat argument
 
     returns:
     a 3-tuple containing
-    - list of explicit non-pattern names passed in
+    - list of roots (places where one should start a recursive walk of the fs);
+      this often matches the explicit non-pattern names passed in, but also
+      includes the initial part of glob: patterns that has no glob characters
     - a bool match(filename) function
     - a bool indicating if any patterns were passed in
-
-    todo:
-    make head regex a rooted bool
     """
+
+    # a common case: no patterns at all
+    if not names and not inc and not exc:
+        return [], always, False
 
     def contains_glob(name):
         for c in name:
@@ -433,84 +444,92 @@ def _matcher(canonroot, cwd, names, inc, exc, head, dflt_pat, src):
 
     def regex(kind, name, tail):
         '''convert a pattern into a regular expression'''
+        if not name:
+            return ''
         if kind == 're':
             return name
         elif kind == 'path':
             return '^' + re.escape(name) + '(?:/|$)'
         elif kind == 'relglob':
-            return head + globre(name, '(?:|.*/)', tail)
+            return globre(name, '(?:|.*/)', tail)
         elif kind == 'relpath':
-            return head + re.escape(name) + tail
+            return re.escape(name) + '(?:/|$)'
         elif kind == 'relre':
             if name.startswith('^'):
                 return name
             return '.*' + name
-        return head + globre(name, '', tail)
+        return globre(name, '', tail)
 
     def matchfn(pats, tail):
         """build a matching function from a set of patterns"""
         if not pats:
             return
-        matches = []
-        for k, p in pats:
-            try:
-                pat = '(?:%s)' % regex(k, p, tail)
-                matches.append(re.compile(pat).match)
-            except re.error:
-                if src: raise Abort("%s: invalid pattern (%s): %s" % (src, k, p))
-                else: raise Abort("invalid pattern (%s): %s" % (k, p))
-
-        def buildfn(text):
-            for m in matches:
-                r = m(text)
-                if r:
-                    return r
-
-        return buildfn
+        try:
+            pat = '(?:%s)' % '|'.join([regex(k, p, tail) for (k, p) in pats])
+            return re.compile(pat).match
+        except re.error:
+            for k, p in pats:
+                try:
+                    re.compile('(?:%s)' % regex(k, p, tail))
+                except re.error:
+                    if src:
+                        raise Abort("%s: invalid pattern (%s): %s" %
+                                    (src, k, p))
+                    else:
+                        raise Abort("invalid pattern (%s): %s" % (k, p))
+            raise Abort("invalid pattern")
 
     def globprefix(pat):
         '''return the non-glob prefix of a path, e.g. foo/* -> foo'''
         root = []
-        for p in pat.split(os.sep):
+        for p in pat.split('/'):
             if contains_glob(p): break
             root.append(p)
-        return '/'.join(root)
+        return '/'.join(root) or '.'
 
-    pats = []
-    files = []
-    roots = []
-    for kind, name in [patkind(p, dflt_pat) for p in names]:
-        if kind in ('glob', 'relpath'):
-            name = canonpath(canonroot, cwd, name)
-            if name == '':
-                kind, name = 'glob', '**'
-        if kind in ('glob', 'path', 're'):
+    def normalizepats(names, default):
+        pats = []
+        roots = []
+        anypats = False
+        for kind, name in [patkind(p, default) for p in names]:
+            if kind in ('glob', 'relpath'):
+                name = canonpath(canonroot, cwd, name)
+            elif kind in ('relglob', 'path'):
+                name = normpath(name)
+
             pats.append((kind, name))
-        if kind == 'glob':
-            root = globprefix(name)
-            if root: roots.append(root)
-        elif kind == 'relpath':
-            files.append((kind, name))
-            roots.append(name)
+
+            if kind in ('glob', 're', 'relglob', 'relre'):
+                anypats = True
+
+            if kind == 'glob':
+                root = globprefix(name)
+                roots.append(root)
+            elif kind in ('relpath', 'path'):
+                roots.append(name or '.')
+            elif kind == 'relglob':
+                roots.append('.')
+        return roots, pats, anypats
+
+    roots, pats, anypats = normalizepats(names, dflt_pat)
 
     patmatch = matchfn(pats, '$') or always
-    filematch = matchfn(files, '(?:/|$)') or always
     incmatch = always
     if inc:
-        inckinds = [patkind(canonpath(canonroot, cwd, i)) for i in inc]
+        dummy, inckinds, dummy = normalizepats(inc, 'glob')
         incmatch = matchfn(inckinds, '(?:/|$)')
     excmatch = lambda fn: False
     if exc:
-        exckinds = [patkind(canonpath(canonroot, cwd, x)) for x in exc]
+        dummy, exckinds, dummy = normalizepats(exc, 'glob')
         excmatch = matchfn(exckinds, '(?:/|$)')
 
-    return (roots,
-            lambda fn: (incmatch(fn) and not excmatch(fn) and
-                        (fn.endswith('/') or
-                         (not pats and not files) or
-                         (pats and patmatch(fn)) or
-                         (files and filematch(fn)))),
-            (inc or exc or (pats and pats != [('glob', '**')])) and True)
+    if not names and inc and not exc:
+        # common case: hgignore patterns
+        match = incmatch
+    else:
+        match = lambda fn: incmatch(fn) and not excmatch(fn) and patmatch(fn)
+
+    return (roots, match, (inc or exc or anypats) and True)
 
 def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None):
     '''enhanced shell command execution.
@@ -559,6 +578,15 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None):
         if cwd is not None and oldcwd != cwd:
             os.chdir(oldcwd)
 
+# os.path.lexists is not available on python2.3
+def lexists(filename):
+    "test whether a file with this name exists. does not follow symlinks"
+    try:
+        os.lstat(filename)
+    except:
+        return False
+    return True
+
 def rename(src, dst):
     """forcibly rename a file"""
     try:
@@ -588,11 +616,18 @@ def unlink(f):
 
 def copyfile(src, dest):
     "copy a file, preserving mode"
-    try:
-        shutil.copyfile(src, dest)
-        shutil.copymode(src, dest)
-    except shutil.Error, inst:
-        raise Abort(str(inst))
+    if os.path.islink(src):
+        try:
+            os.unlink(dest)
+        except:
+            pass
+        os.symlink(os.readlink(src), dest)
+    else:
+        try:
+            shutil.copyfile(src, dest)
+            shutil.copymode(src, dest)
+        except shutil.Error, inst:
+            raise Abort(str(inst))
 
 def copyfiles(src, dst, hardlink=None):
     """Copy a directory tree using hardlinks if possible"""
@@ -622,7 +657,7 @@ def audit_path(path):
     parts = os.path.normcase(path).split(os.sep)
     if (os.path.splitdrive(path)[0] or parts[0] in ('.hg', '')
         or os.pardir in parts):
-        raise Abort(_("path contains illegal component: %s\n") % path)
+        raise Abort(_("path contains illegal component: %s") % path)
 
 def _makelock_file(info, pathname):
     ld = os.open(pathname, os.O_CREAT | os.O_WRONLY | os.O_EXCL)
@@ -724,12 +759,54 @@ def checkfolding(path):
     except:
         return True
 
+def checkexec(path):
+    """
+    Check whether the given path is on a filesystem with UNIX-like exec flags
+
+    Requires a directory (like /foo/.hg)
+    """
+    fh, fn = tempfile.mkstemp("", "", path)
+    os.close(fh)
+    m = os.stat(fn).st_mode
+    os.chmod(fn, m ^ 0111)
+    r = (os.stat(fn).st_mode != m)
+    os.unlink(fn)
+    return r
+
+def execfunc(path, fallback):
+    '''return an is_exec() function with default to fallback'''
+    if checkexec(path):
+        return lambda x: is_exec(os.path.join(path, x))
+    return fallback
+
+def checklink(path):
+    """check whether the given path is on a symlink-capable filesystem"""
+    # mktemp is not racy because symlink creation will fail if the
+    # file already exists
+    name = tempfile.mktemp(dir=path)
+    try:
+        os.symlink(".", name)
+        os.unlink(name)
+        return True
+    except (OSError, AttributeError):
+        return False
+
+def linkfunc(path, fallback):
+    '''return an is_link() function with default to fallback'''
+    if checklink(path):
+        return lambda x: os.path.islink(os.path.join(path, x))
+    return fallback
+
 _umask = os.umask(0)
 os.umask(_umask)
 
+def needbinarypatch():
+    """return True if patches should be applied in binary mode by default."""
+    return os.name == 'nt'
+
 # Platform specific variants
 if os.name == 'nt':
-    demandload(globals(), "msvcrt")
+    import msvcrt
     nulldev = 'NUL:'
 
     class winstdout:
@@ -753,7 +830,7 @@ if os.name == 'nt':
                 if inst.errno != 0: raise
                 self.close()
                 raise IOError(errno.EPIPE, 'Broken pipe')
-                
+
         def flush(self):
             try:
                 return self.fp.flush()
@@ -770,18 +847,17 @@ if os.name == 'nt':
         except:
             return [r'c:\mercurial\mercurial.ini']
 
-    def os_rcpath():
-        '''return default os-specific hgrc search path'''
-        path = system_rcpath()
-        path.append(user_rcpath())
+    def user_rcpath():
+        '''return os-specific hgrc search path to the user dir'''
+        try:
+            userrc = user_rcpath_win32()
+        except:
+            userrc = os.path.join(os.path.expanduser('~'), 'mercurial.ini')
+        path = [userrc]
         userprofile = os.environ.get('USERPROFILE')
         if userprofile:
             path.append(os.path.join(userprofile, 'mercurial.ini'))
         return path
-
-    def user_rcpath():
-        '''return os-specific hgrc search path to the user dir'''
-        return os.path.join(os.path.expanduser('~'), 'mercurial.ini')
 
     def parse_patch_output(output_line):
         """parses the output produced by patch and returns the file name"""
@@ -794,10 +870,10 @@ if os.name == 'nt':
         '''return False if pid dead, True if running or not known'''
         return True
 
-    def is_exec(f, last):
-        return last
-
     def set_exec(f, mode):
+        pass
+
+    def set_link(f, mode):
         pass
 
     def set_binary(fd):
@@ -844,6 +920,30 @@ if os.name == 'nt':
     def isowner(fp, st=None):
         return True
 
+    def find_in_path(name, path, default=None):
+        '''find name in search path. path can be string (will be split
+        with os.pathsep), or iterable thing that returns strings.  if name
+        found, return path to name. else return default. name is looked up
+        using cmd.exe rules, using PATHEXT.'''
+        if isinstance(path, str):
+            path = path.split(os.pathsep)
+
+        pathext = os.environ.get('PATHEXT', '.COM;.EXE;.BAT;.CMD')
+        pathext = pathext.lower().split(os.pathsep)
+        isexec = os.path.splitext(name)[1].lower() in pathext
+
+        for p in path:
+            p_name = os.path.join(p, name)
+
+            if isexec and os.path.exists(p_name):
+                return p_name
+
+            for ext in pathext:
+                p_name_ext = p_name + ext
+                if os.path.exists(p_name_ext):
+                    return p_name_ext
+        return default
+
     try:
         # override functions with win32 versions if possible
         from util_win32 import *
@@ -865,17 +965,17 @@ else:
             pass
         return rcs
 
-    def os_rcpath():
-        '''return default os-specific hgrc search path'''
+    def system_rcpath():
         path = []
         # old mod_python does not set sys.argv
         if len(getattr(sys, 'argv', [])) > 0:
             path.extend(rcfiles(os.path.dirname(sys.argv[0]) +
                                   '/../etc/mercurial'))
         path.extend(rcfiles('/etc/mercurial'))
-        path.append(os.path.expanduser('~/.hgrc'))
-        path = [os.path.normpath(f) for f in path]
         return path
+
+    def user_rcpath():
+        return [os.path.expanduser('~/.hgrc')]
 
     def parse_patch_output(output_line):
         """parses the output produced by patch and returns the file name"""
@@ -884,7 +984,7 @@ else:
             pf = pf[1:-1] # Remove the quotes
         return pf
 
-    def is_exec(f, last):
+    def is_exec(f):
         """check whether a file is executable"""
         return (os.lstat(f).st_mode & 0100 != 0)
 
@@ -898,6 +998,26 @@ else:
             os.chmod(f, s | (s & 0444) >> 2 & ~_umask)
         else:
             os.chmod(f, s & 0666)
+
+    def set_link(f, mode):
+        """make a file a symbolic link/regular file
+
+        if a file is changed to a link, its contents become the link data
+        if a link is changed to a file, its link data become its contents
+        """
+
+        m = os.path.islink(f)
+        if m == bool(mode):
+            return
+
+        if mode: # switch file to link
+            data = file(f).read()
+            os.unlink(f)
+            os.symlink(data, f)
+        else:
+            data = os.readlink(f)
+            os.unlink(f)
+            file(f, "w").write(data)
 
     def set_binary(fd):
         pass
@@ -961,6 +1081,30 @@ else:
         if st is None:
             st = fstat(fp)
         return st.st_uid == os.getuid()
+
+    def find_in_path(name, path, default=None):
+        '''find name in search path. path can be string (will be split
+        with os.pathsep), or iterable thing that returns strings.  if name
+        found, return path to name. else return default.'''
+        if isinstance(path, str):
+            path = path.split(os.pathsep)
+        for p in path:
+            p_name = os.path.join(p, name)
+            if os.path.exists(p_name):
+                return p_name
+        return default
+
+def find_exe(name, default=None):
+    '''find path of an executable.
+    if name contains a path component, return it as is.  otherwise,
+    use normal executable search path.'''
+
+    if os.sep in name:
+        # don't check the executable bit.  if the file isn't
+        # executable, whoever tries to actually run it will give a
+        # much more useful error message.
+        return name
+    return find_in_path(name, os.environ.get('PATH', ''), default=default)
 
 def _buildencodefun():
     e = '_'
@@ -1058,16 +1202,7 @@ def opener(base, audit=True):
                 except: pass
                 posixfile.close(self)
 
-    class atomicfile(atomictempfile):
-        """the file will only be copied on close"""
-        def __init__(self, name, mode):
-            atomictempfile.__init__(self, name, mode)
-        def close(self):
-            self.rename()
-        def __del__(self):
-            self.rename()
-
-    def o(path, mode="r", text=False, atomic=False, atomictemp=False):
+    def o(path, mode="r", text=False, atomictemp=False):
         if audit_p:
             audit_path(path)
         f = os.path.join(p, path)
@@ -1083,9 +1218,7 @@ def opener(base, audit=True):
                 d = os.path.dirname(f)
                 if not os.path.isdir(d):
                     os.makedirs(d)
-            if atomic:
-                return atomicfile(f, mode)
-            elif atomictemp:
+            if atomictemp:
                 return atomictempfile(f, mode)
             if nlink > 1:
                 rename(mktempcopy(f), f)
@@ -1338,6 +1471,13 @@ def walkrepos(path):
                 break
 
 _rcpath = None
+
+def os_rcpath():
+    '''return default os-specific hgrc search path'''
+    path = system_rcpath()
+    path.extend(user_rcpath())
+    path = [os.path.normpath(f) for f in path]
+    return path
 
 def rcpath():
     '''return hgrc search path. if env var HGRCPATH is set, use it.

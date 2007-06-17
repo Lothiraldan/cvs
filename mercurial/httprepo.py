@@ -8,10 +8,9 @@
 
 from node import *
 from remoterepo import *
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "hg os urllib urllib2 urlparse zlib util httplib")
-demandload(globals(), "errno keepalive tempfile socket changegroup")
+from i18n import _
+import hg, os, urllib, urllib2, urlparse, zlib, util, httplib
+import errno, keepalive, tempfile, socket, changegroup
 
 class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def __init__(self, ui):
@@ -209,7 +208,7 @@ class httprepository(remoterepository):
         # 1.0 here is the _protocol_ version
         opener.addheaders = [('User-agent', 'mercurial/proto-1.0')]
         urllib2.install_opener(opener)
-    
+
     def __del__(self):
         if self.handler:
             self.handler.close_all()

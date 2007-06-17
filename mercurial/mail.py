@@ -5,9 +5,8 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "os re smtplib templater util socket")
+from i18n import _
+import os, smtplib, templater, util, socket
 
 def _smtp(ui):
     '''send mail using smtp.'''
@@ -69,3 +68,15 @@ def connect(ui):
 
 def sendmail(ui, sender, recipients, msg):
     return connect(ui).sendmail(sender, recipients, msg)
+
+def validateconfig(ui):
+    '''determine if we have enough config data to try sending email.'''
+    method = ui.config('email', 'method', 'smtp')
+    if method == 'smtp':
+        if not ui.config('smtp', 'host'):
+            raise util.Abort(_('smtp specified as email transport, '
+                               'but no smtp host configured'))
+    else:
+        if not util.find_exe(method):
+            raise util.Abort(_('%r specified as email transport, '
+                               'but not in PATH') % method)

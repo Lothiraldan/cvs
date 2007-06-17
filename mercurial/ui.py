@@ -5,10 +5,9 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "errno getpass os re socket sys tempfile")
-demandload(globals(), "ConfigParser traceback util")
+from i18n import _
+import errno, getpass, os, re, socket, sys, tempfile
+import ConfigParser, traceback, util
 
 def dupconfig(orig):
     new = util.configparser(orig.defaults())
@@ -171,7 +170,15 @@ class ui(object):
 
         cdata = util.configparser()
         try:
-            cdata.read(filename)
+            try:
+                fp = open(filename)
+            except IOError, inst:
+                raise util.Abort(_("unable to open %s: %s") % (filename, 
+                                   getattr(inst, "strerror", inst)))
+            try:
+                cdata.readfp(fp, filename)
+            finally:
+                fp.close()
         except ConfigParser.ParsingError, inst:
             raise util.Abort(_("failed to parse %s\n%s") % (filename,
                                                             inst))
@@ -271,7 +278,7 @@ class ui(object):
             result = result.replace(",", " ").split()
         return result
 
-    def has_config(self, section, untrusted=False):
+    def has_section(self, section, untrusted=False):
         '''tell whether section exists in config.'''
         cdata = self._get_cdata(untrusted)
         return cdata.has_section(section)
@@ -310,7 +317,7 @@ class ui(object):
         sections.sort()
         for section in sections:
             for name, value in self.configitems(section, untrusted):
-                yield section, name, value.replace('\n', '\\n')
+                yield section, name, str(value).replace('\n', '\\n')
 
     def extensions(self):
         result = self.configitems("extensions")
@@ -324,12 +331,6 @@ class ui(object):
         for key, value in self.configitems("ui"):
             if key == 'ignore' or key.startswith('ignore.'):
                 result.append(os.path.expanduser(value))
-        return result
-
-    def configrevlog(self):
-        result = {}
-        for key, value in self.configitems("revlog"):
-            result[key.lower()] = value
         return result
 
     def username(self):
@@ -388,6 +389,9 @@ class ui(object):
             if not sys.stdout.closed: sys.stdout.flush()
             for a in args:
                 sys.stderr.write(str(a))
+            # stderr may be buffered under win32 when redirected to files,
+            # including stdout.
+            if not sys.stderr.closed: sys.stderr.flush()
         except IOError, inst:
             if inst.errno != errno.EPIPE:
                 raise

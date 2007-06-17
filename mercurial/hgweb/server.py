@@ -6,11 +6,11 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from mercurial.demandload import demandload
-import os, sys, errno
-demandload(globals(), "urllib BaseHTTPServer socket SocketServer traceback")
-demandload(globals(), "mercurial:ui,hg,util,templater")
-demandload(globals(), "hgweb_mod:hgweb hgwebdir_mod:hgwebdir request:wsgiapplication")
+import os, sys, errno, urllib, BaseHTTPServer, socket, SocketServer, traceback
+from mercurial import ui, hg, util, templater
+from hgweb_mod import hgweb
+from hgwebdir_mod import hgwebdir
+from request import wsgiapplication
 from mercurial.i18n import gettext as _
 
 def _splitURI(uri):
@@ -195,11 +195,11 @@ def create_server(ui, repo):
                 pass
 
     class MercurialHTTPServer(object, _mixin, BaseHTTPServer.HTTPServer):
-        
+
         # SO_REUSEADDR has broken semantics on windows
         if os.name == 'nt':
             allow_reuse_address = 0
-    
+
         def __init__(self, *args, **kargs):
             BaseHTTPServer.HTTPServer.__init__(self, *args, **kargs)
             self.accesslog = accesslog
@@ -216,14 +216,10 @@ def create_server(ui, repo):
                 return hgwebobj
             self.reqmaker = wsgiapplication(make_handler)
 
-            addr, port = self.socket.getsockname()[:2]
-            if addr in ('0.0.0.0', '::'):
+            addr = address
+            if addr in ('', '::'):
                 addr = socket.gethostname()
-            else:
-                try:
-                    addr = socket.gethostbyaddr(addr)[0]
-                except socket.error:
-                    pass
+
             self.addr, self.port = addr, port
 
     class IPv6HTTPServer(MercurialHTTPServer):

@@ -5,13 +5,401 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from demandload import demandload
 from node import *
-from i18n import gettext as _
-demandload(globals(), 'os sys')
-demandload(globals(), 'mdiff util templater patch')
+from i18n import _
+import os, sys, atexit, signal, pdb, traceback, socket, errno, shlex
+import mdiff, bdiff, util, templater, patch, commands, hg, lock
+import fancyopts, revlog, version, extensions
 
 revrangesep = ':'
+
+class UnknownCommand(Exception):
+    """Exception raised if command is not in the command table."""
+class AmbiguousCommand(Exception):
+    """Exception raised if command shortcut matches more than one command."""
+class ParseError(Exception):
+    """Exception raised on errors in parsing the command line."""
+
+def runcatch(ui, args):
+    def catchterm(*args):
+        raise util.SignalInterrupt
+
+    for name in 'SIGBREAK', 'SIGHUP', 'SIGTERM':
+        num = getattr(signal, name, None)
+        if num: signal.signal(num, catchterm)
+
+    try:
+        try:
+            # enter the debugger before command execution
+            if '--debugger' in args:
+                pdb.set_trace()
+            try:
+                return dispatch(ui, args)
+            finally:
+                ui.flush()
+        except:
+            # enter the debugger when we hit an exception
+            if '--debugger' in args:
+                pdb.post_mortem(sys.exc_info()[2])
+            ui.print_exc()
+            raise
+
+    except ParseError, inst:
+        if inst.args[0]:
+            ui.warn(_("hg %s: %s\n") % (inst.args[0], inst.args[1]))
+            commands.help_(ui, inst.args[0])
+        else:
+            ui.warn(_("hg: %s\n") % inst.args[1])
+            commands.help_(ui, 'shortlist')
+    except AmbiguousCommand, inst:
+        ui.warn(_("hg: command '%s' is ambiguous:\n    %s\n") %
+                (inst.args[0], " ".join(inst.args[1])))
+    except UnknownCommand, inst:
+        ui.warn(_("hg: unknown command '%s'\n") % inst.args[0])
+        commands.help_(ui, 'shortlist')
+    except hg.RepoError, inst:
+        ui.warn(_("abort: %s!\n") % inst)
+    except lock.LockHeld, inst:
+        if inst.errno == errno.ETIMEDOUT:
+            reason = _('timed out waiting for lock held by %s') % inst.locker
+        else:
+            reason = _('lock held by %s') % inst.locker
+        ui.warn(_("abort: %s: %s\n") % (inst.desc or inst.filename, reason))
+    except lock.LockUnavailable, inst:
+        ui.warn(_("abort: could not lock %s: %s\n") %
+               (inst.desc or inst.filename, inst.strerror))
+    except revlog.RevlogError, inst:
+        ui.warn(_("abort: %s!\n") % inst)
+    except util.SignalInterrupt:
+        ui.warn(_("killed!\n"))
+    except KeyboardInterrupt:
+        try:
+            ui.warn(_("interrupted!\n"))
+        except IOError, inst:
+            if inst.errno == errno.EPIPE:
+                if ui.debugflag:
+                    ui.warn(_("\nbroken pipe\n"))
+            else:
+                raise
+    except socket.error, inst:
+        ui.warn(_("abort: %s\n") % inst[1])
+    except IOError, inst:
+        if hasattr(inst, "code"):
+            ui.warn(_("abort: %s\n") % inst)
+        elif hasattr(inst, "reason"):
+            try: # usually it is in the form (errno, strerror)
+                reason = inst.reason.args[1]
+            except: # it might be anything, for example a string
+                reason = inst.reason
+            ui.warn(_("abort: error: %s\n") % reason)
+        elif hasattr(inst, "args") and inst[0] == errno.EPIPE:
+            if ui.debugflag:
+                ui.warn(_("broken pipe\n"))
+        elif getattr(inst, "strerror", None):
+            if getattr(inst, "filename", None):
+                ui.warn(_("abort: %s: %s\n") % (inst.strerror, inst.filename))
+            else:
+                ui.warn(_("abort: %s\n") % inst.strerror)
+        else:
+            raise
+    except OSError, inst:
+        if getattr(inst, "filename", None):
+            ui.warn(_("abort: %s: %s\n") % (inst.strerror, inst.filename))
+        else:
+            ui.warn(_("abort: %s\n") % inst.strerror)
+    except util.UnexpectedOutput, inst:
+        ui.warn(_("abort: %s") % inst[0])
+        if not isinstance(inst[1], basestring):
+            ui.warn(" %r\n" % (inst[1],))
+        elif not inst[1]:
+            ui.warn(_(" empty string\n"))
+        else:
+            ui.warn("\n%r\n" % util.ellipsis(inst[1]))
+    except util.Abort, inst:
+        ui.warn(_("abort: %s\n") % inst)
+    except TypeError, inst:
+        # was this an argument error?
+        tb = traceback.extract_tb(sys.exc_info()[2])
+        if len(tb) > 2: # no
+            raise
+        ui.debug(inst, "\n")
+        ui.warn(_("%s: invalid arguments\n") % cmd)
+        commands.help_(ui, cmd)
+    except SystemExit, inst:
+        # Commands shouldn't sys.exit directly, but give a return code.
+        # Just in case catch this and and pass exit code to caller.
+        return inst.code
+    except:
+        ui.warn(_("** unknown exception encountered, details follow\n"))
+        ui.warn(_("** report bug details to "
+                 "http://www.selenic.com/mercurial/bts\n"))
+        ui.warn(_("** or mercurial@selenic.com\n"))
+        ui.warn(_("** Mercurial Distributed SCM (version %s)\n")
+               % version.get_version())
+        raise
+
+    return -1
+
+def findpossible(ui, cmd):
+    """
+    Return cmd -> (aliases, command table entry)
+    for each matching command.
+    Return debug commands (or their aliases) only if no normal command matches.
+    """
+    choice = {}
+    debugchoice = {}
+    for e in commands.table.keys():
+        aliases = e.lstrip("^").split("|")
+        found = None
+        if cmd in aliases:
+            found = cmd
+        elif not ui.config("ui", "strict"):
+            for a in aliases:
+                if a.startswith(cmd):
+                    found = a
+                    break
+        if found is not None:
+            if aliases[0].startswith("debug") or found.startswith("debug"):
+                debugchoice[found] = (aliases, commands.table[e])
+            else:
+                choice[found] = (aliases, commands.table[e])
+
+    if not choice and debugchoice:
+        choice = debugchoice
+
+    return choice
+
+def findcmd(ui, cmd):
+    """Return (aliases, command table entry) for command string."""
+    choice = findpossible(ui, cmd)
+
+    if choice.has_key(cmd):
+        return choice[cmd]
+
+    if len(choice) > 1:
+        clist = choice.keys()
+        clist.sort()
+        raise AmbiguousCommand(cmd, clist)
+
+    if choice:
+        return choice.values()[0]
+
+    raise UnknownCommand(cmd)
+
+def findrepo():
+    p = os.getcwd()
+    while not os.path.isdir(os.path.join(p, ".hg")):
+        oldp, p = p, os.path.dirname(p)
+        if p == oldp:
+            return None
+
+    return p
+
+def parse(ui, args):
+    options = {}
+    cmdoptions = {}
+
+    try:
+        args = fancyopts.fancyopts(args, commands.globalopts, options)
+    except fancyopts.getopt.GetoptError, inst:
+        raise ParseError(None, inst)
+
+    if args:
+        cmd, args = args[0], args[1:]
+        aliases, i = findcmd(ui, cmd)
+        cmd = aliases[0]
+        defaults = ui.config("defaults", cmd)
+        if defaults:
+            args = shlex.split(defaults) + args
+        c = list(i[1])
+    else:
+        cmd = None
+        c = []
+
+    # combine global options into local
+    for o in commands.globalopts:
+        c.append((o[0], o[1], options[o[1]], o[3]))
+
+    try:
+        args = fancyopts.fancyopts(args, c, cmdoptions)
+    except fancyopts.getopt.GetoptError, inst:
+        raise ParseError(cmd, inst)
+
+    # separate global options back out
+    for o in commands.globalopts:
+        n = o[1]
+        options[n] = cmdoptions[n]
+        del cmdoptions[n]
+
+    return (cmd, cmd and i[0] or None, args, options, cmdoptions)
+
+def parseconfig(config):
+    """parse the --config options from the command line"""
+    parsed = []
+    for cfg in config:
+        try:
+            name, value = cfg.split('=', 1)
+            section, name = name.split('.', 1)
+            if not section or not name:
+                raise IndexError
+            parsed.append((section, name, value))
+        except (IndexError, ValueError):
+            raise util.Abort(_('malformed --config option: %s') % cfg)
+    return parsed
+
+def earlygetopt(aliases, args):
+    if "--" in args:
+        args = args[:args.index("--")]
+    for opt in aliases:
+        if opt in args:
+            return args[args.index(opt) + 1]
+    return None
+
+def dispatch(ui, args):
+    # check for cwd first
+    cwd = earlygetopt(['--cwd'], args)
+    if cwd:
+        os.chdir(cwd)
+
+    extensions.loadall(ui)
+    ui.addreadhook(extensions.loadall)
+
+    # read the local repository .hgrc into a local ui object
+    # this will trigger its extensions to load
+    path = earlygetopt(["-R", "--repository", "--repo"], args)
+    if not path:
+        path = findrepo() or ""
+    if path:
+        try:
+            lui = commands.ui.ui(parentui=ui)
+            lui.readconfig(os.path.join(path, ".hg", "hgrc"))
+        except IOError:
+            pass
+
+    cmd, func, args, options, cmdoptions = parse(ui, args)
+
+    if options["encoding"]:
+        util._encoding = options["encoding"]
+    if options["encodingmode"]:
+        util._encodingmode = options["encodingmode"]
+    if options["time"]:
+        def get_times():
+            t = os.times()
+            if t[4] == 0.0: # Windows leaves this as zero, so use time.clock()
+                t = (t[0], t[1], t[2], t[3], time.clock())
+            return t
+        s = get_times()
+        def print_time():
+            t = get_times()
+            ui.warn(_("Time: real %.3f secs (user %.3f+%.3f sys %.3f+%.3f)\n") %
+                (t[4]-s[4], t[0]-s[0], t[2]-s[2], t[1]-s[1], t[3]-s[3]))
+        atexit.register(print_time)
+
+    ui.updateopts(options["verbose"], options["debug"], options["quiet"],
+                 not options["noninteractive"], options["traceback"],
+                 parseconfig(options["config"]))
+
+    if options['help']:
+        return commands.help_(ui, cmd, options['version'])
+    elif options['version']:
+        return commands.version_(ui)
+    elif not cmd:
+        return commands.help_(ui, 'shortlist')
+
+    if cmd not in commands.norepo.split():
+        repo = None
+        try:
+            repo = hg.repository(ui, path=path)
+            ui = repo.ui
+            if not repo.local():
+                raise util.Abort(_("repository '%s' is not local") % path)
+        except hg.RepoError:
+            if cmd not in commands.optionalrepo.split():
+                raise
+        d = lambda: func(ui, repo, *args, **cmdoptions)
+    else:
+        d = lambda: func(ui, *args, **cmdoptions)
+
+    return runcommand(ui, options, d)
+
+def runcommand(ui, options, cmdfunc):
+    if options['profile']:
+        import hotshot, hotshot.stats
+        prof = hotshot.Profile("hg.prof")
+        try:
+            try:
+                return prof.runcall(cmdfunc)
+            except:
+                try:
+                    ui.warn(_('exception raised - generating '
+                             'profile anyway\n'))
+                except:
+                    pass
+                raise
+        finally:
+            prof.close()
+            stats = hotshot.stats.load("hg.prof")
+            stats.strip_dirs()
+            stats.sort_stats('time', 'calls')
+            stats.print_stats(40)
+    elif options['lsprof']:
+        try:
+            from mercurial import lsprof
+        except ImportError:
+            raise util.Abort(_(
+                'lsprof not available - install from '
+                'http://codespeak.net/svn/user/arigo/hack/misc/lsprof/'))
+        p = lsprof.Profiler()
+        p.enable(subcalls=True)
+        try:
+            return cmdfunc()
+        finally:
+            p.disable()
+            stats = lsprof.Stats(p.getstats())
+            stats.sort()
+            stats.pprint(top=10, file=sys.stderr, climit=5)
+    else:
+        return cmdfunc()
+
+def bail_if_changed(repo):
+    modified, added, removed, deleted = repo.status()[:4]
+    if modified or added or removed or deleted:
+        raise util.Abort(_("outstanding uncommitted changes"))
+
+def logmessage(opts):
+    """ get the log message according to -m and -l option """
+    message = opts['message']
+    logfile = opts['logfile']
+
+    if message and logfile:
+        raise util.Abort(_('options --message and --logfile are mutually '
+                           'exclusive'))
+    if not message and logfile:
+        try:
+            if logfile == '-':
+                message = sys.stdin.read()
+            else:
+                message = open(logfile).read()
+        except IOError, inst:
+            raise util.Abort(_("can't read commit message '%s': %s") %
+                             (logfile, inst.strerror))
+    return message
+
+def setremoteconfig(ui, opts):
+    "copy remote options to ui tree"
+    if opts.get('ssh'):
+        ui.setconfig("ui", "ssh", opts['ssh'])
+    if opts.get('remotecmd'):
+        ui.setconfig("ui", "remotecmd", opts['remotecmd'])
+
+def parseurl(url, revs):
+    '''parse url#branch, returning url, branch + revs'''
+
+    if '#' not in url:
+        return url, (revs or None)
+
+    url, rev = url.split('#', 1)
+    return url, revs + [rev]
 
 def revpair(repo, revs):
     '''return pair of nodes, given list of revisions. second item can
@@ -127,42 +515,48 @@ def make_file(repo, pat, node=None,
                               pathname),
                 mode)
 
-def matchpats(repo, pats=[], opts={}, head='', globbed=False):
+def matchpats(repo, pats=[], opts={}, globbed=False, default=None):
     cwd = repo.getcwd()
-    if not pats and cwd:
-        opts['include'] = [os.path.join(cwd, i)
-                           for i in opts.get('include', [])]
-        opts['exclude'] = [os.path.join(cwd, x)
-                           for x in opts.get('exclude', [])]
-        cwd = ''
-    return util.cmdmatcher(repo.root, cwd, pats or ['.'], opts.get('include'),
-                           opts.get('exclude'), head, globbed=globbed)
+    return util.cmdmatcher(repo.root, cwd, pats or [], opts.get('include'),
+                           opts.get('exclude'), globbed=globbed,
+                           default=default)
 
-def walk(repo, pats=[], opts={}, node=None, head='', badmatch=None,
-         globbed=False):
-    files, matchfn, anypats = matchpats(repo, pats, opts, head,
-                                        globbed=globbed)
+def walk(repo, pats=[], opts={}, node=None, badmatch=None, globbed=False,
+         default=None):
+    files, matchfn, anypats = matchpats(repo, pats, opts, globbed=globbed,
+                                        default=default)
     exact = dict.fromkeys(files)
+    cwd = repo.getcwd()
     for src, fn in repo.walk(node=node, files=files, match=matchfn,
                              badmatch=badmatch):
-        yield src, fn, util.pathto(repo.root, repo.getcwd(), fn), fn in exact
+        yield src, fn, repo.pathto(fn, cwd), fn in exact
 
 def findrenames(repo, added=None, removed=None, threshold=0.5):
+    '''find renamed files -- yields (before, after, score) tuples'''
     if added is None or removed is None:
         added, removed = repo.status()[1:3]
-    changes = repo.changelog.read(repo.dirstate.parents()[0])
-    mf = repo.manifest.read(changes[0])
+    ctx = repo.changectx()
     for a in added:
         aa = repo.wread(a)
-        bestscore, bestname = None, None
+        bestname, bestscore = None, threshold
         for r in removed:
-            rr = repo.file(r).read(mf[r])
-            delta = mdiff.textdiff(aa, rr)
-            if len(delta) < len(aa):
-                myscore = 1.0 - (float(len(delta)) / len(aa))
-                if bestscore is None or myscore > bestscore:
-                    bestscore, bestname = myscore, r
-        if bestname and bestscore >= threshold:
+            rr = ctx.filectx(r).data()
+
+            # bdiff.blocks() returns blocks of matching lines
+            # count the number of bytes in each
+            equal = 0
+            alines = mdiff.splitnewlines(aa)
+            matches = bdiff.blocks(aa, rr)
+            for x1,x2,y1,y2 in matches:
+                for line in alines[x1:x2]:
+                    equal += len(line)
+
+            lengths = len(aa) + len(rr)
+            if lengths:
+                myscore = equal*2.0 / lengths
+                if myscore >= bestscore:
+                    bestname, bestscore = r, myscore
+        if bestname:
             yield bestname, a, bestscore
 
 def addremove(repo, pats=[], opts={}, wlock=None, dry_run=None,
@@ -174,12 +568,13 @@ def addremove(repo, pats=[], opts={}, wlock=None, dry_run=None,
     add, remove = [], []
     mapping = {}
     for src, abs, rel, exact in walk(repo, pats, opts):
+        target = repo.wjoin(abs)
         if src == 'f' and repo.dirstate.state(abs) == '?':
             add.append(abs)
             mapping[abs] = rel, exact
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        if repo.dirstate.state(abs) != 'r' and not os.path.exists(rel):
+        if repo.dirstate.state(abs) != 'r' and not util.lexists(target):
             remove.append(abs)
             mapping[abs] = rel, exact
             if repo.ui.verbose or not exact:
@@ -198,15 +593,58 @@ def addremove(repo, pats=[], opts={}, wlock=None, dry_run=None,
             if not dry_run:
                 repo.copy(old, new, wlock=wlock)
 
+def service(opts, parentfn=None, initfn=None, runfn=None):
+    '''Run a command as a service.'''
+
+    if opts['daemon'] and not opts['daemon_pipefds']:
+        rfd, wfd = os.pipe()
+        args = sys.argv[:]
+        args.append('--daemon-pipefds=%d,%d' % (rfd, wfd))
+        pid = os.spawnvp(os.P_NOWAIT | getattr(os, 'P_DETACH', 0),
+                         args[0], args)
+        os.close(wfd)
+        os.read(rfd, 1)
+        if parentfn:
+            return parentfn(pid)
+        else:
+            os._exit(0)
+
+    if initfn:
+        initfn()
+
+    if opts['pid_file']:
+        fp = open(opts['pid_file'], 'w')
+        fp.write(str(os.getpid()) + '\n')
+        fp.close()
+
+    if opts['daemon_pipefds']:
+        rfd, wfd = [int(x) for x in opts['daemon_pipefds'].split(',')]
+        os.close(rfd)
+        try:
+            os.setsid()
+        except AttributeError:
+            pass
+        os.write(wfd, 'y')
+        os.close(wfd)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        fd = os.open(util.nulldev, os.O_RDWR)
+        if fd != 0: os.dup2(fd, 0)
+        if fd != 1: os.dup2(fd, 1)
+        if fd != 2: os.dup2(fd, 2)
+        if fd not in (0, 1, 2): os.close(fd)
+
+    if runfn:
+        return runfn()
+
 class changeset_printer(object):
     '''show changeset information when templating not requested.'''
 
-    def __init__(self, ui, repo, patch, brinfo, buffered):
+    def __init__(self, ui, repo, patch, buffered):
         self.ui = ui
         self.repo = repo
         self.buffered = buffered
         self.patch = patch
-        self.brinfo = brinfo
         self.header = {}
         self.hunk = {}
         self.lastheader = None
@@ -271,11 +709,6 @@ class changeset_printer(object):
         for parent in parents:
             self.ui.write(_("parent:      %d:%s\n") % parent)
 
-        if self.brinfo:
-            br = self.repo.branchlookup([changenode])
-            if br:
-                self.ui.write(_("branch:      %s\n") % " ".join(br[changenode]))
-
         if self.ui.debugflag:
             self.ui.write(_("manifest:    %d:%s\n") %
                           (self.repo.manifest.rev(changes[0]), hex(changes[0])))
@@ -323,8 +756,8 @@ class changeset_printer(object):
 class changeset_templater(changeset_printer):
     '''format changeset information.'''
 
-    def __init__(self, ui, repo, patch, brinfo, mapfile, buffered):
-        changeset_printer.__init__(self, ui, repo, patch, brinfo, buffered)
+    def __init__(self, ui, repo, patch, mapfile, buffered):
+        changeset_printer.__init__(self, ui, repo, patch, buffered)
         filters = templater.common_filters.copy()
         filters['formatnode'] = (ui.debugflag and (lambda x: x)
                                  or (lambda x: x[:12]))
@@ -414,12 +847,6 @@ class changeset_templater(changeset_printer):
             if branch != 'default':
                 branch = util.tolocal(branch)
                 return showlist('branch', [branch], plural='branches', **args)
-            # add old style branches if requested
-            if self.brinfo:
-                br = self.repo.branchlookup([changenode])
-                if changenode in br:
-                    return showlist('branch', br[changenode],
-                                    plural='branches', **args)
 
         def showparents(**args):
             parents = [[('rev', log.rev(p)), ('node', hex(p))]
@@ -533,11 +960,6 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
     if opts.get('patch'):
         patch = matchfn or util.always
 
-    br = None
-    if opts.get('branches'):
-        ui.warn(_("the --branches option is deprecated, "
-                  "please use 'hg branches' instead\n"))
-        br = True
     tmpl = opts.get('template')
     mapfile = None
     if tmpl:
@@ -559,12 +981,12 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
                            or templater.templatepath(mapfile))
                 if mapname: mapfile = mapname
         try:
-            t = changeset_templater(ui, repo, patch, br, mapfile, buffered)
+            t = changeset_templater(ui, repo, patch, mapfile, buffered)
         except SyntaxError, inst:
             raise util.Abort(inst.args[0])
         if tmpl: t.use_template(tmpl)
         return t
-    return changeset_printer(ui, repo, patch, br, buffered)
+    return changeset_printer(ui, repo, patch, buffered)
 
 def finddate(ui, repo, date):
     """Find the tipmost changeset that matches the given date spec"""

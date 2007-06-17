@@ -7,7 +7,6 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 import os, mimetypes
-import os.path
 
 def get_mtime(repo_path):
     store_path = os.path.join(repo_path, ".hg")
@@ -39,7 +38,7 @@ def staticfile(directory, fname, req):
         os.stat(path)
         ct = mimetypes.guess_type(path)[0] or "text/plain"
         req.header([('Content-type', ct),
-                    ('Content-length', os.path.getsize(path))])
+                    ('Content-length', str(os.path.getsize(path)))])
         return file(path, 'rb').read()
     except (TypeError, OSError):
         # illegal fname or unreadable file
@@ -60,4 +59,20 @@ def style_map(templatepath, style):
         if os.path.isfile(mapfile):
             return mapfile
     raise RuntimeError("No hgweb templates found in %r" % templatepath)
+
+def paritygen(stripecount, offset=0):
+    """count parity of horizontal stripes for easier reading"""
+    if stripecount and offset:
+        # account for offset, e.g. due to building the list in reverse
+        count = (stripecount + offset) % stripecount
+        parity = (stripecount + offset) / stripecount & 1
+    else:
+        count = 0
+        parity = 0
+    while True:
+        yield parity
+        count += 1
+        if stripecount and count >= stripecount:
+            parity = 1 - parity
+            count = 0
 

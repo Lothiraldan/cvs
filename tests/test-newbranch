@@ -12,7 +12,9 @@ hg branch
 hg ci -m "add branch name" -d "1000000 0"
 hg branch bar
 hg ci -m "change branch name" -d "1000000 0"
+echo % branch shadowing
 hg branch default
+hg branch -f default
 hg ci -m "clear branch name" -d "1000000 0"
 
 hg co foo
@@ -48,5 +50,16 @@ hg up -q
 hg id
 hg branch foobar
 hg up
+
+echo % fastforward merge
+hg branch ff
+echo ff > ff
+hg ci -Am'fast forward' -d '1000000 0'
+hg up foo
+hg merge ff
+hg branch
+hg commit -m'Merge ff into foo' -d '1000000 0'
+hg parents
+hg manifest
 
 exit 0

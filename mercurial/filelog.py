@@ -6,15 +6,12 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from revlog import *
-from demandload import *
-demandload(globals(), "os")
+import os
 
 class filelog(revlog):
-    def __init__(self, opener, path, defversion=REVLOG_DEFAULT_VERSION):
+    def __init__(self, opener, path):
         revlog.__init__(self, opener,
-                        "/".join(("data", self.encodedir(path + ".i"))),
-                        "/".join(("data", self.encodedir(path + ".d"))),
-                        defversion)
+                        "/".join(("data", self.encodedir(path + ".i"))))
 
     # This avoids a collision between a file named foo and a dir named
     # foo.i or foo.d

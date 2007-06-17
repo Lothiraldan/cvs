@@ -8,10 +8,11 @@
 
 from node import *
 from repo import *
-from demandload import *
-from i18n import gettext as _
-demandload(globals(), "localrepo bundlerepo httprepo sshrepo statichttprepo")
-demandload(globals(), "errno lock os shutil util merge@_merge verify@_verify")
+from i18n import _
+import localrepo, bundlerepo, httprepo, sshrepo, statichttprepo
+import errno, lock, os, shutil, util, cmdutil
+import merge as _merge
+import verify as _verify
 
 def _local(path):
     return (os.path.isfile(util.drop_scheme('file', path)) and
@@ -96,6 +97,10 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     update: update working directory after clone completes, if
     destination is local repository
     """
+
+    origsource = source
+    source, rev = cmdutil.parseurl(ui.expandpath(source), rev)
+
     if isinstance(source, str):
         src_repo = repository(ui, source)
     else:
@@ -133,10 +138,10 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     if islocal(dest):
         dir_cleanup = DirCleanup(dest)
 
-    abspath = source
+    abspath = origsource
     copy = False
     if src_repo.local() and islocal(dest):
-        abspath = os.path.abspath(source)
+        abspath = os.path.abspath(origsource)
         copy = not pull and not rev
 
     src_lock, dest_lock = None, None
@@ -217,7 +222,11 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
             dest_lock.release()
 
         if update:
-            _update(dest_repo, dest_repo.changelog.tip())
+            try:
+                checkout = dest_repo.lookup("default")
+            except:
+                checkout = dest_repo.changelog.tip()
+            _update(dest_repo, checkout)
     if dir_cleanup:
         dir_cleanup.close()
 
