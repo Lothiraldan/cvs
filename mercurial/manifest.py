@@ -1,15 +1,13 @@
 # manifest.py - manifest revision class for mercurial
 #
-# Copyright 2005, 2006 Matt Mackall <mpm@selenic.com>
+# Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
 from revlog import *
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "array bisect struct")
-demandload(globals(), "mdiff")
+from i18n import _
+import array, bisect, struct, mdiff
 
 class manifestdict(dict):
     def __init__(self, mapping=None, flags=None):
@@ -37,11 +35,10 @@ class manifestdict(dict):
         return manifestdict(dict.copy(self), dict.copy(self._flags))
 
 class manifest(revlog):
-    def __init__(self, opener, defversion=REVLOGV0):
+    def __init__(self, opener):
         self.mapcache = None
         self.listcache = None
-        revlog.__init__(self, opener, "00manifest.i", "00manifest.d",
-                        defversion)
+        revlog.__init__(self, opener, "00manifest.i")
 
     def parselines(self, lines):
         for l in lines.splitlines(1):
@@ -108,7 +105,7 @@ class manifest(revlog):
 
     def find(self, node, f):
         '''look up entry for a single file efficiently.
-        return (node, flag) pair if found, (None, None) if not.'''
+        return (node, flags) pair if found, (None, None) if not.'''
         if self.mapcache and node == self.mapcache[0]:
             return self.mapcache[1].get(f), self.mapcache[1].flags(f)
         text = self.revision(node)
@@ -117,7 +114,7 @@ class manifest(revlog):
             return None, None
         l = text[start:end]
         f, n = l.split('\0')
-        return bin(n[:40]), n[40:-1] == 'x'
+        return bin(n[:40]), n[40:-1]
 
     def add(self, map, transaction, link, p1=None, p2=None,
             changed=None):
@@ -135,7 +132,7 @@ class manifest(revlog):
                     addlist[start:end] = array.array('c', x[i][2])
                 else:
                     del addlist[start:end]
-            return "".join([struct.pack(">lll", d[0], d[1], len(d[2])) + d[2] \
+            return "".join([struct.pack(">lll", d[0], d[1], len(d[2])) + d[2]
                             for d in x ])
 
         def checkforbidden(f):
@@ -144,8 +141,7 @@ class manifest(revlog):
 
         # if we're using the listcache, make sure it is valid and
         # parented by the same node we're diffing against
-        if not changed or not self.listcache or not p1 or \
-               self.mapcache[0] != p1:
+        if not (changed and self.listcache and p1 and self.mapcache[0] == p1):
             files = map.keys()
             files.sort()
 
@@ -154,7 +150,8 @@ class manifest(revlog):
 
             # if this is changed to support newlines in filenames,
             # be sure to check the templates/ dir again (especially *-raw.tmpl)
-            text = ["%s\000%s%s\n" % (f, hex(map[f]), map.flags(f)) for f in files]
+            text = ["%s\000%s%s\n" % (f, hex(map[f]), map.flags(f))
+                    for f in files]
             self.listcache = array.array('c', "".join(text))
             cachedelta = None
         else:
@@ -211,8 +208,8 @@ class manifest(revlog):
                 cachedelta = None
             self.listcache = addlist
 
-        n = self.addrevision(buffer(self.listcache), transaction, link, p1,  \
-                             p2, cachedelta)
+        n = self.addrevision(buffer(self.listcache), transaction, link,
+                             p1, p2, cachedelta)
         self.mapcache = (n, map)
 
         return n

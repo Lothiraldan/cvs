@@ -2,15 +2,14 @@
 #
 # This provides read-only repo access to repositories exported via static http
 #
-# Copyright 2005, 2006 Matt Mackall <mpm@selenic.com>
+# Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from demandload import *
-from i18n import gettext as _
-demandload(globals(), "changelog filelog httprangereader")
-demandload(globals(), "repo localrepo manifest os urllib urllib2 util")
+from i18n import _
+import changelog, filelog, httprangereader
+import repo, localrepo, manifest, os, urllib, urllib2, util
 
 class rangereader(httprangereader.httprangereader):
     def read(self, size=None):
@@ -33,7 +32,6 @@ class statichttprepository(localrepo.localrepository):
     def __init__(self, ui, path):
         self._url = path
         self.ui = ui
-        self.revlogversion = 0
 
         self.path = (path + "/.hg")
         self.opener = opener(self.path)

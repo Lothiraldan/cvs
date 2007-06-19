@@ -6,8 +6,7 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from mercurial.demandload import demandload
-demandload(globals(), "socket sys cgi os errno")
+import socket, cgi, errno
 from mercurial.i18n import gettext as _
 
 class wsgiapplication(object):
@@ -21,7 +20,7 @@ class _wsgirequest(object):
     def __init__(self, destination, wsgienv, start_response):
         version = wsgienv['wsgi.version']
         if (version < (1, 0)) or (version >= (2, 0)):
-            raise RuntimeError("Unknown and unsupported WSGI version %d.%d" \
+            raise RuntimeError("Unknown and unsupported WSGI version %d.%d"
                                % version)
         self.inp = wsgienv['wsgi.input']
         self.server_write = None

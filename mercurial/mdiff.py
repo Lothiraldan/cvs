@@ -5,9 +5,7 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from demandload import demandload
-import bdiff, mpatch
-demandload(globals(), "re struct util md5")
+import bdiff, mpatch, re, struct, util, md5
 
 def splitnewlines(text):
     '''like str.splitlines, but only split on newlines.'''
@@ -251,6 +249,10 @@ def patchtext(bin):
 
 def patch(a, bin):
     return mpatch.patches(a, [bin])
+
+# similar to difflib.SequenceMatcher.get_matching_blocks
+def get_matching_blocks(a, b):
+    return [(d[0], d[2], d[1] - d[0]) for d in bdiff.blocks(a, b)]
 
 patches = mpatch.patches
 patchedsize = mpatch.patchedsize

@@ -1,12 +1,12 @@
 # verify.py - repository integrity checking for Mercurial
 #
-# Copyright 2006 Matt Mackall <mpm@selenic.com>
+# Copyright 2006, 2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
 from node import *
-from i18n import gettext as _
+from i18n import _
 import revlog, mdiff
 
 def verify(repo):
@@ -16,6 +16,8 @@ def verify(repo):
     errors = [0]
     warnings = [0]
     neededmanifests = {}
+
+    lock = repo.lock()
 
     def err(msg):
         repo.ui.warn(msg + "\n")
@@ -39,8 +41,8 @@ def verify(repo):
         elif revlogv1:
             warn(_("warning: `%s' uses revlog format 0") % name)
 
-    revlogv1 = repo.revlogversion != revlog.REVLOGV0
-    if repo.ui.verbose or revlogv1 != repo.revlogv1:
+    revlogv1 = repo.changelog.version != revlog.REVLOGV0
+    if repo.ui.verbose or not revlogv1:
         repo.ui.status(_("repository uses revlog format %d\n") %
                        (revlogv1 and 1 or 0))
 

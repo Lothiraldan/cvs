@@ -215,6 +215,15 @@ extensions::
     # (this extension will get loaded from the file specified)
     myfeature = ~/.hgext/myfeature.py
 
+format::
+
+  usestore;;
+    Enable or disable the "store" repository format which improves
+    compatibility with systems that fold case or otherwise mangle
+    filenames. Enabled by default. Disabling this option will allow
+    you to store longer filenames in some situations at the expense of
+    compatibility.
+
 hooks::
   Commands or Python functions that get automatically executed by
   various actions such as starting or finishing a commit. Multiple
@@ -303,10 +312,20 @@ hooks::
     new parent is in $HG_PARENT1.  If merge, ID of second new parent
     is in $HG_PARENT2.  If update succeeded, $HG_ERROR=0.  If update
     failed (e.g. because conflicts not resolved), $HG_ERROR=1.
+  pre-<command>;;
+    Run before executing the associated command. The contents of the
+    command line are passed as $HG_ARGS. If the hook returns failure,
+    the command doesn't execute and Mercurial returns the failure code.
+  post-<command>;;
+    Run after successful invocations of the associated command. The
+    contents of the command line are passed as $HG_ARGS and the result
+    code in $HG_RESULT. Hook failure is ignored.
 
-  Note: In earlier releases, the names of hook environment variables
-  did not have a "HG_" prefix.  The old unprefixed names are no longer
-  provided in the environment.
+  Note: it is generally better to use standard hooks rather than the
+  generic pre- and post- command hooks as they are guaranteed to be
+  called in the appropriate contexts for influencing transactions.
+  Also, hooks like "commit" will be called in all contexts that
+  generate a commit (eg. tag) and not just the commit command.
 
   The syntax for Python hooks is as follows:
 
@@ -423,10 +442,18 @@ ui::
   merge;;
     The conflict resolution program to use during a manual merge.
     Default is "hgmerge".
+  patch;;
+    command to use to apply patches. Look for 'gpatch' or 'patch' in PATH if
+    unset.
   quiet;;
     Reduce the amount of output printed.  True or False.  Default is False.
   remotecmd;;
     remote command to use for clone/push/pull operations. Default is 'hg'.
+  slash;;
+    Display paths using a slash ("/") as the path separator.  This only
+    makes a difference on systems where the default path separator is not
+    the slash character (e.g. Windows uses the backslash character ("\")).
+    Default is False.
   ssh;;
     command to use for SSH connections. Default is 'ssh'.
   strict;;
@@ -507,6 +534,11 @@ web::
   push_ssl;;
     Whether to require that inbound pushes be transported over SSL to
     prevent password sniffing.  Default is true.
+  staticurl;;
+    Base URL to use for static files. If unset, static files (e.g.
+    the hgicon.png favicon) will be served by the CGI script itself.
+    Use this setting to serve them directly with the HTTP server.
+    Example: "http://hgserver/static/"
   stripes;;
     How many lines a "zebra stripe" should span in multiline output.
     Default is 1; set to 0 to disable.
@@ -529,6 +561,6 @@ hg(1), hgignore(5)
 COPYING
 -------
 This manual page is copyright 2005 Bryan O'Sullivan.
-Mercurial is copyright 2005, 2006 Matt Mackall.
+Mercurial is copyright 2005-2007 Matt Mackall.
 Free use of this software is granted under the terms of the GNU General
 Public License (GPL).

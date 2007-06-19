@@ -1,14 +1,13 @@
 # ui.py - user interface bits for mercurial
 #
-# Copyright 2005, 2006 Matt Mackall <mpm@selenic.com>
+# Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "errno getpass os re socket sys tempfile")
-demandload(globals(), "ConfigParser traceback util")
+from i18n import _
+import errno, getpass, os, re, socket, sys, tempfile
+import ConfigParser, traceback, util
 
 def dupconfig(orig):
     new = util.configparser(orig.defaults())
@@ -33,7 +32,6 @@ class ui(object):
         if parentui is None:
             # this is the parent of all ui children
             self.parentui = None
-            self.readhooks = []
             self.quiet = quiet
             self.verbose = verbose
             self.debugflag = debug
@@ -53,7 +51,6 @@ class ui(object):
         else:
             # parentui may point to an ui object which is already a child
             self.parentui = parentui.parentui or parentui
-            self.readhooks = self.parentui.readhooks[:]
             self.trusted_users = parentui.trusted_users.copy()
             self.trusted_groups = parentui.trusted_groups.copy()
             self.cdata = dupconfig(self.parentui.cdata)
@@ -155,11 +152,6 @@ class ui(object):
         if root is None:
             root = os.path.expanduser('~')
         self.fixconfig(root=root)
-        for hook in self.readhooks:
-            hook(self)
-
-    def addreadhook(self, hook):
-        self.readhooks.append(hook)
 
     def readsections(self, filename, *sections):
         """Read filename and add only the specified sections to the config data
@@ -171,10 +163,17 @@ class ui(object):
 
         cdata = util.configparser()
         try:
-            cdata.read(filename)
+            try:
+                fp = open(filename)
+            except IOError, inst:
+                raise util.Abort(_("unable to open %s: %s") %
+                                 (filename, getattr(inst, "strerror", inst)))
+            try:
+                cdata.readfp(fp, filename)
+            finally:
+                fp.close()
         except ConfigParser.ParsingError, inst:
-            raise util.Abort(_("failed to parse %s\n%s") % (filename,
-                                                            inst))
+            raise util.Abort(_("failed to parse %s\n%s") % (filename, inst))
 
         for section in sections:
             if not cdata.has_section(section):
@@ -271,7 +270,7 @@ class ui(object):
             result = result.replace(",", " ").split()
         return result
 
-    def has_config(self, section, untrusted=False):
+    def has_section(self, section, untrusted=False):
         '''tell whether section exists in config.'''
         cdata = self._get_cdata(untrusted)
         return cdata.has_section(section)
@@ -310,27 +309,7 @@ class ui(object):
         sections.sort()
         for section in sections:
             for name, value in self.configitems(section, untrusted):
-                yield section, name, value.replace('\n', '\\n')
-
-    def extensions(self):
-        result = self.configitems("extensions")
-        for i, (key, value) in enumerate(result):
-            if value:
-                result[i] = (key, os.path.expanduser(value))
-        return result
-
-    def hgignorefiles(self):
-        result = []
-        for key, value in self.configitems("ui"):
-            if key == 'ignore' or key.startswith('ignore.'):
-                result.append(os.path.expanduser(value))
-        return result
-
-    def configrevlog(self):
-        result = {}
-        for key, value in self.configitems("revlog"):
-            result[key.lower()] = value
-        return result
+                yield section, name, str(value).replace('\n', '\\n')
 
     def username(self):
         """Return default username to be used in commits.
@@ -388,6 +367,9 @@ class ui(object):
             if not sys.stdout.closed: sys.stdout.flush()
             for a in args:
                 sys.stderr.write(str(a))
+            # stderr may be buffered under win32 when redirected to files,
+            # including stdout.
+            if not sys.stderr.closed: sys.stderr.flush()
         except IOError, inst:
             if inst.errno != errno.EPIPE:
                 raise
