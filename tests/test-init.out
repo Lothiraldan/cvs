@@ -1,8 +1,15 @@
 # creating 'local'
+store created
+00changelog.i created
+revlogv1
+store
 adding foo
+# creating repo with old format
+revlogv1
 #test failure
 abort: repository local already exists!
 # init+push to remote2
+comparing with local
 changeset:   0:c4e059d443be
 tag:         tip
 user:        test
@@ -28,13 +35,13 @@ abort: could not create remote repo!
 abort: repository remote1 already exists!
 abort: could not create remote repo!
 # output of dummyssh
-Got arguments 1:user@dummy 2:hg init remote2 3: 4: 5:
-Got arguments 1:user@dummy 2:hg -R remote2 serve --stdio 3: 4: 5:
-Got arguments 1:user@dummy 2:hg -R remote2 serve --stdio 3: 4: 5:
-Got arguments 1:user@dummy 2:hg init remote1 3: 4: 5:
-Got arguments 1:user@dummy 2:hg -R remote1 serve --stdio 3: 4: 5:
-Got arguments 1:user@dummy 2:hg init remote1 3: 4: 5:
-Got arguments 1:user@dummy 2:hg init remote1 3: 4: 5:
+Got arguments 1:user@dummy 2:hg init remote2
+Got arguments 1:user@dummy 2:hg -R remote2 serve --stdio
+Got arguments 1:user@dummy 2:hg -R remote2 serve --stdio
+Got arguments 1:user@dummy 2:hg init remote1
+Got arguments 1:user@dummy 2:hg -R remote1 serve --stdio
+Got arguments 1:user@dummy 2:hg init remote1
+Got arguments 1:user@dummy 2:hg init remote1
 # comparing repositories
 0:c4e059d443be
 0:c4e059d443be

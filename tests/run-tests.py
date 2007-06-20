@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 
-required_tools = ["python", "diff", "grep", "unzip", "gunzip", "bunzip2", "sed", "merge"]
+required_tools = ["python", "diff", "grep", "unzip", "gunzip", "bunzip2", "sed"]
 
 parser = optparse.OptionParser("%prog [options] [tests]")
 parser.add_option("-v", "--verbose", action="store_true",
@@ -150,10 +150,10 @@ def install_hg():
         os.rename(os.path.join(BINDIR, "hg"), os.path.join(BINDIR, "_hg.py"))
         f = open(os.path.join(BINDIR, 'hg'), 'w')
         f.write('#!' + sys.executable + '\n')
-        f.write('import sys, os; os.execv(sys.executable, [sys.executable, '+ \
-            '"%s", "-x", "%s"] + sys.argv[1:])\n' % (
-            os.path.join(TESTDIR, 'coverage.py'),
-            os.path.join(BINDIR, '_hg.py')))
+        f.write('import sys, os; os.execv(sys.executable, [sys.executable, '
+                '"%s", "-x", "%s"] + sys.argv[1:])\n' %
+                (os.path.join(TESTDIR, 'coverage.py'),
+                 os.path.join(BINDIR, '_hg.py')))
         f.close()
         os.chmod(os.path.join(BINDIR, 'hg'), 0700)
         python = '"%s" "%s" -x' % (sys.executable,
@@ -226,6 +226,8 @@ def run_one(test):
 
     # create a fresh hgrc
     hgrc = file(HGRCPATH, 'w+')
+    hgrc.write('[ui]\n')
+    hgrc.write('slash = True\n')
     hgrc.close()
 
     err = os.path.join(TESTDIR, test+".err")
@@ -340,16 +342,18 @@ check_required_tools()
 os.environ['LANG'] = os.environ['LC_ALL'] = 'C'
 os.environ['TZ'] = 'GMT'
 
-os.environ["HGEDITOR"] = sys.executable + ' -c "import sys; sys.exit(0)"'
-os.environ["HGMERGE"]  = sys.executable + ' -c "import sys; sys.exit(0)"'
-os.environ["HGUSER"]   = "test"
-os.environ["HGENCODING"] = "ascii"
-os.environ["HGENCODINGMODE"] = "strict"
-
 TESTDIR = os.environ["TESTDIR"] = os.getcwd()
 HGTMP   = os.environ["HGTMP"]   = tempfile.mkdtemp("", "hgtests.")
 DAEMON_PIDS = os.environ["DAEMON_PIDS"] = os.path.join(HGTMP, 'daemon.pids')
 HGRCPATH = os.environ["HGRCPATH"] = os.path.join(HGTMP, '.hgrc')
+
+os.environ["HGEDITOR"] = sys.executable + ' -c "import sys; sys.exit(0)"'
+os.environ["HGMERGE"]  = ('python "%s" -L my -L other'
+                          % os.path.join(TESTDIR, os.path.pardir, 'contrib',
+                                         'simplemerge'))
+os.environ["HGUSER"]   = "test"
+os.environ["HGENCODING"] = "ascii"
+os.environ["HGENCODINGMODE"] = "strict"
 
 vlog("# Using TESTDIR", TESTDIR)
 vlog("# Using HGTMP", HGTMP)

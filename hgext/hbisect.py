@@ -6,9 +6,9 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from mercurial.i18n import gettext as _
-from mercurial.demandload import demandload
-demandload(globals(), "os sys sets mercurial:hg,util,commands,cmdutil")
+from mercurial.i18n import _
+from mercurial import hg, util, commands, cmdutil
+import os, sys, sets
 
 versionstr = "0.0.3"
 
@@ -252,8 +252,21 @@ def test(ui, repo, rev):
     return 0
 
 def bisect_run(ui, repo, cmd=None, *args):
-    """bisect extension: dichotomic search in the DAG of changesets
-for subcommands see "hg bisect help\"
+    """Dichotomic search in the DAG of changesets
+
+This extension helps to find changesets which cause problems.
+To use, mark the earliest changeset you know introduces the problem
+as bad, then mark the latest changeset which is free from the problem
+as good. Bisect will update your working directory to a revision for
+testing. Once you have performed tests, mark the working directory
+as bad or good and bisect will either update to another candidate
+changeset or announce that it has found the bad revision.
+
+Note: bisect expects bad revisions to be descendants of good revisions.
+If you are looking for the point at which a problem was fixed, then make
+the problem-free state "bad" and the problematic state "good."
+
+For subcommands see "hg bisect help\"
     """
     def help_(cmd=None, *args):
         """show help for a given bisect subcommand or all subcommands"""

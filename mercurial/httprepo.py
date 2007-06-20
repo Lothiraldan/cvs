@@ -8,10 +8,9 @@
 
 from node import *
 from remoterepo import *
-from i18n import gettext as _
-from demandload import *
-demandload(globals(), "hg os urllib urllib2 urlparse zlib util httplib")
-demandload(globals(), "errno keepalive tempfile socket changegroup")
+from i18n import _
+import hg, os, urllib, urllib2, urlparse, zlib, util, httplib
+import errno, keepalive, tempfile, socket, changegroup
 
 class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def __init__(self, ui):
@@ -209,7 +208,7 @@ class httprepository(remoterepository):
         # 1.0 here is the _protocol_ version
         opener.addheaders = [('User-agent', 'mercurial/proto-1.0')]
         urllib2.install_opener(opener)
-    
+
     def __del__(self):
         if self.handler:
             self.handler.close_all()
@@ -272,11 +271,11 @@ class httprepository(remoterepository):
             proto = resp.headers['content-type']
 
         # accept old "text/plain" and "application/hg-changegroup" for now
-        if not proto.startswith('application/mercurial-') and \
-               not proto.startswith('text/plain') and \
-               not proto.startswith('application/hg-changegroup'):
-            raise hg.RepoError(_("'%s' does not appear to be an hg repository") %
-                               self._url)
+        if not (proto.startswith('application/mercurial-') or
+                proto.startswith('text/plain') or
+                proto.startswith('application/hg-changegroup')):
+            raise hg.RepoError(_("'%s' does not appear to be an hg repository")
+                               % self._url)
 
         if proto.startswith('application/mercurial-'):
             try:
