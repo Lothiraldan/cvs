@@ -1,0 +1,30 @@
+abort: Connection refused
+255
+copy: No such file or directory
+changeset:   0:53e17d176ae6
+tag:         tip
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     test
+
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 1 changes to 1 files
+1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+checking changesets
+checking manifests
+crosschecking files in changesets and manifests
+checking files
+1 files, 1 changesets, 1 total revisions
+foo
+adding quux
+changegroup: u=static-http://localhost:20059/remote
+pulling from static-http://localhost:20059/remote
+searching for changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 1 changes to 1 files
+(run 'hg update' to get a working copy)
