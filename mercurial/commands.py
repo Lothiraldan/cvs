@@ -1432,38 +1432,69 @@ def help_(ui, name=None, with_version=False):
             else:
                 ui.write("%s\n" % first)
 
-def identify(ui, repo):
-    """print information about the working copy
+def identify(ui, repo, source=None,
+             rev=None, num=None, id=None, branch=None, tags=None):
+    """identify the working copy or specified revision
 
-    Print a short summary of the current state of the repo.
+    With no revision, print a summary of the current state of the repo.
+
+    With a path, do a lookup in another repository.
 
     This summary identifies the repository state using one or two parent
     hash identifiers, followed by a "+" if there are uncommitted changes
-    in the working directory, followed by a list of tags for this revision.
+    in the working directory, a list of tags for this revision and a branch
+    name for non-default branches.
     """
-    parents = [p for p in repo.dirstate.parents() if p != nullid]
-    if not parents:
-        ui.write(_("unknown\n"))
-        return
 
     hexfunc = ui.debugflag and hex or short
-    modified, added, removed, deleted = repo.status()[:4]
-    output = ["%s%s" %
-              ('+'.join([hexfunc(parent) for parent in parents]),
-              (modified or added or removed or deleted) and "+" or "")]
+    default = not (num or id or branch or tags)
+    output = []
 
-    if not ui.quiet:
+    if source:
+        source, revs = cmdutil.parseurl(ui.expandpath(source), [])
+        srepo = hg.repository(ui, source)
+        if not rev and revs:
+            rev = revs[0]
+        if not rev:
+            rev = "tip"
+        if num or branch or tags:
+            raise util.Abort(
+                "can't query remote revision number, branch, or tags")
+        output = [hexfunc(srepo.lookup(rev))]
+    elif not rev:
+        ctx = repo.workingctx()
+        parents = ctx.parents()
+        changed = False
+        if default or id or num:
+            changed = ctx.files() + ctx.deleted()
+        if default or id:
+            output = ["%s%s" % ('+'.join([hexfunc(p.node()) for p in parents]),
+                                (changed) and "+" or "")]
+        if num:
+            output.append("%s%s" % ('+'.join([str(p.rev()) for p in parents]),
+                                    (changed) and "+" or ""))
+    else:
+        ctx = repo.changectx(rev)
+        if default or id:
+            output = [hexfunc(ctx.node())]
+        if num:
+            output.append(str(ctx.rev()))
 
-        branch = util.tolocal(repo.workingctx().branch())
-        if branch != 'default':
-            output.append("(%s)" % branch)
+    if not source and default and not ui.quiet:
+        b = util.tolocal(ctx.branch())
+        if b != 'default':
+            output.append("(%s)" % b)
 
         # multiple tags for a single parent separated by '/'
-        parenttags = ['/'.join(tags)
-                      for tags in map(repo.nodetags, parents) if tags]
-        # tags for multiple parents separated by ' + '
-        if parenttags:
-            output.append(' + '.join(parenttags))
+        t = "/".join(ctx.tags())
+        if t:
+            output.append(t)
+
+    if branch:
+        output.append(util.tolocal(ctx.branch()))
+
+    if tags:
+        output.extend(ctx.tags())
 
     ui.write("%s\n" % ' '.join(output))
 
@@ -2826,7 +2857,14 @@ table = {
           ('', 'template', '', _('display with template'))],
          _('hg heads [-r REV] [REV]...')),
     "help": (help_, [], _('hg help [COMMAND]')),
-    "identify|id": (identify, [], _('hg identify')),
+    "identify|id":
+        (identify,
+         [('r', 'rev', '', _('identify the specified rev')),
+          ('n', 'num', None, _('show local revision number')),
+          ('i', 'id', None, _('show global revision id')),
+          ('b', 'branch', None, _('show branch')),
+          ('t', 'tags', None, _('show tags'))],
+         _('hg identify [-nibt] [-r REV] [SOURCE]')),
     "import|patch":
         (import_,
          [('p', 'strip', 1,
