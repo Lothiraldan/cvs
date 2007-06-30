@@ -169,6 +169,9 @@ def backout(ui, repo, node=None, rev=None, **opts):
     if not rev:
         rev = node
 
+    if not rev:
+        raise util.Abort(_("please specify a revision to backout"))
+
     cmdutil.bail_if_changed(repo)
     op1, op2 = repo.dirstate.parents()
     if op2 != nullid:
@@ -1392,6 +1395,8 @@ def help_(ui, name=None, with_version=False):
         try:
             ct = mod.cmdtable
         except AttributeError:
+            ct = None
+        if not ct:
             ui.status(_('no commands defined\n'))
             return
 
@@ -2765,14 +2770,16 @@ table = {
           ('r', 'rev', '', _('revision to backout')),
          ] + walkopts + commitopts,
          _('hg backout [OPTION]... [-r] REV')),
-    "branch": (branch,
-               [('f', 'force', None,
-                 _('set branch name even if it shadows an existing branch'))],
-                _('hg branch [NAME]')),
-    "branches": (branches,
-                 [('a', 'active', False,
-                   _("show only branches that have unmerged heads"))],
-                 _('hg branches [-a]')),
+    "branch":
+        (branch,
+         [('f', 'force', None,
+           _('set branch name even if it shadows an existing branch'))],
+         _('hg branch [NAME]')),
+    "branches":
+        (branches,
+         [('a', 'active', False,
+           _('show only branches that have unmerged heads'))],
+         _('hg branches [-a]')),
     "bundle":
         (bundle,
          [('f', 'force', None,
@@ -2834,9 +2841,10 @@ table = {
     "debugdata": (debugdata, [], _('debugdata FILE REV')),
     "debugindex": (debugindex, [], _('debugindex FILE')),
     "debugindexdot": (debugindexdot, [], _('debugindexdot FILE')),
-    "debugrename": (debugrename,
-                    [('r', 'rev', '', _('revision to debug'))],
-                    _('debugrename [-r REV] FILE')),
+    "debugrename":
+        (debugrename,
+         [('r', 'rev', '', _('revision to debug'))],
+         _('debugrename [-r REV] FILE')),
     "debugwalk": (debugwalk, walkopts, _('debugwalk [OPTION]... [FILE]...')),
     "^diff":
         (diff,

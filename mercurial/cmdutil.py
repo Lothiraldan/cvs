@@ -248,27 +248,32 @@ def parseconfig(config):
     return parsed
 
 def earlygetopt(aliases, args):
-    """Return list of values for a option (with aliases) in given order"""
+    """Return list of values for an option (or aliases).
+
+    The values are listed in the order they appear in args.
+    The options and values are removed from args.
+    """
     try:
         argcount = args.index("--")
     except ValueError:
         argcount = len(args)
+    shortopts = [opt for opt in aliases if len(opt) == 2]
     values = []
     pos = 0
     while pos < argcount:
-        valuepos = argcount
-        for opt in aliases:
-            # find next occurance of current alias
-            try:
-                candidate = args.index(opt, pos, argcount) + 1
+        if args[pos] in aliases:
+            if pos + 1 >= argcount:
                 # ignore and let getopt report an error if there is no value
-                if candidate < valuepos:
-                    valuepos = candidate
-            except ValueError:
-                pass
-        if valuepos < argcount:
-            values.append(args[valuepos])
-        pos = valuepos
+                break
+            del args[pos]
+            values.append(args.pop(pos))
+            argcount -= 2
+        elif args[pos][:2] in shortopts:
+            # short option can have no following space, e.g. hg log -Rfoo
+            values.append(args.pop(pos)[2:])
+            argcount -= 1
+        else:
+            pos += 1
     return values
 
 def dispatch(ui, args, argv0=None):
@@ -312,6 +317,15 @@ def dispatch(ui, args, argv0=None):
 
     fullargs = args
     cmd, func, args, options, cmdoptions = parse(ui, args)
+
+    if options["config"]:
+        raise util.Abort(_("Option --config may not be abbreviated!"))
+    if options["cwd"]:
+        raise util.Abort(_("Option --cwd may not be abbreviated!"))
+    if options["repository"]:
+        raise util.Abort(_(
+            "Option -R has to be separated from other options (i.e. not -qR) "
+            "and --repository may only be abbreviated as --repo!"))
 
     if options["encoding"]:
         util._encoding = options["encoding"]

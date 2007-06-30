@@ -32,6 +32,29 @@ user:        test
 date:        Thu Jan 01 00:00:01 1970 +0000
 summary:     b
 
+%% earlygetopt with duplicate options (36d23de02da1)
+changeset:   1:b6c483daf290
+tag:         tip
+parent:      -1:000000000000
+user:        test
+date:        Thu Jan 01 00:00:01 1970 +0000
+summary:     b
+
+changeset:   0:8580ff50825a
+tag:         tip
+user:        test
+date:        Thu Jan 01 00:00:01 1970 +0000
+summary:     a
+
+%% earlygetopt short option without following space
+0:b6c483daf290
+%% earlygetopt with illegal abbreviations
+abort: Option --config may not be abbreviated!
+abort: Option --cwd may not be abbreviated!
+abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
+abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
+abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
+abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
 %% --cwd
 changeset:   0:8580ff50825a
 tag:         tip
