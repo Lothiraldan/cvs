@@ -1,0 +1,126 @@
+adding a
+adding d1/d2/a
+% import exported patch
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying ../tip.patch
+% message should be same
+summary:     second change
+% committer should be same
+user:        someone
+% import of plain diff should fail without message
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying ../tip.patch
+transaction abort!
+rollback completed
+% import of plain diff should be ok with message
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying ../tip.patch
+% hg -R repo import
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying tip.patch
+% import from stdin
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying patch from stdin
+% override commit message
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying patch from stdin
+summary:     override
+% plain diff in email, subject, message body
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying ../msg.patch
+user:        email patcher
+summary:     email patch
+% plain diff in email, no subject, message body
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying patch from stdin
+% plain diff in email, subject, no message body
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying patch from stdin
+% plain diff in email, no subject, no message body, should fail
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying patch from stdin
+transaction abort!
+rollback completed
+% hg export in email, should use patch header
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying patch from stdin
+summary:     second change
+% plain diff in email, [PATCH] subject, message body with subject
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying patch from stdin
+email patch
+
+next line
+% hg import in a subdirectory
+requesting all changes
+adding changesets
+adding manifests
+adding file changes
+added 1 changesets with 2 changes to 2 files
+2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+applying ../../../tip.patch
+% message should be 'subdir change'
+summary:     subdir change
+% committer should be 'someoneelse'
+user:        someoneelse
+% should be empty
