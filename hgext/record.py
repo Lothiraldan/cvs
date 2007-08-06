@@ -327,8 +327,8 @@ def record(ui, repo, *pats, **opts):
         try:
             os.mkdir(backupdir)
         except OSError, err:
-            if err.errno == errno.EEXIST:
-                pass
+            if err.errno != errno.EEXIST:
+                raise
         try:
             for f in newfiles:
                 if f not in modified:
@@ -363,7 +363,7 @@ def record(ui, repo, *pats, **opts):
             try:
                 for realname, tmpname in backups.iteritems():
                     ui.debug('restoring %r to %r\n' % (tmpname, realname))
-                    util.copyfile(tmpname, realname)
+                    util.copyfile(tmpname, repo.wjoin(realname))
                     os.unlink(tmpname)
                 os.rmdir(backupdir)
             except OSError:
