@@ -1,0 +1,109 @@
+adding a
+This patch series consists of 1 patches.
+
+
+Displaying [PATCH] a ...
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [PATCH] a
+X-Mercurial-Node: 8580ff50825a50c8f716709acdf8de0deddcd6ab
+Message-Id: <8580ff50825a50c8f716.60@
+Date: Thu, 01 Jan 1970 00:01:00 +0000
+From: quux
+To: foo
+Cc: bar
+
+# HG changeset patch
+# User test
+# Date 1 0
+# Node ID 8580ff50825a50c8f716709acdf8de0deddcd6ab
+# Parent  0000000000000000000000000000000000000000
+a
+
+diff -r 000000000000 -r 8580ff50825a a
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/a	Thu Jan 01 00:00:01 1970 +0000
+@@ -0,0 +1,1 @@
++a
+
+adding b
+This patch series consists of 2 patches.
+
+
+Write the introductory message for the patch series.
+
+
+Displaying [PATCH 0 of 2] test ...
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [PATCH 0 of 2] test
+Message-Id: <patchbomb.120@
+Date: Thu, 01 Jan 1970 00:02:00 +0000
+From: quux
+To: foo
+Cc: bar
+
+
+Displaying [PATCH 1 of 2] a ...
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [PATCH 1 of 2] a
+X-Mercurial-Node: 8580ff50825a50c8f716709acdf8de0deddcd6ab
+Message-Id: <8580ff50825a50c8f716.121@
+In-Reply-To: <patchbomb.120@
+Date: Thu, 01 Jan 1970 00:02:01 +0000
+From: quux
+To: foo
+Cc: bar
+
+# HG changeset patch
+# User test
+# Date 1 0
+# Node ID 8580ff50825a50c8f716709acdf8de0deddcd6ab
+# Parent  0000000000000000000000000000000000000000
+a
+
+diff -r 000000000000 -r 8580ff50825a a
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/a	Thu Jan 01 00:00:01 1970 +0000
+@@ -0,0 +1,1 @@
++a
+
+Displaying [PATCH 2 of 2] b ...
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [PATCH 2 of 2] b
+X-Mercurial-Node: 97d72e5f12c7e84f85064aa72e5a297142c36ed9
+Message-Id: <97d72e5f12c7e84f8506.122@
+In-Reply-To: <patchbomb.120@
+Date: Thu, 01 Jan 1970 00:02:02 +0000
+From: quux
+To: foo
+Cc: bar
+
+# HG changeset patch
+# User test
+# Date 2 0
+# Node ID 97d72e5f12c7e84f85064aa72e5a297142c36ed9
+# Parent  8580ff50825a50c8f716709acdf8de0deddcd6ab
+b
+
+diff -r 8580ff50825a -r 97d72e5f12c7 b
+--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
++++ b/b	Thu Jan 01 00:00:02 1970 +0000
+@@ -0,0 +1,1 @@
++b
+
+This patch series consists of 2 patches.
+
+
+Write the introductory message for the patch series.
+
+
+Writing [PATCH 0 of 2] test ...
+Writing [PATCH 1 of 2] a ...
+Writing [PATCH 2 of 2] b ...
