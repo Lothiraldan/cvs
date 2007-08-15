@@ -1,0 +1,24 @@
+#!/bin/sh
+
+hg init a
+cd a
+hg init b
+echo x > b/x
+
+echo '# should print nothing'
+hg add b
+hg st
+
+echo '# should fail'
+hg st b/x
+hg add b/x
+
+echo '# should arguably print nothing'
+hg st b
+
+echo a > a
+hg ci -Ama a
+
+echo '# should fail'
+hg mv a b
+hg st
