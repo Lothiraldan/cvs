@@ -1,0 +1,97 @@
+% commit date test
+transaction abort!
+rollback completed
+abort: impossible time zone offset: 4444444
+transaction abort!
+rollback completed
+abort: invalid date: '1\t15.1' 
+transaction abort!
+rollback completed
+abort: invalid date: 'foo bar' 
+nothing changed
+% partial commit test
+trouble committing bar!
+abort: No such file or directory: .../test/bar
+adding dir/file
+dir/file
+adding dir.file
+abort: no match under directory .../test/dir!
+abort: no match under directory .../test/bleh!
+abort: no match under directory .../test/dir2!
+dir/file
+does-not-exist: No such file or directory
+abort: file .../test/does-not-exist not found!
+abort: file .../test/baz not tracked!
+abort: file .../test/quux not tracked!
+dir/file
+% partial subdir commit test
+adding bar/bar
+adding foo/foo
+% subdir log 1
+changeset:   0:6ef3cb06bb80
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+files:       foo/foo
+description:
+commit-subdir-1
+
+
+% subdir log 2
+changeset:   1:f2e51572cf5a
+tag:         tip
+user:        test
+date:        Mon Jan 12 13:46:41 1970 +0000
+files:       bar/bar
+description:
+commit-subdir-2
+
+
+% full log
+changeset:   1:f2e51572cf5a
+tag:         tip
+user:        test
+date:        Mon Jan 12 13:46:41 1970 +0000
+files:       bar/bar
+description:
+commit-subdir-2
+
+
+changeset:   0:6ef3cb06bb80
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+files:       foo/foo
+description:
+commit-subdir-1
+
+
+% dot and subdir commit test
+% full log
+changeset:   1:d9180e04fa8a
+tag:         tip
+user:        test
+date:        Sat Jan 24 03:33:20 1970 +0000
+files:       foo/plain-file
+description:
+commit-foo-dot
+
+
+changeset:   0:80b572aaf098
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+files:       foo/plain-file
+description:
+commit-foo-subdir
+
+
+% subdir log
+changeset:   1:d9180e04fa8a
+tag:         tip
+user:        test
+date:        Sat Jan 24 03:33:20 1970 +0000
+summary:     commit-foo-dot
+
+changeset:   0:80b572aaf098
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     commit-foo-subdir
+
