@@ -1,0 +1,24 @@
+adding base
+abort: qdelete requires at least one revision or patch name
+abort: cannot delete applied patch c
+Now at: b
+a
+b
+a
+b
+series
+status
+Now at: a
+a
+b
+series
+status
+1 [mq]: a
+0 base
+abort: cannot delete revision 3 above applied patches
+f
+4 [mq]: f
+3 [mq]: e
+2 [mq]: d
+1 [mq]: a
+0 base
