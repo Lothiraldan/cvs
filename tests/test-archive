@@ -1,0 +1,76 @@
+#!/bin/sh
+
+mkdir test
+cd test
+hg init
+echo foo>foo
+hg commit -Am 1 -d '1 0'
+echo bar>bar
+hg commit -Am 2 -d '2 0'
+mkdir baz
+echo bletch>baz/bletch
+hg commit -Am 3 -d '1000000000 0'
+echo "[web]" >> .hg/hgrc
+echo "name = test-archive" >> .hg/hgrc
+echo "allow_archive = gz bz2, zip" >> .hg/hgrc
+hg serve -p 20059 -d --pid-file=hg.pid
+cat hg.pid >> $DAEMON_PIDS
+
+TIP=`hg id -v | cut -f1 -d' '`
+QTIP=`hg id -q`
+cat > getarchive.py <<EOF
+import sys, urllib2
+node, archive = sys.argv[1:]
+f = urllib2.urlopen('http://127.0.0.1:20059/?cmd=archive;node=%s;type=%s'
+                    % (node, archive))
+sys.stdout.write(f.read())
+EOF
+http_proxy= python getarchive.py "$TIP" gz | gunzip | tar tf - | sed "s/$QTIP/TIP/"
+http_proxy= python getarchive.py "$TIP" bz2 | bunzip2 | tar tf - | sed "s/$QTIP/TIP/"
+http_proxy= python getarchive.py "$TIP" zip > archive.zip
+unzip -t archive.zip | sed "s/$QTIP/TIP/"
+
+hg archive -t tar test.tar
+tar tf test.tar
+
+hg archive -t tbz2 -X baz test.tar.bz2
+bunzip2 -dc test.tar.bz2 | tar tf -
+
+hg archive -t tgz -p %b-%h test-%h.tar.gz
+gzip -dc test-$QTIP.tar.gz | tar tf - | sed "s/$QTIP/TIP/"
+
+cat > md5comp.py <<EOF
+import md5, sys
+f1, f2 = sys.argv[1:3]
+h1 = md5.md5(file(f1, 'rb').read()).hexdigest()
+h2 = md5.md5(file(f2, 'rb').read()).hexdigest()
+print h1 == h2 or "md5 differ: " + repr((h1, h2))
+EOF
+
+# archive name is stored in the archive, so create similar
+# archives and rename them afterwards.
+hg archive -t tgz tip.tar.gz
+mv tip.tar.gz tip1.tar.gz
+sleep 1
+hg archive -t tgz tip.tar.gz
+mv tip.tar.gz tip2.tar.gz
+python md5comp.py tip1.tar.gz tip2.tar.gz
+
+hg archive -t zip -p /illegal test.zip
+hg archive -t zip -p very/../bad test.zip
+
+hg archive -t zip -r 2 test.zip
+unzip -t test.zip
+
+hg archive -t tar - | tar tf - | sed "s/$QTIP/TIP/"
+
+hg archive -r 0 -t tar rev-%r.tar
+if [ -f rev-0.tar ]; then
+    echo 'rev-0.tar created'
+fi
+
+echo '% empty repo'
+hg init ../empty
+cd ../empty
+hg archive ../test-empty
+exit 0

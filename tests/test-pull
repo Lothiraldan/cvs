@@ -1,0 +1,26 @@
+#!/bin/sh
+
+mkdir test
+cd test
+echo foo>foo
+hg init
+hg addremove
+hg commit -m 1
+hg verify
+hg serve -p 20059 -d --pid-file=hg.pid
+cat hg.pid >> $DAEMON_PIDS
+cd ..
+
+http_proxy= hg clone --pull http://localhost:20059/ copy
+cd copy
+hg verify
+hg co
+cat foo
+hg manifest --debug
+hg pull
+
+echo % issue 622
+cd ..
+hg init empty
+cd empty
+hg pull -u ../test
