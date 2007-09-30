@@ -59,7 +59,7 @@ class mercurial_sink(converter_sink):
 
     def delfile(self, f):
         try:
-            os.unlink(self.repo.wjoin(f))
+            util.unlink(self.repo.wjoin(f))
             #self.repo.remove([f])
         except:
             pass
