@@ -10,8 +10,8 @@ No conflicts created by this import
 U src/a
 U src/b/c
 % convert fresh repo
-connecting to cvsrepo
 initializing destination src-hg repository
+connecting to cvsrepo
 scanning source...
 sorting...
 converting...
@@ -24,8 +24,8 @@ c
 checking in src/a,v
 checking in src/b/c,v
 % convert again
-connecting to cvsrepo
 destination src-hg is a Mercurial repository
+connecting to cvsrepo
 scanning source...
 sorting...
 converting...
