@@ -1,0 +1,25 @@
+rm 'd/b'
+assuming destination git-repo-hg
+initializing destination git-repo-hg repository
+scanning source...
+sorting...
+converting...
+5 t1
+4 t2
+3 t3
+2 t4.1
+1 t4.2
+0 Merge branch other
+changeset:   5:77dc8b329132
+tag:         tip
+parent:      3:6f360826ff29
+parent:      4:b5fadecd5d0e
+user:        test <test@example.org>
+date:        Mon Jan 01 00:00:15 2007 +0000
+files:       a
+description:
+Merge branch other
+
+committer: test <test@example.org>
+
+
