@@ -1087,10 +1087,16 @@ class revlog(object):
             if infocollect is not None:
                 infocollect(nb)
 
-            d = self.revdiff(a, b)
             p = self.parents(nb)
             meta = nb + p[0] + p[1] + lookup(nb)
-            yield changegroup.genchunk("%s%s" % (meta, d))
+            if a == -1:
+                d = self.revision(nb)
+                meta += mdiff.trivialdiffheader(len(d))
+            else:
+                d = self.revdiff(a, b)
+            yield changegroup.chunkheader(len(meta) + len(d))
+            yield meta
+            yield d
 
         yield changegroup.closechunk()
 

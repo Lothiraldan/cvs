@@ -5,14 +5,15 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from common import NoRepo, converter_source, converter_sink
+from common import NoRepo, SKIPREV, converter_source, converter_sink
 from cvs import convert_cvs
 from darcs import darcs_source
 from git import convert_git
 from hg import mercurial_source, mercurial_sink
 from subversion import convert_svn, debugsvnlog
+import filemap
 
-import os, shlex, shutil
+import os, shutil
 from mercurial import hg, ui, util, commands
 from mercurial.i18n import _
 
@@ -40,7 +41,7 @@ def convertsink(ui, path):
     raise util.Abort('%s: unknown repository type' % path)
 
 class converter(object):
-    def __init__(self, ui, source, dest, revmapfile, filemapper, opts):
+    def __init__(self, ui, source, dest, revmapfile, opts):
 
         self.source = source
         self.dest = dest
@@ -51,13 +52,15 @@ class converter(object):
         self.revmapfilefd = None
         self.authors = {}
         self.authorfile = None
-        self.mapfile = filemapper
 
+        self.maporder = []
         self.map = {}
         try:
             origrevmapfile = open(self.revmapfile, 'r')
             for l in origrevmapfile:
                 sv, dv = l[:-1].split()
+                if sv not in self.map:
+                    self.maporder.append(sv)
                 self.map[sv] = dv
             origrevmapfile.close()
         except IOError:
@@ -199,7 +202,15 @@ class converter(object):
         do_copies = hasattr(self.dest, 'copyfile')
         filenames = []
 
-        files, copies = self.source.getchanges(rev)
+        changes = self.source.getchanges(rev)
+        if isinstance(changes, basestring):
+            if changes == SKIPREV:
+                dest = SKIPREV
+            else:
+                dest = self.map[changes]
+            self.mapentry(rev, dest)
+            return
+        files, copies = changes
         parents = [self.map[r] for r in commit.parents]
         if commit.parents:
             prev = commit.parents[0]
@@ -210,35 +221,28 @@ class converter(object):
             pbranch = None
         self.dest.setbranch(commit.branch, pbranch, parents)
         for f, v in files:
-            newf = self.mapfile(f)
-            if not newf:
-                continue
-            filenames.append(newf)
+            filenames.append(f)
             try:
                 data = self.source.getfile(f, v)
             except IOError, inst:
-                self.dest.delfile(newf)
+                self.dest.delfile(f)
             else:
                 e = self.source.getmode(f, v)
-                self.dest.putfile(newf, e, data)
+                self.dest.putfile(f, e, data)
                 if do_copies:
                     if f in copies:
-                        copyf = self.mapfile(copies[f])
-                        if copyf:
-                            # Merely marks that a copy happened.
-                            self.dest.copyfile(copyf, newf)
+                        copyf = copies[f]
+                        # Merely marks that a copy happened.
+                        self.dest.copyfile(copyf, f)
 
-        if not filenames and self.mapfile.active():
-            newnode = parents[0]
-        else:
-            newnode = self.dest.putcommit(filenames, parents, commit)
+        newnode = self.dest.putcommit(filenames, parents, commit)
         self.mapentry(rev, newnode)
 
     def convert(self):
         try:
             self.source.before()
             self.dest.before()
-            self.source.setrevmap(self.map)
+            self.source.setrevmap(self.map, self.maporder)
             self.ui.status("scanning source...\n")
             heads = self.source.getheads()
             parents = self.walktree(heads)
@@ -260,7 +264,7 @@ class converter(object):
             ctags = {}
             for k in tags:
                 v = tags[k]
-                if v in self.map:
+                if self.map.get(v, SKIPREV) != SKIPREV:
                     ctags[k] = self.map[v]
 
             if c and ctags:
@@ -281,92 +285,6 @@ class converter(object):
             self.source.after()
         if self.revmapfilefd:
             self.revmapfilefd.close()
-
-def rpairs(name):
-    e = len(name)
-    while e != -1:
-        yield name[:e], name[e+1:]
-        e = name.rfind('/', 0, e)
-
-class filemapper(object):
-    '''Map and filter filenames when importing.
-    A name can be mapped to itself, a new name, or None (omit from new
-    repository).'''
-
-    def __init__(self, ui, path=None):
-        self.ui = ui
-        self.include = {}
-        self.exclude = {}
-        self.rename = {}
-        if path:
-            if self.parse(path):
-                raise util.Abort(_('errors in filemap'))
-
-    def parse(self, path):
-        errs = 0
-        def check(name, mapping, listname):
-            if name in mapping:
-                self.ui.warn(_('%s:%d: %r already in %s list\n') %
-                             (lex.infile, lex.lineno, name, listname))
-                return 1
-            return 0
-        lex = shlex.shlex(open(path), path, True)
-        lex.wordchars += '!@#$%^&*()-=+[]{}|;:,./<>?'
-        cmd = lex.get_token()
-        while cmd:
-            if cmd == 'include':
-                name = lex.get_token()
-                errs += check(name, self.exclude, 'exclude')
-                self.include[name] = name
-            elif cmd == 'exclude':
-                name = lex.get_token()
-                errs += check(name, self.include, 'include')
-                errs += check(name, self.rename, 'rename')
-                self.exclude[name] = name
-            elif cmd == 'rename':
-                src = lex.get_token()
-                dest = lex.get_token()
-                errs += check(src, self.exclude, 'exclude')
-                self.rename[src] = dest
-            elif cmd == 'source':
-                errs += self.parse(lex.get_token())
-            else:
-                self.ui.warn(_('%s:%d: unknown directive %r\n') %
-                             (lex.infile, lex.lineno, cmd))
-                errs += 1
-            cmd = lex.get_token()
-        return errs
-
-    def lookup(self, name, mapping):
-        for pre, suf in rpairs(name):
-            try:
-                return mapping[pre], pre, suf
-            except KeyError, err:
-                pass
-        return '', name, ''
-
-    def __call__(self, name):
-        if self.include:
-            inc = self.lookup(name, self.include)[0]
-        else:
-            inc = name
-        if self.exclude:
-            exc = self.lookup(name, self.exclude)[0]
-        else:
-            exc = ''
-        if not inc or exc:
-            return None
-        newpre, pre, suf = self.lookup(name, self.rename)
-        if newpre:
-            if newpre == '.':
-                return suf
-            if suf:
-                return newpre + '/' + suf
-            return newpre
-        return name
-
-    def active(self):
-        return bool(self.include or self.exclude or self.rename)
 
 def convert(ui, src, dest=None, revmapfile=None, **opts):
     """Convert a foreign SCM repository to a Mercurial one.
@@ -461,15 +379,18 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
             shutil.rmtree(dest, True)
         raise
 
+    fmap = opts.get('filemap')
+    if fmap:
+        srcc = filemap.filemap_source(ui, srcc, fmap)
+        destc.setfilemapmode(True)
+
     if not revmapfile:
         try:
             revmapfile = destc.revmapfile()
         except:
             revmapfile = os.path.join(destc, "map")
 
-
-    c = converter(ui, srcc, destc, revmapfile, filemapper(ui, opts['filemap']),
-                  opts)
+    c = converter(ui, srcc, destc, revmapfile, opts)
     c.convert()
 
 

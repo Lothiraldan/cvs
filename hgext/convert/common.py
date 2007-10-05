@@ -17,6 +17,8 @@ def decodeargs(s):
 
 class NoRepo(Exception): pass
 
+SKIPREV = 'hg-convert-skipped-revision'
+
 class commit(object):
     def __init__(self, author, date, desc, parents, branch=None, rev=None):
         self.author = author
@@ -44,8 +46,11 @@ class converter_source(object):
     def after(self):
         pass
 
-    def setrevmap(self, revmap):
-        """set the map of already-converted revisions"""
+    def setrevmap(self, revmap, order):
+        """set the map of already-converted revisions
+        
+        order is a list with the keys from revmap in the order they
+        appear in the revision map file."""
         pass
 
     def getheads(self):
@@ -90,6 +95,19 @@ class converter_source(object):
                 return s.decode("latin-1").encode("utf-8")
             except:
                 return s.decode(encoding, "replace").encode("utf-8")
+
+    def getchangedfiles(self, rev, i):
+        """Return the files changed by rev compared to parent[i].
+    
+        i is an index selecting one of the parents of rev.  The return
+        value should be the list of files that are different in rev and
+        this parent.
+
+        If rev has no parents, i is None.
+    
+        This function is only needed to support --filemap
+        """
+        raise NotImplementedError()
 
 class converter_sink(object):
     """Conversion sink (target) interface"""
@@ -148,4 +166,14 @@ class converter_sink(object):
         branch: branch name for subsequent commits
         pbranch: branch name of parent commit
         parents: destination revisions of parent"""
+        pass
+
+    def setfilemapmode(self, active):
+        """Tell the destination that we're using a filemap
+
+        Some converter_sources (svn in particular) can claim that a file
+        was changed in a revision, even if there was no change.  This method
+        tells the destination that we're using a filemap and that it should
+        filter empty revisions.
+        """
         pass
