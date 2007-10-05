@@ -1,0 +1,81 @@
+#!/bin/sh
+# Test basic extension support
+
+cat > foobar.py <<EOF
+import os
+from mercurial import commands
+
+def uisetup(ui):
+    ui.write("uisetup called\\n")
+    ui.write("ui.parentui is%s None\\n" % (ui.parentui is not None
+                                           and "not" or ""))
+
+def reposetup(ui, repo):
+    ui.write("reposetup called for %s\\n" % os.path.basename(repo.root))
+    ui.write("ui %s= repo.ui\\n" % (ui == repo.ui and "=" or "!"))
+
+def foo(ui, *args, **kwargs):
+    ui.write("Foo\\n")
+
+def bar(ui, *args, **kwargs):
+    ui.write("Bar\\n")
+
+cmdtable = {
+    "foo": (foo, [], "hg foo"),
+    "bar": (bar, [], "hg bar"),
+}
+
+commands.norepo += ' bar'
+EOF
+abspath=`pwd`/foobar.py
+
+mkdir barfoo
+cp foobar.py barfoo/__init__.py
+barfoopath=`pwd`/barfoo
+
+hg init a
+cd a
+echo foo > file
+hg add file
+hg commit -m 'add file'
+
+echo '[extensions]' >> $HGRCPATH
+echo "foobar = $abspath" >> $HGRCPATH
+hg foo
+
+cd ..
+hg clone a b
+
+hg bar
+
+echo '% module/__init__.py-style'
+echo '[extensions]' > $HGRCPATH
+echo "barfoo = $barfoopath" >> $HGRCPATH
+cd a
+hg foo
+
+cd ..
+cat > empty.py <<EOF
+'''empty cmdtable
+'''
+cmdtable = {}
+EOF
+emptypath=`pwd`/empty.py
+echo '[extensions]' > $HGRCPATH
+echo "empty = $emptypath" >> $HGRCPATH
+hg help empty
+
+cat > debugextension.py <<EOF
+'''only debugcommands
+'''
+def debugfoobar(ui, repo, *args, **opts):
+    "yet another debug command"
+    pass
+
+cmdtable = {"debugfoobar": (debugfoobar, (), "hg debugfoobar")}
+EOF
+debugpath=`pwd`/debugextension.py
+echo '[extensions]' > $HGRCPATH
+echo "debugextension = $debugpath" >> $HGRCPATH
+hg help debugextension
+hg --debug help debugextension
