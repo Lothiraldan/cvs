@@ -11,9 +11,30 @@
 #
 # <alias email> <actual email>
 
-import sys
 from mercurial.i18n import gettext as _
 from mercurial import hg, mdiff, cmdutil, ui, util, templater, node
+import os, sys
+
+def get_tty_width():
+    if 'COLUMNS' in os.environ:
+        try:
+            return int(os.environ['COLUMNS'])
+        except ValueError:
+            pass
+    try:
+        import termios, array, fcntl
+        for dev in (sys.stdout, sys.stdin):
+            try:
+                fd = dev.fileno()
+                if not os.isatty(fd):
+                    continue
+                arri = fcntl.ioctl(fd, termios.TIOCGWINSZ, '\0' * 8)
+                return array.array('h', arri)[1]
+            except ValueError:
+                pass
+    except ImportError:
+        pass
+    return 80
 
 def __gather(ui, repo, node1, node2):
     def dirtywork(f, mmap1, mmap2):
@@ -159,8 +180,9 @@ def churn(ui, repo, **opts):
 
     maximum = ordered[0][1]
 
-    ui.note("Assuming 80 character terminal\n")
-    width = 80 - 1
+    width = get_tty_width()
+    ui.note(_("assuming %i character terminal\n") % width)
+    width -= 1
 
     for i in ordered:
         person = i[0]

@@ -13,8 +13,8 @@ platform-specific details from the core.
 """
 
 from i18n import _
-import cStringIO, errno, getpass, popen2, re, shutil, sys, tempfile
-import os, stat, threading, time, calendar, ConfigParser, locale, glob
+import cStringIO, errno, getpass, popen2, re, shutil, sys, tempfile, strutil
+import os, stat, threading, time, calendar, ConfigParser, locale, glob, osutil
 
 try:
     set = set
@@ -63,7 +63,7 @@ def fromlocal(s):
     Convert a string from the local character encoding to UTF-8
 
     We attempt to decode strings using the encoding mode set by
-    HG_ENCODINGMODE, which defaults to 'strict'. In this mode, unknown
+    HGENCODINGMODE, which defaults to 'strict'. In this mode, unknown
     characters will cause an error message. Other modes include
     'replace', which replaces unknown characters with a special
     Unicode character, and 'ignore', which drops the character.
@@ -366,6 +366,7 @@ def canonpath(root, cwd, myname):
     if not os.path.isabs(name):
         name = os.path.join(root, cwd, name)
     name = os.path.normpath(name)
+    audit_path = path_auditor(root)
     if name != rootsep and name.startswith(rootsep):
         name = name[len(rootsep):]
         audit_path(name)
@@ -628,7 +629,7 @@ def rename(src, dst):
     """forcibly rename a file"""
     try:
         os.rename(src, dst)
-    except OSError, err:
+    except OSError, err: # FIXME: check err (EEXIST ?)
         # on windows, rename to existing file is not allowed, so we
         # must delete destination first. but if file is open, unlink
         # schedules it for delete but does not delete it. rename
@@ -675,7 +676,7 @@ def copyfiles(src, dst, hardlink=None):
 
     if os.path.isdir(src):
         os.mkdir(dst)
-        for name in os.listdir(src):
+        for name, kind in osutil.listdir(src):
             srcname = os.path.join(src, name)
             dstname = os.path.join(dst, name)
             copyfiles(srcname, dstname, hardlink)
@@ -689,12 +690,59 @@ def copyfiles(src, dst, hardlink=None):
         else:
             shutil.copy(src, dst)
 
-def audit_path(path):
-    """Abort if path contains dangerous components"""
-    parts = os.path.normcase(path).split(os.sep)
-    if (os.path.splitdrive(path)[0] or parts[0] in ('.hg', '')
-        or os.pardir in parts):
-        raise Abort(_("path contains illegal component: %s") % path)
+class path_auditor(object):
+    '''ensure that a filesystem path contains no banned components.
+    the following properties of a path are checked:
+
+    - under top-level .hg
+    - starts at the root of a windows drive
+    - contains ".."
+    - traverses a symlink (e.g. a/symlink_here/b)
+    - inside a nested repository'''
+
+    def __init__(self, root):
+        self.audited = set()
+        self.auditeddir = set()
+        self.root = root
+
+    def __call__(self, path):
+        if path in self.audited:
+            return
+        normpath = os.path.normcase(path)
+        parts = normpath.split(os.sep)
+        if (os.path.splitdrive(path)[0] or parts[0] in ('.hg', '')
+            or os.pardir in parts):
+            raise Abort(_("path contains illegal component: %s") % path)
+        def check(prefix):
+            curpath = os.path.join(self.root, prefix)
+            try:
+                st = os.lstat(curpath)
+            except OSError, err:
+                # EINVAL can be raised as invalid path syntax under win32.
+                # They must be ignored for patterns can be checked too.
+                if err.errno not in (errno.ENOENT, errno.EINVAL):
+                    raise
+            else:
+                if stat.S_ISLNK(st.st_mode):
+                    raise Abort(_('path %r traverses symbolic link %r') %
+                                (path, prefix))
+                elif (stat.S_ISDIR(st.st_mode) and
+                      os.path.isdir(os.path.join(curpath, '.hg'))):
+                    raise Abort(_('path %r is inside repo %r') %
+                                (path, prefix))
+
+        prefixes = []
+        for c in strutil.rfindall(normpath, os.sep):
+            prefix = normpath[:c]
+            if prefix in self.auditeddir:
+                break
+            check(prefix)
+            prefixes.append(prefix)
+
+        self.audited.add(path)
+        # only add prefixes to the cache after checking everything: we don't
+        # want to add "foo/bar/baz" before checking if there's a "foo/.hg"
+        self.auditeddir.update(prefixes)
 
 def _makelock_file(info, pathname):
     ld = os.open(pathname, os.O_CREAT | os.O_WRONLY | os.O_EXCL)
@@ -803,16 +851,20 @@ def checkexec(path):
     Requires a directory (like /foo/.hg)
     """
     try:
+        EXECFLAGS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
         fh, fn = tempfile.mkstemp("", "", path)
         os.close(fh)
         m = os.stat(fn).st_mode
-        os.chmod(fn, m ^ 0111)
-        r = (os.stat(fn).st_mode != m)
+        # VFAT on Linux can flip mode but it doesn't persist a FS remount.
+        # frequently we can detect it if files are created with exec bit on.
+        new_file_has_exec = m & EXECFLAGS
+        os.chmod(fn, m ^ EXECFLAGS)
+        exec_flags_cannot_flip = (os.stat(fn).st_mode == m)
         os.unlink(fn)
     except (IOError,OSError):
         # we don't care, the user probably won't be able to commit anyway
         return False
-    return r
+    return not (new_file_has_exec or exec_flags_cannot_flip)
 
 def execfunc(path, fallback):
     '''return an is_exec() function with default to fallback'''
@@ -1012,7 +1064,8 @@ else:
         rcs = [os.path.join(path, 'hgrc')]
         rcdir = os.path.join(path, 'hgrc.d')
         try:
-            rcs.extend([os.path.join(rcdir, f) for f in os.listdir(rcdir)
+            rcs.extend([os.path.join(rcdir, f)
+                        for f, kind in osutil.listdir(rcdir)
                         if f.endswith(".rc")])
         except OSError:
             pass
@@ -1284,7 +1337,10 @@ class opener(object):
     """
     def __init__(self, base, audit=True):
         self.base = base
-        self.audit = audit
+        if audit:
+            self.audit_path = path_auditor(base)
+        else:
+            self.audit_path = always
 
     def __getattr__(self, name):
         if name == '_can_symlink':
@@ -1293,8 +1349,7 @@ class opener(object):
         raise AttributeError(name)
 
     def __call__(self, path, mode="r", text=False, atomictemp=False):
-        if self.audit:
-            audit_path(path)
+        self.audit_path(path)
         f = os.path.join(self.base, path)
 
         if not text and "b" not in mode:
@@ -1315,8 +1370,7 @@ class opener(object):
         return posixfile(f, mode)
 
     def symlink(self, src, dst):
-        if self.audit:
-            audit_path(dst)
+        self.audit_path(dst)
         linkname = os.path.join(self.base, dst)
         try:
             os.unlink(linkname)
@@ -1328,7 +1382,11 @@ class opener(object):
             os.makedirs(dirname)
 
         if self._can_symlink:
-            os.symlink(src, linkname)
+            try:
+                os.symlink(src, linkname)
+            except OSError, err:
+                raise OSError(err.errno, _('could not symlink to %r: %s') %
+                              (src, err.strerror), linkname)
         else:
             f = self(dst, "w")
             f.write(src)
@@ -1404,7 +1462,7 @@ def makedate():
         tz = time.timezone
     return time.mktime(lt), tz
 
-def datestr(date=None, format='%a %b %d %H:%M:%S %Y', timezone=True):
+def datestr(date=None, format='%a %b %d %H:%M:%S %Y', timezone=True, timezone_format=" %+03d%02d"):
     """represent a (unixtime, offset) tuple as a localized time.
     unixtime is seconds since the epoch, and offset is the time zone's
     number of seconds away from UTC. if timezone is false, do not
@@ -1412,10 +1470,10 @@ def datestr(date=None, format='%a %b %d %H:%M:%S %Y', timezone=True):
     t, tz = date or makedate()
     s = time.strftime(format, time.gmtime(float(t) - tz))
     if timezone:
-        s += " %+03d%02d" % (-tz / 3600, ((-tz % 3600) / 60))
+        s += timezone_format % (-tz / 3600, ((-tz % 3600) / 60))
     return s
 
-def strdate(string, format, defaults):
+def strdate(string, format, defaults=[]):
     """parse a localized time string and return a (unixtime, offset) tuple.
     if the string cannot be parsed, ValueError is raised."""
     def timezone(string):
@@ -1600,7 +1658,7 @@ def rcpath():
             for p in os.environ['HGRCPATH'].split(os.pathsep):
                 if not p: continue
                 if os.path.isdir(p):
-                    for f in os.listdir(p):
+                    for f, kind in osutil.listdir(p):
                         if f.endswith('.rc'):
                             _rcpath.append(os.path.join(p, f))
                 else:
