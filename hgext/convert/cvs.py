@@ -3,7 +3,7 @@
 import os, locale, re, socket
 from mercurial import util
 
-from common import NoRepo, commit, converter_source
+from common import NoRepo, commit, converter_source, checktool
 
 class convert_cvs(converter_source):
     def __init__(self, ui, path, rev=None):
@@ -12,6 +12,9 @@ class convert_cvs(converter_source):
         cvs = os.path.join(path, "CVS")
         if not os.path.exists(cvs):
             raise NoRepo("couldn't open CVS repo %s" % path)
+
+        for tool in ('cvsps', 'cvs'):
+            checktool(tool)
 
         self.changeset = {}
         self.files = {}
@@ -43,14 +46,13 @@ class convert_cvs(converter_source):
                     cmd = '%s -d "1970/01/01 00:00:01" -d "%s"' % (cmd, self.rev)
                 except util.Abort:
                     raise util.Abort('revision %s is not a patchset number or date' % self.rev)
-        cmd += " 2>&1"
 
         d = os.getcwd()
         try:
             os.chdir(self.path)
             id = None
             state = 0
-            for l in os.popen(cmd):
+            for l in util.popen(cmd):
                 if state == 0: # header
                     if l.startswith("PatchSet"):
                         id = l[9:-2]

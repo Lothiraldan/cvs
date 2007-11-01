@@ -1,6 +1,6 @@
 # darcs support for the convert extension
 
-from common import NoRepo, commit, converter_source
+from common import NoRepo, commit, converter_source, checktool
 from mercurial.i18n import _
 from mercurial import util
 import os, shutil, tempfile
@@ -23,6 +23,8 @@ class darcs_source(converter_source):
 
         if not os.path.exists(os.path.join(path, '_darcs', 'inventory')):
             raise NoRepo("couldn't open darcs repo %s" % path)
+
+        checktool('darcs')
 
         if ElementTree is None:
             raise util.Abort(_("Python ElementTree module is not available"))
@@ -65,9 +67,9 @@ class darcs_source(converter_source):
         cmdline += args
         cmdline = [util.shellquote(arg) for arg in cmdline]
         cmdline += ['<', util.nulldev]
-        cmdline = util.quotecommand(' '.join(cmdline))
+        cmdline = ' '.join(cmdline)
         self.ui.debug(cmdline, '\n')
-        return os.popen(cmdline, 'r')
+        return util.popen(cmdline)
 
     def run(self, cmd, *args, **kwargs):
         fp = self._run(cmd, *args, **kwargs)
