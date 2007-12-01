@@ -1,0 +1,4 @@
+*** failed to import extension badext: bit bucket overflow
+hg help [COMMAND]
+
+show help for a command, extension, or list of commands
