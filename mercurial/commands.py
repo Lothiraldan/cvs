@@ -194,6 +194,11 @@ def backout(ui, repo, node=None, rev=None, **opts):
     if op2 != nullid:
         raise util.Abort(_('outstanding uncommitted merge'))
     node = repo.lookup(rev)
+
+    a = repo.changelog.ancestor(op1, node)
+    if a != node:
+        raise util.Abort(_('cannot back out change on a different branch'))
+
     p1, p2 = repo.changelog.parents(node)
     if p1 == nullid:
         raise util.Abort(_('cannot back out a change with no parents'))
@@ -210,6 +215,7 @@ def backout(ui, repo, node=None, rev=None, **opts):
         if opts['parent']:
             raise util.Abort(_('cannot use --parent on non-merge changeset'))
         parent = p1
+
     hg.clean(repo, node, show_stats=False)
     revert_opts = opts.copy()
     revert_opts['date'] = None
@@ -2267,7 +2273,10 @@ def rename(ui, repo, *pats, **opts):
         del wlock
 
 def revert(ui, repo, *pats, **opts):
-    """revert files or dirs to their states as of some revision
+    """restore individual files or dirs to an earlier state
+
+    (use update -r to check out earlier revisions, revert does not
+    change the working dir parents)
 
     With no revision specified, revert the named files or directories
     to the contents they had in the parent of the working directory.
@@ -2276,12 +2285,9 @@ def revert(ui, repo, *pats, **opts):
     working directory has two parents, you must explicitly specify the
     revision to revert to.
 
-    Modified files are saved with a .orig suffix before reverting.
-    To disable these backups, use --no-backup.
-
     Using the -r option, revert the given files or directories to their
     contents as of a specific revision. This can be helpful to "roll
-    back" some or all of a change that should not have been committed.
+    back" some or all of an earlier  change.
 
     Revert modifies the working directory.  It does not commit any
     changes, or change the parent of the working directory.  If you
@@ -2295,6 +2301,9 @@ def revert(ui, repo, *pats, **opts):
     If names are given, all files matching the names are reverted.
 
     If no arguments are given, no files are reverted.
+
+    Modified files are saved with a .orig suffix before reverting.
+    To disable these backups, use --no-backup.
     """
 
     if opts["date"]:
@@ -2445,10 +2454,12 @@ def revert(ui, repo, *pats, **opts):
         del wlock
 
 def rollback(ui, repo):
-    """roll back the last transaction in this repository
+    """roll back the last transaction
 
-    Roll back the last transaction in this repository, restoring the
-    project to its state prior to the transaction.
+    This command should be used with care. There is only one level of
+    rollback, and there is no way to undo a rollback. It will also
+    restore the dirstate at the time of the last transaction, losing
+    any dirstate changes since that time.
 
     Transactions are used to encapsulate the effects of all commands
     that create new changesets or propagate existing changesets into a
@@ -2460,11 +2471,6 @@ def rollback(ui, repo):
       pull
       push (with this repository as destination)
       unbundle
-
-    This command should be used with care. There is only one level of
-    rollback, and there is no way to undo a rollback. It will also
-    restore the dirstate at the time of the last transaction, which
-    may lose subsequent dirstate changes.
 
     This command is not intended for use on public repositories. Once
     changes are visible for pull by other users, rolling a transaction
@@ -3068,7 +3074,7 @@ table = {
     "recover": (recover, [], _('hg recover')),
     "^remove|rm":
         (remove,
-         [('A', 'after', None, _('record remove that has already occurred')),
+         [('A', 'after', None, _('record remove without deleting')),
           ('f', 'force', None, _('remove file even if modified')),
          ] + walkopts,
          _('hg remove [OPTION]... FILE...')),
@@ -3079,7 +3085,7 @@ table = {
            _('forcibly copy over an existing managed file')),
          ] + walkopts + dryrunopts,
          _('hg rename [OPTION]... SOURCE... DEST')),
-    "^revert":
+    "revert":
         (revert,
          [('a', 'all', None, _('revert all changes when no arguments given')),
           ('d', 'date', '', _('tipmost revision matching date')),
