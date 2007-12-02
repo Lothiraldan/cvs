@@ -1,0 +1,11 @@
+#!/bin/sh
+
+echo 'raise Exception("bit bucket overflow")' > badext.py
+abspath=`pwd`/badext.py
+
+echo '[extensions]' >> $HGRCPATH
+echo "gpg =" >> $HGRCPATH
+echo "hgext.gpg =" >> $HGRCPATH
+echo "badext = $abspath" >> $HGRCPATH
+
+hg -q help help
