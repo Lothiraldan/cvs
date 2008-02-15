@@ -8,7 +8,7 @@
 from node import *
 from i18n import _
 import os, sys, bisect, stat
-import mdiff, bdiff, util, templater, patch
+import mdiff, bdiff, util, templater, templatefilters, patch, errno
 
 revrangesep = ':'
 
@@ -50,7 +50,7 @@ def findcmd(ui, cmd, table):
     """Return (aliases, command table entry) for command string."""
     choice = findpossible(ui, cmd, table)
 
-    if choice.has_key(cmd):
+    if cmd in choice:
         return choice[cmd]
 
     if len(choice) > 1:
@@ -64,6 +64,8 @@ def findcmd(ui, cmd, table):
     raise UnknownCommand(cmd)
 
 def bail_if_changed(repo):
+    if repo.dirstate.parents()[1] != nullid:
+        raise util.Abort(_('outstanding uncommitted merge'))
     modified, added, removed, deleted = repo.status()[:4]
     if modified or added or removed or deleted:
         raise util.Abort(_("outstanding uncommitted changes"))
@@ -266,14 +268,15 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
             mapping[abs] = rel, exact
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        if repo.dirstate[abs] != 'r' and not util.lexists(target):
+        if repo.dirstate[abs] != 'r' and (not util.lexists(target)
+            or (os.path.isdir(target) and not os.path.islink(target))):
             remove.append(abs)
             mapping[abs] = rel, exact
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('removing %s\n') % ((pats and rel) or abs))
     if not dry_run:
-        repo.add(add)
         repo.remove(remove)
+        repo.add(add)
     if similarity > 0:
         for old, new, score in findrenames(repo, add, remove, similarity):
             oldrel, oldexact = mapping[old]
@@ -285,6 +288,206 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
             if not dry_run:
                 repo.copy(old, new)
 
+def copy(ui, repo, pats, opts, rename=False):
+    # called with the repo lock held
+    #
+    # hgsep => pathname that uses "/" to separate directories
+    # ossep => pathname that uses os.sep to separate directories
+    cwd = repo.getcwd()
+    targets = {}
+    after = opts.get("after")
+    dryrun = opts.get("dry_run")
+
+    def walkpat(pat):
+        srcs = []
+        for tag, abs, rel, exact in walk(repo, [pat], opts, globbed=True):
+            state = repo.dirstate[abs]
+            if state in '?r':
+                if exact and state == '?':
+                    ui.warn(_('%s: not copying - file is not managed\n') % rel)
+                if exact and state == 'r':
+                    ui.warn(_('%s: not copying - file has been marked for'
+                              ' remove\n') % rel)
+                continue
+            # abs: hgsep
+            # rel: ossep
+            srcs.append((abs, rel, exact))
+        return srcs
+
+    # abssrc: hgsep
+    # relsrc: ossep
+    # otarget: ossep
+    def copyfile(abssrc, relsrc, otarget, exact):
+        abstarget = util.canonpath(repo.root, cwd, otarget)
+        reltarget = repo.pathto(abstarget, cwd)
+        target = repo.wjoin(abstarget)
+        src = repo.wjoin(abssrc)
+        state = repo.dirstate[abstarget]
+
+        # check for collisions
+        prevsrc = targets.get(abstarget)
+        if prevsrc is not None:
+            ui.warn(_('%s: not overwriting - %s collides with %s\n') %
+                    (reltarget, repo.pathto(abssrc, cwd),
+                     repo.pathto(prevsrc, cwd)))
+            return
+
+        # check for overwrites
+        exists = os.path.exists(target)
+        if (not after and exists or after and state in 'mn'):
+            if not opts['force']:
+                ui.warn(_('%s: not overwriting - file exists\n') %
+                        reltarget)
+                return
+
+        if after:
+            if not exists:
+                return
+        elif not dryrun:
+            try:
+                if exists:
+                    os.unlink(target)
+                targetdir = os.path.dirname(target) or '.'
+                if not os.path.isdir(targetdir):
+                    os.makedirs(targetdir)
+                util.copyfile(src, target)
+            except IOError, inst:
+                if inst.errno == errno.ENOENT:
+                    ui.warn(_('%s: deleted in working copy\n') % relsrc)
+                else:
+                    ui.warn(_('%s: cannot copy - %s\n') %
+                            (relsrc, inst.strerror))
+                    return True # report a failure
+
+        if ui.verbose or not exact:
+            action = rename and "moving" or "copying"
+            ui.status(_('%s %s to %s\n') % (action, relsrc, reltarget))
+
+        targets[abstarget] = abssrc
+
+        # fix up dirstate
+        origsrc = repo.dirstate.copied(abssrc) or abssrc
+        if abstarget == origsrc: # copying back a copy?
+            if state not in 'mn' and not dryrun:
+                repo.dirstate.normallookup(abstarget)
+        else:
+            if repo.dirstate[origsrc] == 'a':
+                if not ui.quiet:
+                    ui.warn(_("%s has not been committed yet, so no copy "
+                              "data will be stored for %s.\n")
+                            % (repo.pathto(origsrc, cwd), reltarget))
+                if abstarget not in repo.dirstate and not dryrun:
+                    repo.add([abstarget])
+            elif not dryrun:
+                repo.copy(origsrc, abstarget)
+
+        if rename and not dryrun:
+            repo.remove([abssrc], True)
+
+    # pat: ossep
+    # dest ossep
+    # srcs: list of (hgsep, hgsep, ossep, bool)
+    # return: function that takes hgsep and returns ossep
+    def targetpathfn(pat, dest, srcs):
+        if os.path.isdir(pat):
+            abspfx = util.canonpath(repo.root, cwd, pat)
+            abspfx = util.localpath(abspfx)
+            if destdirexists:
+                striplen = len(os.path.split(abspfx)[0])
+            else:
+                striplen = len(abspfx)
+            if striplen:
+                striplen += len(os.sep)
+            res = lambda p: os.path.join(dest, util.localpath(p)[striplen:])
+        elif destdirexists:
+            res = lambda p: os.path.join(dest,
+                                         os.path.basename(util.localpath(p)))
+        else:
+            res = lambda p: dest
+        return res
+
+    # pat: ossep
+    # dest ossep
+    # srcs: list of (hgsep, hgsep, ossep, bool)
+    # return: function that takes hgsep and returns ossep
+    def targetpathafterfn(pat, dest, srcs):
+        if util.patkind(pat, None)[0]:
+            # a mercurial pattern
+            res = lambda p: os.path.join(dest,
+                                         os.path.basename(util.localpath(p)))
+        else:
+            abspfx = util.canonpath(repo.root, cwd, pat)
+            if len(abspfx) < len(srcs[0][0]):
+                # A directory. Either the target path contains the last
+                # component of the source path or it does not.
+                def evalpath(striplen):
+                    score = 0
+                    for s in srcs:
+                        t = os.path.join(dest, util.localpath(s[0])[striplen:])
+                        if os.path.exists(t):
+                            score += 1
+                    return score
+
+                abspfx = util.localpath(abspfx)
+                striplen = len(abspfx)
+                if striplen:
+                    striplen += len(os.sep)
+                if os.path.isdir(os.path.join(dest, os.path.split(abspfx)[1])):
+                    score = evalpath(striplen)
+                    striplen1 = len(os.path.split(abspfx)[0])
+                    if striplen1:
+                        striplen1 += len(os.sep)
+                    if evalpath(striplen1) > score:
+                        striplen = striplen1
+                res = lambda p: os.path.join(dest,
+                                             util.localpath(p)[striplen:])
+            else:
+                # a file
+                if destdirexists:
+                    res = lambda p: os.path.join(dest,
+                                        os.path.basename(util.localpath(p)))
+                else:
+                    res = lambda p: dest
+        return res
+
+
+    pats = util.expand_glob(pats)
+    if not pats:
+        raise util.Abort(_('no source or destination specified'))
+    if len(pats) == 1:
+        raise util.Abort(_('no destination specified'))
+    dest = pats.pop()
+    destdirexists = os.path.isdir(dest)
+    if not destdirexists:
+        if len(pats) > 1 or util.patkind(pats[0], None)[0]:
+            raise util.Abort(_('with multiple sources, destination must be an '
+                               'existing directory'))
+        if util.endswithsep(dest):
+            raise util.Abort(_('destination %s is not a directory') % dest)
+
+    tfn = targetpathfn
+    if after:
+        tfn = targetpathafterfn
+    copylist = []
+    for pat in pats:
+        srcs = walkpat(pat)
+        if not srcs:
+            continue
+        copylist.append((tfn(pat, dest, srcs), srcs))
+    if not copylist:
+        raise util.Abort(_('no files to copy'))
+
+    errors = 0
+    for targetpath, srcs in copylist:
+        for abssrc, relsrc, exact in srcs:
+            if copyfile(abssrc, relsrc, targetpath(abssrc), exact):
+                errors += 1
+
+    if errors:
+        ui.warn(_('(consider using --after)\n'))
+
+    return errors
+
 def service(opts, parentfn=None, initfn=None, runfn=None):
     '''Run a command as a service.'''
 
@@ -292,6 +495,15 @@ def service(opts, parentfn=None, initfn=None, runfn=None):
         rfd, wfd = os.pipe()
         args = sys.argv[:]
         args.append('--daemon-pipefds=%d,%d' % (rfd, wfd))
+        # Don't pass --cwd to the child process, because we've already
+        # changed directory.
+        for i in xrange(1,len(args)):
+            if args[i].startswith('--cwd='):
+                del args[i]
+                break
+            elif args[i].startswith('--cwd'):
+                del args[i:i+2]
+                break
         pid = os.spawnvp(os.P_NOWAIT | getattr(os, 'P_DETACH', 0),
                          args[0], args)
         os.close(wfd)
@@ -461,7 +673,7 @@ class changeset_templater(changeset_printer):
 
     def __init__(self, ui, repo, patch, mapfile, buffered):
         changeset_printer.__init__(self, ui, repo, patch, buffered)
-        filters = templater.common_filters.copy()
+        filters = templatefilters.filters.copy()
         filters['formatnode'] = (ui.debugflag and (lambda x: x)
                                  or (lambda x: x[:12]))
         self.t = templater.templater(mapfile, filters,
@@ -571,25 +783,25 @@ class changeset_templater(changeset_printer):
             c = [{'name': x[0], 'source': x[1]} for x in copies]
             return showlist('file_copy', c, plural='file_copies', **args)
 
-        if self.ui.debugflag:
-            files = self.repo.status(log.parents(changenode)[0], changenode)[:3]
-            def showfiles(**args):
-                return showlist('file', files[0], **args)
-            def showadds(**args):
-                return showlist('file_add', files[1], **args)
-            def showdels(**args):
-                return showlist('file_del', files[2], **args)
-            def showmanifest(**args):
-                args = args.copy()
-                args.update(dict(rev=self.repo.manifest.rev(changes[0]),
-                                 node=hex(changes[0])))
-                return self.t('manifest', **args)
-        else:
-            def showfiles(**args):
-                return showlist('file', changes[3], **args)
-            showadds = ''
-            showdels = ''
-            showmanifest = ''
+        files = []
+        def getfiles():
+            if not files:
+                files[:] = self.repo.status(
+                    log.parents(changenode)[0], changenode)[:3]
+            return files
+        def showfiles(**args):
+            return showlist('file', changes[3], **args)
+        def showmods(**args):
+            return showlist('file_mod', getfiles()[0], **args)
+        def showadds(**args):
+            return showlist('file_add', getfiles()[1], **args)
+        def showdels(**args):
+            return showlist('file_del', getfiles()[2], **args)
+        def showmanifest(**args):
+            args = args.copy()
+            args.update(dict(rev=self.repo.manifest.rev(changes[0]),
+                             node=hex(changes[0])))
+            return self.t('manifest', **args)
 
         defprops = {
             'author': changes[1],
@@ -598,6 +810,7 @@ class changeset_templater(changeset_printer):
             'desc': changes[4].strip(),
             'file_adds': showadds,
             'file_dels': showdels,
+            'file_mods': showmods,
             'files': showfiles,
             'file_copies': showcopies,
             'manifest': showmanifest,
@@ -689,7 +902,7 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
 
 def finddate(ui, repo, date):
     """Find the tipmost changeset that matches the given date spec"""
-    df = util.matchdate(date + " to " + date)
+    df = util.matchdate(date)
     get = util.cachefunc(lambda r: repo.changectx(r).changeset())
     changeiter, matchfn = walkchangerevs(ui, repo, [], get, {'rev':None})
     results = {}
@@ -904,8 +1117,11 @@ def commit(ui, repo, commitfunc, pats, opts):
     '''commit the specified files or all outstanding changes'''
     message = logmessage(opts)
 
-    if opts['addremove']:
+    # extract addremove carefully -- this function can be called from a command
+    # that doesn't support addremove
+    if opts.get('addremove'):
         addremove(repo, pats, opts)
+
     fns, match, anypats = matchpats(repo, pats, opts)
     if pats:
         status = repo.status(files=fns, match=match)
@@ -917,10 +1133,11 @@ def commit(ui, repo, commitfunc, pats, opts):
                 continue
             if f not in files:
                 rf = repo.wjoin(f)
+                rel = repo.pathto(f)
                 try:
                     mode = os.lstat(rf)[stat.ST_MODE]
                 except OSError:
-                    raise util.Abort(_("file %s not found!") % rf)
+                    raise util.Abort(_("file %s not found!") % rel)
                 if stat.S_ISDIR(mode):
                     name = f + '/'
                     if slist is None:
@@ -929,12 +1146,12 @@ def commit(ui, repo, commitfunc, pats, opts):
                     i = bisect.bisect(slist, name)
                     if i >= len(slist) or not slist[i].startswith(name):
                         raise util.Abort(_("no match under directory %s!")
-                                         % rf)
+                                         % rel)
                 elif not (stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
                     raise util.Abort(_("can't commit %s: "
-                                       "unsupported file type!") % rf)
+                                       "unsupported file type!") % rel)
                 elif f not in repo.dirstate:
-                    raise util.Abort(_("file %s not tracked!") % rf)
+                    raise util.Abort(_("file %s not tracked!") % rel)
     else:
         files = []
     try:

@@ -105,14 +105,14 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     destination is local repository
     """
 
-    origsource = source
-    source, rev, checkout = parseurl(ui.expandpath(source), rev)
-
     if isinstance(source, str):
+        origsource = ui.expandpath(source)
+        source, rev, checkout = parseurl(origsource, rev)
         src_repo = repository(ui, source)
     else:
         src_repo = source
-        source = src_repo.url()
+        origsource = source = src_repo.url()
+        checkout = None
 
     if dest is None:
         dest = defaultdest(source)
@@ -164,17 +164,23 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
 
         if copy:
             def force_copy(src, dst):
-                try:
-                    util.copyfiles(src, dst)
-                except OSError, inst:
-                    if inst.errno != errno.ENOENT:
-                        raise
+                if not os.path.exists(src):
+                    # Tolerate empty source repository and optional files
+                    return
+                util.copyfiles(src, dst)
 
             src_store = os.path.realpath(src_repo.spath)
             if not os.path.exists(dest):
                 os.mkdir(dest)
-            dest_path = os.path.realpath(os.path.join(dest, ".hg"))
-            os.mkdir(dest_path)
+            try:
+                dest_path = os.path.realpath(os.path.join(dest, ".hg"))
+                os.mkdir(dest_path)
+            except OSError, inst:
+                if inst.errno == errno.EEXIST:
+                    dir_cleanup.close()
+                    raise util.Abort(_("destination '%s' already exists")
+                                     % dest)
+                raise
             if src_repo.spath != src_repo.path:
                 # XXX racy
                 dummy_changelog = os.path.join(dest_path, "00changelog.i")
@@ -203,7 +209,14 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
             dest_repo = repository(ui, dest)
 
         else:
-            dest_repo = repository(ui, dest, create=True)
+            try:
+                dest_repo = repository(ui, dest, create=True)
+            except OSError, inst:
+                if inst.errno == errno.EEXIST:
+                    dir_cleanup.close()
+                    raise util.Abort(_("destination '%s' already exists")
+                                     % dest)
+                raise
 
             revs = None
             if rev:
@@ -266,13 +279,13 @@ def update(repo, node):
         # len(pl)==1, otherwise _merge.update() would have raised util.Abort:
         repo.ui.status(_("  hg update %s\n  hg update %s\n")
                        % (pl[0].rev(), repo.changectx(node).rev()))
-    return stats[3]
+    return stats[3] > 0
 
 def clean(repo, node, show_stats=True):
     """forcibly switch the working directory to node, clobbering changes"""
     stats = _merge.update(repo, node, False, True, None)
     if show_stats: _showstats(repo, stats)
-    return stats[3]
+    return stats[3] > 0
 
 def merge(repo, node, force=None, remind=True):
     """branch merge with node, resolving changes"""
@@ -287,11 +300,11 @@ def merge(repo, node, force=None, remind=True):
                        % (pl[0].rev(), pl[1].rev()))
     elif remind:
         repo.ui.status(_("(branch merge, don't forget to commit)\n"))
-    return stats[3]
+    return stats[3] > 0
 
 def revert(repo, node, choose):
     """revert changes to revision in node without updating dirstate"""
-    return _merge.update(repo, node, False, True, choose)[3]
+    return _merge.update(repo, node, False, True, choose)[3] > 0
 
 def verify(repo):
     """verify the consistency of a repository"""

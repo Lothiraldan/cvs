@@ -50,7 +50,8 @@ class dirstate(object):
         elif name == '_dirs':
             self._dirs = {}
             for f in self._map:
-                self._incpath(f)
+                if self[f] != 'r':
+                    self._incpath(f)
             return self._dirs
         elif name == '_ignore':
             files = [self._join('.hgignore')]
@@ -73,7 +74,7 @@ class dirstate(object):
         if cwd == self._root: return ''
         # self._root ends with a path separator if self._root is '/' or 'C:\'
         rootsep = self._root
-        if not rootsep.endswith(os.sep):
+        if not util.endswithsep(rootsep):
             rootsep += os.sep
         if cwd.startswith(rootsep):
             return cwd[len(rootsep):]
@@ -86,7 +87,7 @@ class dirstate(object):
             cwd = self.getcwd()
         path = util.pathto(self._root, cwd, f)
         if self._slash:
-            return path.replace(os.sep, '/')
+            return util.normpath(path)
         return path
 
     def __getitem__(self, key):
@@ -184,16 +185,15 @@ class dirstate(object):
                 dirs[base] += 1
 
     def _decpath(self, path):
-        if "_dirs" in self.__dict__:
-            c = path.rfind('/')
-            if c >= 0:
-                base = path[:c]
-                dirs = self._dirs
-                if dirs[base] == 1:
-                    del dirs[base]
-                    self._decpath(base)
-                else:
-                    dirs[base] -= 1
+        c = path.rfind('/')
+        if c >= 0:
+            base = path[:c]
+            dirs = self._dirs
+            if dirs[base] == 1:
+                del dirs[base]
+                self._decpath(base)
+            else:
+                dirs[base] -= 1
 
     def _incpathcheck(self, f):
         if '\r' in f or '\n' in f:
@@ -205,22 +205,43 @@ class dirstate(object):
             d = f[:c]
             if d in self._dirs:
                 break
-            if d in self._map:
+            if d in self._map and self[d] != 'r':
                 raise util.Abort(_('file %r in dirstate clashes with %r') %
                                  (d, f))
         self._incpath(f)
 
+    def _changepath(self, f, newstate, relaxed=False):
+        # handle upcoming path changes
+        oldstate = self[f]
+        if oldstate not in "?r" and newstate in "?r":
+            if "_dirs" in self.__dict__:
+                self._decpath(f)
+            return
+        if oldstate in "?r" and newstate not in "?r":
+            if relaxed and oldstate == '?':
+                # XXX
+                # in relaxed mode we assume the caller knows
+                # what it is doing, workaround for updating
+                # dir-to-file revisions
+                if "_dirs" in self.__dict__:
+                    self._incpath(f)
+                return
+            self._incpathcheck(f)
+            return
+
     def normal(self, f):
         'mark a file normal and clean'
         self._dirty = True
+        self._changepath(f, 'n', True)
         s = os.lstat(self._join(f))
         self._map[f] = ('n', s.st_mode, s.st_size, s.st_mtime, 0)
-        if self._copymap.has_key(f):
+        if f in self._copymap:
             del self._copymap[f]
 
     def normallookup(self, f):
         'mark a file normal, but possibly dirty'
         self._dirty = True
+        self._changepath(f, 'n', True)
         self._map[f] = ('n', 0, -1, -1, 0)
         if f in self._copymap:
             del self._copymap[f]
@@ -228,6 +249,7 @@ class dirstate(object):
     def normaldirty(self, f):
         'mark a file normal, but dirty'
         self._dirty = True
+        self._changepath(f, 'n', True)
         self._map[f] = ('n', 0, -2, -1, 0)
         if f in self._copymap:
             del self._copymap[f]
@@ -235,7 +257,7 @@ class dirstate(object):
     def add(self, f):
         'mark a file added'
         self._dirty = True
-        self._incpathcheck(f)
+        self._changepath(f, 'a')
         self._map[f] = ('a', 0, -1, -1, 0)
         if f in self._copymap:
             del self._copymap[f]
@@ -243,8 +265,8 @@ class dirstate(object):
     def remove(self, f):
         'mark a file removed'
         self._dirty = True
+        self._changepath(f, 'r')
         self._map[f] = ('r', 0, 0, 0, 0)
-        self._decpath(f)
         if f in self._copymap:
             del self._copymap[f]
 
@@ -252,6 +274,7 @@ class dirstate(object):
         'mark a file merged'
         self._dirty = True
         s = os.lstat(self._join(f))
+        self._changepath(f, 'm', True)
         self._map[f] = ('m', s.st_mode, s.st_size, s.st_mtime, 0)
         if f in self._copymap:
             del self._copymap[f]
@@ -260,13 +283,15 @@ class dirstate(object):
         'forget a file'
         self._dirty = True
         try:
+            self._changepath(f, '?')
             del self._map[f]
-            self._decpath(f)
         except KeyError:
-            self._ui.warn(_("not in dirstate: %s!\n") % f)
+            self._ui.warn(_("not in dirstate: %s\n") % f)
 
     def clear(self):
         self._map = {}
+        if "_dirs" in self.__dict__:
+            delattr(self, "_dirs");
         self._copymap = {}
         self._pl = [nullid, nullid]
         self._dirty = True
@@ -344,6 +369,14 @@ class dirstate(object):
                           % (self.pathto(f), kind))
         return False
 
+    def _dirignore(self, f):
+        if self._ignore(f):
+            return True
+        for c in strutil.findall(f, '/'):
+            if self._ignore(f[:c]):
+                return True
+        return False
+
     def walk(self, files=None, match=util.always, badmatch=None):
         # filter out the stat
         for src, f, st in self.statwalk(files, match, badmatch=badmatch):
@@ -379,13 +412,15 @@ class dirstate(object):
             return match(file_)
 
         ignore = self._ignore
+        dirignore = self._dirignore
         if ignored:
             imatch = match
             ignore = util.never
+            dirignore = util.never
 
         # self._root may end with a path separator when self._root == '/'
         common_prefix_len = len(self._root)
-        if not self._root.endswith(os.sep):
+        if not util.endswithsep(self._root):
             common_prefix_len += 1
 
         normpath = util.normpath
@@ -467,8 +502,9 @@ class dirstate(object):
                         yield 'b', ff, None
                 continue
             if s_isdir(st.st_mode):
-                for f, src, st in findfiles(f):
-                    yield src, f, st
+                if not dirignore(nf):
+                    for f, src, st in findfiles(f):
+                        yield src, f, st
             else:
                 if nf in known:
                     continue
@@ -494,6 +530,7 @@ class dirstate(object):
         lookup, modified, added, unknown, ignored = [], [], [], [], []
         removed, deleted, clean = [], [], []
 
+        files = files or []
         _join = self._join
         lstat = os.lstat
         cmap = self._copymap
@@ -511,8 +548,9 @@ class dirstate(object):
             if fn in dmap:
                 type_, mode, size, time, foo = dmap[fn]
             else:
-                if list_ignored and self._ignore(fn):
-                    iadd(fn)
+                if (list_ignored or fn in files) and self._dirignore(fn):
+                    if list_ignored:
+                        iadd(fn)
                 else:
                     uadd(fn)
                 continue
@@ -522,7 +560,7 @@ class dirstate(object):
                     try:
                         st = lstat(_join(fn))
                     except OSError, inst:
-                        if inst.errno != errno.ENOENT:
+                        if inst.errno not in (errno.ENOENT, errno.ENOTDIR):
                             raise
                         st = None
                     # We need to re-check that it is a valid file
@@ -530,7 +568,7 @@ class dirstate(object):
                         nonexistent = False
                 # XXX: what to do with file no longer present in the fs
                 # who are not removed in the dirstate ?
-                if nonexistent and type_ in "nm":
+                if nonexistent and type_ in "nma":
                     dadd(fn)
                     continue
             # check the common case first

@@ -103,9 +103,12 @@ class httpconnection(keepalive.HTTPConnection):
     # must be able to send big bundle as stream.
     send = _gen_sendfile(keepalive.HTTPConnection)
 
-class basehttphandler(keepalive.HTTPHandler):
+class httphandler(keepalive.HTTPHandler):
     def http_open(self, req):
         return self.do_open(httpconnection, req)
+
+    def __del__(self):
+        self.close_all()
 
 has_https = hasattr(urllib2, 'HTTPSHandler')
 if has_https:
@@ -114,12 +117,9 @@ if has_https:
         # must be able to send big bundle as stream.
         send = _gen_sendfile(httplib.HTTPSConnection)
 
-    class httphandler(basehttphandler, urllib2.HTTPSHandler):
+    class httpshandler(keepalive.KeepAliveHandler, urllib2.HTTPSHandler):
         def https_open(self, req):
             return self.do_open(httpsconnection, req)
-else:
-    class httphandler(basehttphandler):
-        pass
 
 # In python < 2.5 AbstractDigestAuthHandler raises a ValueError if
 # it doesn't know about the auth type requested.  This can happen if
@@ -203,8 +203,9 @@ class httprepository(remoterepository):
 
         proxyurl = ui.config("http_proxy", "host") or os.getenv('http_proxy')
         # XXX proxyauthinfo = None
-        self.handler = httphandler()
-        handlers = [self.handler]
+        handlers = [httphandler()]
+        if has_https:
+            handlers.append(httpshandler())
 
         if proxyurl:
             # proxy can be proper url or host[:port]
@@ -230,6 +231,9 @@ class httprepository(remoterepository):
             # "http_proxy.always" config is for running tests on localhost
             if (not ui.configbool("http_proxy", "always") and
                 host.lower() in no_list):
+                # avoid auto-detection of proxy settings by appending
+                # a ProxyHandler with no proxies defined.
+                handlers.append(urllib2.ProxyHandler({}))
                 ui.debug(_('disabling proxy for %s\n') % host)
             else:
                 proxyurl = urlparse.urlunsplit((
@@ -244,7 +248,7 @@ class httprepository(remoterepository):
         # will take precedence if found, so drop them
         for env in ["HTTP_PROXY", "http_proxy", "no_proxy"]:
             try:
-                if os.environ.has_key(env):
+                if env in os.environ:
                     del os.environ[env]
             except OSError:
                 pass
@@ -253,7 +257,11 @@ class httprepository(remoterepository):
         if user:
             ui.debug(_('http auth: user %s, password %s\n') %
                      (user, passwd and '*' * len(passwd) or 'not set'))
-            passmgr.add_password(None, self._url, user, passwd or '')
+            netloc = host
+            if port:
+                netloc += ':' + port
+            # Python < 2.4.3 uses only the netloc to search for a password
+            passmgr.add_password(None, (self._url, netloc), user, passwd or '')
 
         handlers.extend((urllib2.HTTPBasicAuthHandler(passmgr),
                          httpdigestauthhandler(passmgr)))
@@ -262,11 +270,6 @@ class httprepository(remoterepository):
         # 1.0 here is the _protocol_ version
         opener.addheaders = [('User-agent', 'mercurial/proto-1.0')]
         urllib2.install_opener(opener)
-
-    def __del__(self):
-        if self.handler:
-            self.handler.close_all()
-            self.handler = None
 
     def url(self):
         return self.path
@@ -336,7 +339,7 @@ class httprepository(remoterepository):
                 version = proto.split('-', 1)[1]
                 version_info = tuple([int(n) for n in version.split('.')])
             except ValueError:
-                raise repo.RepoError(_("'%s' sent a broken Content-type "
+                raise repo.RepoError(_("'%s' sent a broken Content-Type "
                                      "header (%s)") % (self._url, proto))
             if version_info > (0, 1):
                 raise repo.RepoError(_("'%s' uses newer protocol %s") %
@@ -421,7 +424,7 @@ class httprepository(remoterepository):
             try:
                 rfp = self.do_cmd(
                     'unbundle', data=fp,
-                    headers={'content-type': 'application/octet-stream'},
+                    headers={'Content-Type': 'application/octet-stream'},
                     heads=' '.join(map(hex, heads)))
                 try:
                     ret = int(rfp.readline())

@@ -7,9 +7,10 @@
 import shlex
 from mercurial.i18n import _
 from mercurial import util
-from common import SKIPREV
+from common import SKIPREV, converter_source
 
 def rpairs(name):
+    yield '.', name
     e = len(name)
     while e != -1:
         yield name[:e], name[e+1:]
@@ -110,9 +111,9 @@ class filemapper(object):
 #   touch files we're interested in, but also merges that merge two
 #   or more interesting revisions.
 
-class filemap_source(object):
+class filemap_source(converter_source):
     def __init__(self, ui, baseconverter, filemap):
-        self.ui = ui
+        super(filemap_source, self).__init__(ui)
         self.base = baseconverter
         self.filemapper = filemapper(ui, filemap)
         self.commits = {}
@@ -128,7 +129,13 @@ class filemap_source(object):
         self.children = {}
         self.seenchildren = {}
 
-    def setrevmap(self, revmap, order):
+    def before(self):
+        self.base.before()
+
+    def after(self):
+        self.base.after()
+
+    def setrevmap(self, revmap):
         # rebuild our state to make things restartable
         #
         # To avoid calling getcommit for every revision that has already
@@ -143,7 +150,7 @@ class filemap_source(object):
         seen = {SKIPREV: SKIPREV}
         dummyset = util.set()
         converted = []
-        for rev in order:
+        for rev in revmap.order:
             mapped = revmap[rev]
             wanted = mapped not in seen
             if wanted:
@@ -157,7 +164,7 @@ class filemap_source(object):
                 arg = None
             converted.append((rev, wanted, arg))
         self.convertedorder = converted
-        return self.base.setrevmap(revmap, order)
+        return self.base.setrevmap(revmap)
 
     def rebuild(self):
         if self._rebuilt:
@@ -344,9 +351,3 @@ class filemap_source(object):
 
     def gettags(self):
         return self.base.gettags()
-
-    def before(self):
-        pass
-
-    def after(self):
-        pass

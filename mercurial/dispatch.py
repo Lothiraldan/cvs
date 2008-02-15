@@ -125,7 +125,7 @@ def _runcatch(ui, args):
             ui.warn("\n%r\n" % util.ellipsis(inst[1]))
     except ImportError, inst:
         m = str(inst).split()[-1]
-        ui.warn(_("abort: could not import module %s!\n" % m))
+        ui.warn(_("abort: could not import module %s!\n") % m)
         if m in "mpatch bdiff".split():
             ui.warn(_("(did you forget to compile extensions?)\n"))
         elif m in "zlib".split():
@@ -133,6 +133,8 @@ def _runcatch(ui, args):
 
     except util.Abort, inst:
         ui.warn(_("abort: %s\n") % inst)
+    except MemoryError:
+        ui.warn(_("abort: out of memory\n"))
     except SystemExit, inst:
         # Commands shouldn't sys.exit directly, but give a return code.
         # Just in case catch this and and pass exit code to caller.
@@ -273,6 +275,15 @@ def _dispatch(ui, args):
     for name, module in extensions.extensions():
         if name in _loaded:
             continue
+
+        # setup extensions
+        # TODO this should be generalized to scheme, where extensions can
+        #      redepend on other extensions.  then we should toposort them, and
+        #      do initialization in correct order
+        extsetup = getattr(module, 'extsetup', None)
+        if extsetup:
+            extsetup()
+
         cmdtable = getattr(module, 'cmdtable', {})
         overrides = [cmd for cmd in cmdtable if cmd in commands.table]
         if overrides:
@@ -331,6 +342,7 @@ def _dispatch(ui, args):
             ui = repo.ui
             if not repo.local():
                 raise util.Abort(_("repository '%s' is not local") % path)
+            ui.setconfig("bundle", "mainreporoot", repo.root)
         except hg.RepoError:
             if cmd not in commands.optionalrepo.split():
                 if not path:
@@ -342,12 +354,12 @@ def _dispatch(ui, args):
         d = lambda: func(ui, *args, **cmdoptions)
 
     # run pre-hook, and abort if it fails
-    ret = hook.hook(ui, repo, "pre-%s" % cmd, False, args=" ".join(fullargs))
+    ret = hook.hook(lui, repo, "pre-%s" % cmd, False, args=" ".join(fullargs))
     if ret:
         return ret
     ret = _runcommand(ui, options, cmd, d)
     # run post-hook, passing command result
-    hook.hook(ui, repo, "post-%s" % cmd, False, args=" ".join(fullargs),
+    hook.hook(lui, repo, "post-%s" % cmd, False, args=" ".join(fullargs),
               result = ret)
     return ret
 
@@ -361,8 +373,18 @@ def _runcommand(ui, options, cmd, cmdfunc):
             if len(tb) != 2: # no
                 raise
             raise ParseError(cmd, _("invalid arguments"))
+    return profiled(ui, checkargs, options)
 
-    if options['profile']:
+def profiled(ui, func, options={}):
+    def profile_fp():
+        outfile = ui.config('profile', 'output', untrusted=True)
+        if outfile:
+            pid = str(os.getpid())
+            return open(outfile.replace('%p', pid), 'w')
+        else:
+            return sys.stderr
+    
+    if options.get('profile') or ui.config('profile', 'enable') == 'hotshot':
         import hotshot, hotshot.stats
         prof = hotshot.Profile("hg.prof")
         try:
@@ -378,10 +400,11 @@ def _runcommand(ui, options, cmd, cmdfunc):
         finally:
             prof.close()
             stats = hotshot.stats.load("hg.prof")
+            stats.stream = profile_fp()
             stats.strip_dirs()
             stats.sort_stats('time', 'calls')
             stats.print_stats(40)
-    elif options['lsprof']:
+    elif options.get('lsprof') or ui.config('profile', 'enable') == 'lsprof':
         try:
             from mercurial import lsprof
         except ImportError:
@@ -391,11 +414,11 @@ def _runcommand(ui, options, cmd, cmdfunc):
         p = lsprof.Profiler()
         p.enable(subcalls=True)
         try:
-            return checkargs()
+            return func()
         finally:
             p.disable()
             stats = lsprof.Stats(p.getstats())
             stats.sort()
-            stats.pprint(top=10, file=sys.stderr, climit=5)
+            stats.pprint(top=10, file=profile_fp(), climit=5)
     else:
-        return checkargs()
+        return func()

@@ -1,4 +1,6 @@
 #!/bin/sh
+# Tests if hgweb can run without touching sys.stdin, as is required
+# by the WSGI standard and strictly implemented by mod_wsgi.
 
 mkdir repo
 cd repo
@@ -11,7 +13,6 @@ hg tip
 cat > request.py <<EOF
 from mercurial import dispatch
 from mercurial.hgweb.hgweb_mod import hgweb
-from mercurial.hgweb.request import _wsgirequest
 from mercurial.ui import ui
 from mercurial import hg
 from StringIO import StringIO
@@ -62,7 +63,7 @@ env = {
 	'SERVER_PROTOCOL': 'HTTP/1.0'
 }
 
-_wsgirequest(hgweb('.'), env, startrsp)
+hgweb('.')(env, startrsp)
 print '---- ERRORS'
 print errors.getvalue()
 EOF

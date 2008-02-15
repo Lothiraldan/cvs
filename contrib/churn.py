@@ -12,7 +12,7 @@
 # <alias email> <actual email>
 
 from mercurial.i18n import gettext as _
-from mercurial import hg, mdiff, cmdutil, ui, util, templater, node
+from mercurial import hg, mdiff, cmdutil, ui, util, templatefilters, node
 import os, sys
 
 def get_tty_width():
@@ -43,7 +43,7 @@ def __gather(ui, repo, node1, node2):
         to = mmap1 and repo.file(f).read(mmap1[f]) or None
         tn = mmap2 and repo.file(f).read(mmap2[f]) or None
 
-        diff = mdiff.unidiff(to, "", tn, "", f).split("\n")
+        diff = mdiff.unidiff(to, "", tn, "", f, f).split("\n")
 
         for line in diff:
             if not line:
@@ -69,7 +69,7 @@ def __gather(ui, repo, node1, node2):
     modified, added, removed, deleted, unknown = changes
 
     who = repo.changelog.read(node2)[1]
-    who = templater.email(who) # get the email of the person
+    who = util.email(who) # get the email of the person
 
     mmap1 = repo.manifest.read(repo.changelog.read(node1)[0])
     mmap2 = repo.manifest.read(repo.changelog.read(node2)[0])
@@ -114,23 +114,24 @@ def gather_stats(ui, repo, amap, revs=None, progress=False):
         who, lines = __gather(ui, repo, node1, node2)
 
         # remap the owner if possible
-        if amap.has_key(who):
+        if who in amap:
             ui.note("using '%s' alias for '%s'\n" % (amap[who], who))
             who = amap[who]
 
-        if not stats.has_key(who):
+        if not who in stats:
             stats[who] = 0
         stats[who] += lines
 
         ui.note("rev %d: %d lines by %s\n" % (rev, lines, who))
 
         if progress:
+            nr_revs = max(nr_revs, 1)
             if int(100.0*(cur_rev - 1)/nr_revs) < int(100.0*cur_rev/nr_revs):
-                ui.write("%d%%.." % (int(100.0*cur_rev/nr_revs),))
+                ui.write("\rGenerating stats: %d%%" % (int(100.0*cur_rev/nr_revs),))
                 sys.stdout.flush()
 
     if progress:
-        ui.write("done\n")
+        ui.write("\r")
         sys.stdout.flush()
 
     return stats
@@ -144,6 +145,7 @@ def churn(ui, repo, **opts):
         return s[0:l]
 
     def graph(n, maximum, width, char):
+        maximum = max(1, maximum)
         n = int(n * width / float(maximum))
 
         return char * (n)
@@ -178,6 +180,8 @@ def churn(ui, repo, **opts):
     ordered = stats.items()
     ordered.sort(lambda x, y: cmp(y[1], x[1]))
 
+    if not ordered:
+        return
     maximum = ordered[0][1]
 
     width = get_tty_width()

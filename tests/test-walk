@@ -58,6 +58,7 @@ debugwalk .hg
 debugwalk ../.hg
 chdir ..
 debugwalk -Ibeans
+debugwalk -I '{*,{b,m}*/*}k'
 debugwalk 'glob:mammals/../beans/b*'
 debugwalk '-X*/Procyonidae' mammals
 debugwalk path:mammals
@@ -92,6 +93,13 @@ hg rm fenugreek
 debugwalk fenugreek
 touch new
 debugwalk new
+
+mkdir ignored
+touch ignored/file
+echo '^ignored$' > .hgignore
+debugwalk ignored
+debugwalk ignored/file
+
 chdir ..
 debugwalk -R t t/mammals/skunk
 mkdir t2

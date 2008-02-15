@@ -5,19 +5,27 @@
 # This software may be used and distributed according to the terms of
 # the GNU General Public License, incorporated herein by reference.
 
-'''interactive change selection during commit'''
+'''interactive change selection during commit or qrefresh'''
 
 from mercurial.i18n import _
-from mercurial import cmdutil, commands, cmdutil, hg, mdiff, patch, revlog
+from mercurial import cmdutil, commands, cmdutil, extensions, hg, mdiff, patch, revlog
 from mercurial import util
 import copy, cStringIO, errno, operator, os, re, shutil, tempfile
 
 lines_re = re.compile(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@\s*(.*)')
 
 def scanpatch(fp):
+    """like patch.iterhunks, but yield different events
+
+    - ('file',    [header_lines + fromfile + tofile])
+    - ('context', [context_lines])
+    - ('hunk',    [hunk_lines])
+    - ('range',   (-start,len, +start,len, diffp))
+    """
     lr = patch.linereader(fp)
 
     def scanwhile(first, p):
+        """scan lr while predicate holds"""
         lines = [first]
         while True:
             line = lr.readline()
@@ -58,6 +66,10 @@ def scanpatch(fp):
                 raise patch.PatchError('unknown patch content: %r' % line)
 
 class header(object):
+    """patch header
+    
+    XXX shoudn't we move this to mercurial/patch.py ? 
+    """
     diff_re = re.compile('diff --git a/(.*) b/(.*)$')
     allhunks_re = re.compile('(?:index|new file|deleted file) ')
     pretty_re = re.compile('(?:new file|deleted file) ')
@@ -115,11 +127,16 @@ class header(object):
                 return True
 
 def countchanges(hunk):
+    """hunk -> (n+,n-)"""
     add = len([h for h in hunk if h[0] == '+'])
     rem = len([h for h in hunk if h[0] == '-'])
     return add, rem
 
 class hunk(object):
+    """patch hunk
+    
+    XXX shouldn't we merge this with patch.hunk ?
+    """
     maxcontext = 3
 
     def __init__(self, header, fromline, toline, proc, before, hunk, after):
@@ -154,7 +171,9 @@ class hunk(object):
         return '<hunk %r@%d>' % (self.filename(), self.fromline)
 
 def parsepatch(fp):
+    """patch -> [] of hunks """
     class parser(object):
+        """patch parsing state machine"""
         def __init__(self):
             self.fromline = 0
             self.toline = 0
@@ -227,10 +246,14 @@ def parsepatch(fp):
     return p.finished()
 
 def filterpatch(ui, chunks):
+    """Interactively filter patch chunks into applied-only chunks"""
     chunks = list(chunks)
     chunks.reverse()
     seen = {}
     def consumefile():
+        """fetch next portion from chunks until a 'header' is seen
+        NB: header == new-file mark
+        """
         consumed = []
         while chunks:
             if isinstance(chunks[-1], header):
@@ -238,17 +261,27 @@ def filterpatch(ui, chunks):
             else:
                 consumed.append(chunks.pop())
         return consumed
-    resp_all = [None]
-    resp_file = [None]
-    applied = {}
+
+    resp_all = [None]   # this two are changed from inside prompt,
+    resp_file = [None]  # so can't be usual variables
+    applied = {}        # 'filename' -> [] of chunks
     def prompt(query):
+        """prompt query, and process base inputs
+        
+        - y/n for the rest of file
+        - y/n for the rest
+        - ? (help)
+        - q (quit)
+
+        else, input is returned to the caller.
+        """
         if resp_all[0] is not None:
             return resp_all[0]
         if resp_file[0] is not None:
             return resp_file[0]
         while True:
-            r = (ui.prompt(query + _(' [Ynsfdaq?] '), '[Ynsfdaq?]?$',
-                           matchflags=re.I) or 'y').lower()
+            r = (ui.prompt(query + _(' [Ynsfdaq?] '), '(?i)[Ynsfdaq?]?$')
+                 or 'y').lower()
             if r == '?':
                 c = record.__doc__.find('y - record this change')
                 for l in record.__doc__[c:].splitlines():
@@ -268,6 +301,7 @@ def filterpatch(ui, chunks):
     while chunks:
         chunk = chunks.pop()
         if isinstance(chunk, header):
+            # new-file mark
             resp_file = [None]
             fixoffset = 0
             hdr = ''.join(chunk.header)
@@ -286,6 +320,7 @@ def filterpatch(ui, chunks):
             else:
                 consumefile()
         else:
+            # new hunk
             if resp_file[0] is None and resp_all[0] is None:
                 chunk.pretty(ui)
             r = prompt(_('record this change to %r?') %
@@ -323,10 +358,48 @@ def record(ui, repo, *pats, **opts):
 
     ? - display help'''
 
+    def record_committer(ui, repo, pats, opts):
+        commands.commit(ui, repo, *pats, **opts)
+
+    dorecord(ui, repo, record_committer, *pats, **opts)
+
+
+def qrecord(ui, repo, patch, *pats, **opts):
+    '''interactively record a new patch
+
+    see 'hg help qnew' & 'hg help record' for more information and usage
+    '''
+
+    try:
+        mq = extensions.find('mq')
+    except KeyError:
+        raise util.Abort(_("'mq' extension not loaded"))
+
+    def qrecord_committer(ui, repo, pats, opts):
+        mq.new(ui, repo, patch, *pats, **opts)
+
+    opts = opts.copy()
+    opts['force'] = True    # always 'qnew -f'
+    dorecord(ui, repo, qrecord_committer, *pats, **opts)
+
+
+def dorecord(ui, repo, committer, *pats, **opts):
     if not ui.interactive:
         raise util.Abort(_('running non-interactively, use commit instead'))
 
     def recordfunc(ui, repo, files, message, match, opts):
+        """This is generic record driver.
+
+        It's job is to interactively filter local changes, and accordingly
+        prepare working dir into a state, where the job can be delegated to
+        non-interactive commit command such as 'commit' or 'qrefresh'.
+
+        After the actual job is done by non-interactive command, working dir
+        state is restored to original.
+
+        In the end we'll record intresting changes, and everything else will be
+        left in place, so the user can continue his work.
+        """
         if files:
             changes = None
         else:
@@ -339,6 +412,7 @@ def record(ui, repo, *pats, **opts):
                    match=match, changes=changes, opts=diffopts, fp=fp)
         fp.seek(0)
 
+        # 1. filter patch, so we have intending-to apply subset of it
         chunks = filterpatch(ui, parsepatch(fp))
         del fp
 
@@ -357,6 +431,7 @@ def record(ui, repo, *pats, **opts):
             changes = repo.status(files=newfiles, match=match)[:5]
         modified = dict.fromkeys(changes[0])
 
+        # 2. backup changed files, so we can restore them in the end
         backups = {}
         backupdir = repo.join('record-backups')
         try:
@@ -365,6 +440,7 @@ def record(ui, repo, *pats, **opts):
             if err.errno != errno.EEXIST:
                 raise
         try:
+            # backup continues
             for f in newfiles:
                 if f not in modified:
                     continue
@@ -382,19 +458,32 @@ def record(ui, repo, *pats, **opts):
             dopatch = fp.tell()
             fp.seek(0)
 
+            # 3a. apply filtered patch to clean repo  (clean)
             if backups:
                 hg.revert(repo, repo.dirstate.parents()[0], backups.has_key)
 
+            # 3b. (apply)
             if dopatch:
                 ui.debug('applying patch\n')
                 ui.debug(fp.getvalue())
                 patch.internalpatch(fp, ui, 1, repo.root)
             del fp
 
-            repo.commit(newfiles, message, opts['user'], opts['date'], match,
-                        force_editor=opts.get('force_editor'))
+            # 4. We prepared working directory according to filtered patch.
+            #    Now is the time to delegate the job to commit/qrefresh or the like!
+
+            # it is important to first chdir to repo root -- we'll call a
+            # highlevel command with list of pathnames relative to repo root
+            cwd = os.getcwd()
+            os.chdir(repo.root)
+            try:
+                committer(ui, repo, newfiles, opts)
+            finally:
+                os.chdir(cwd)
+
             return 0
         finally:
+            # 5. finally restore backed-up files
             try:
                 for realname, tmpname in backups.iteritems():
                     ui.debug('restoring %r to %r\n' % (tmpname, realname))
@@ -408,8 +497,29 @@ def record(ui, repo, *pats, **opts):
 cmdtable = {
     "record":
         (record,
-         [('A', 'addremove', None,
-           _('mark new/missing files as added/removed before committing')),
-         ] + commands.walkopts + commands.commitopts + commands.commitopts2,
+
+         # add commit options
+         commands.table['^commit|ci'][1],
+
          _('hg record [OPTION]... [FILE]...')),
 }
+
+
+def extsetup():
+    try:
+        mq = extensions.find('mq')
+    except KeyError:
+        return
+
+    qcmdtable = {
+    "qrecord":
+        (qrecord,
+
+         # add qnew options, except '--force'
+         [opt for opt in mq.cmdtable['qnew'][1] if opt[1] != 'force'],
+
+         _('hg qrecord [OPTION]... PATCH [FILE]...')),
+    }
+
+    cmdtable.update(qcmdtable)
+

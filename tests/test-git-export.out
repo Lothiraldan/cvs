@@ -33,9 +33,9 @@ old mode 100755
 new mode 100644
 rename from src
 rename to dst
---- a/dst
+--- a/src
 +++ b/dst
-@@ -3,3 +3,4 @@ 3
+@@ -3,3 +3,4 @@
  3
  4
  5
@@ -84,9 +84,9 @@ rename to dst2
 diff --git a/foo b/bar
 rename from foo
 rename to bar
---- a/bar
+--- a/foo
 +++ b/bar
-@@ -1,2 +1,3 @@ a
+@@ -1,2 +1,3 @@
  a
  b
 +c
@@ -94,9 +94,9 @@ rename to bar
 diff --git a/bar b/foo
 rename from bar
 rename to foo
---- a/foo
+--- a/bar
 +++ b/foo
-@@ -1,3 +1,2 @@ a
+@@ -1,3 +1,2 @@
  a
  b
 -c
@@ -105,9 +105,9 @@ rename to foo
 diff --git a/foo b/bar
 rename from foo
 rename to bar
---- a/bar
+--- a/foo
 +++ b/bar
-@@ -1,1 +1,3 @@ a
+@@ -1,1 +1,3 @@
  a
 +b
 +c
@@ -115,9 +115,9 @@ rename to bar
 diff --git a/bar b/foo
 rename from bar
 rename to foo
---- a/foo
+--- a/bar
 +++ b/foo
-@@ -1,3 +1,1 @@ a
+@@ -1,3 +1,1 @@
  a
 -b
 -c

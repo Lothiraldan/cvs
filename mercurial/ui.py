@@ -204,7 +204,8 @@ class ui(object):
                     pathsitems = items
                 for n, path in pathsitems:
                     if path and "://" not in path and not os.path.isabs(path):
-                        cdata.set("paths", n, os.path.join(root, path))
+                        cdata.set("paths", n,
+                                  os.path.normpath(os.path.join(root, path)))
 
         # update verbosity/interactive/report_untrusted settings
         if section is None or section == 'ui':
@@ -403,18 +404,30 @@ class ui(object):
                 readline.read_history_file
             except ImportError:
                 pass
-        return raw_input(prompt)
+        line = raw_input(prompt)
+        # When stdin is in binary mode on Windows, it can cause
+        # raw_input() to emit an extra trailing carriage return
+        if os.linesep == '\r\n' and line and line[-1] == '\r':
+            line = line[:-1]
+        return line
 
-    def prompt(self, msg, pat=None, default="y", matchflags=0):
+    def prompt(self, msg, pat=None, default="y"):
+        """Prompt user with msg, read response, and ensure it matches pat
+
+        If not interactive -- the default is returned
+        """
         if not self.interactive: return default
-        try:
-            r = self._readline(msg + ' ')
-            if not pat or re.match(pat, r, matchflags):
-                return r
-            else:
-                self.write(_("unrecognized response\n"))
-        except EOFError:
-            raise util.Abort(_('response expected'))
+        while True:
+            try:
+                r = self._readline(msg + ' ')
+                if not r:
+                    return default
+                if not pat or re.match(pat, r):
+                    return r
+                else:
+                    self.write(_("unrecognized response\n"))
+            except EOFError:
+                raise util.Abort(_('response expected'))
 
     def getpass(self, prompt=None, default=None):
         if not self.interactive: return default
@@ -435,9 +448,7 @@ class ui(object):
             f.write(text)
             f.close()
 
-            editor = (os.environ.get("HGEDITOR") or
-                    self.config("ui", "editor") or
-                    os.environ.get("EDITOR", "vi"))
+            editor = self.geteditor()
 
             util.system("%s \"%s\"" % (editor, name),
                         environ={'HGUSER': user},
@@ -459,3 +470,11 @@ class ui(object):
         if self.traceback:
             traceback.print_exc()
         return self.traceback
+
+    def geteditor(self):
+        '''return editor to use'''
+        return (os.environ.get("HGEDITOR") or
+                self.config("ui", "editor") or
+                os.environ.get("VISUAL") or
+                os.environ.get("EDITOR", "vi"))
+

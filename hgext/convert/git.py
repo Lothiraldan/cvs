@@ -3,7 +3,7 @@
 import os
 from mercurial import util
 
-from common import NoRepo, commit, converter_source
+from common import NoRepo, commit, converter_source, checktool
 
 class convert_git(converter_source):
     # Windows does not support GIT_DIR= construct while other systems
@@ -14,7 +14,7 @@ class convert_git(converter_source):
             prevgitdir = os.environ.get('GIT_DIR')
             os.environ['GIT_DIR'] = self.path
             try:
-                return os.popen(s)
+                return util.popen(s)
             finally:
                 if prevgitdir is None:
                     del os.environ['GIT_DIR']
@@ -22,7 +22,7 @@ class convert_git(converter_source):
                     os.environ['GIT_DIR'] = prevgitdir
     else:
         def gitcmd(self, s):
-            return os.popen('GIT_DIR=%s %s' % (self.path, s))
+            return util.popen('GIT_DIR=%s %s' % (self.path, s))
 
     def __init__(self, ui, path, rev=None):
         super(convert_git, self).__init__(ui, path, rev=rev)
@@ -30,7 +30,10 @@ class convert_git(converter_source):
         if os.path.isdir(path + "/.git"):
             path += "/.git"
         if not os.path.exists(path + "/objects"):
-            raise NoRepo("couldn't open GIT repo %s" % path)
+            raise NoRepo("%s does not look like a Git repo" % path)
+
+        checktool('git-rev-parse', 'git')
+
         self.path = path
 
     def getheads(self):
@@ -42,8 +45,7 @@ class convert_git(converter_source):
 
     def catfile(self, rev, type):
         if rev == "0" * 40: raise IOError()
-        fh = self.gitcmd("git-cat-file %s %s 2>%s" % (type, rev,
-                                                      util.nulldev))
+        fh = self.gitcmd("git-cat-file %s %s" % (type, rev))
         return fh.read()
 
     def getfile(self, name, rev):
@@ -100,7 +102,6 @@ class convert_git(converter_source):
         tzs, tzh, tzm = tz[-5:-4] + "1", tz[-4:-2], tz[-2:]
         tz = -int(tzs) * (int(tzh) * 3600 + int(tzm))
         date = tm + " " + str(tz)
-        author = author or "unknown"
 
         c = commit(parents=parents, date=date, author=author, desc=message,
                    rev=version)
@@ -108,8 +109,7 @@ class convert_git(converter_source):
 
     def gettags(self):
         tags = {}
-        fh = self.gitcmd('git-ls-remote --tags "%s" 2>%s' % (self.path,
-                                                             util.nulldev))
+        fh = self.gitcmd('git-ls-remote --tags "%s"' % self.path)
         prefix = 'refs/tags/'
         for line in fh:
             line = line.strip()
