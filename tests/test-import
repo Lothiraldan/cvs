@@ -32,6 +32,20 @@ hg --cwd a diff -r0:1 > tip.patch
 hg --cwd b import -mpatch ../tip.patch
 rm -r b
 
+echo % import of plain diff with specific date and user
+hg clone -r0 a b
+hg --cwd a diff -r0:1 > tip.patch
+hg --cwd b import -mpatch -d '1 0' -u 'user@nowhere.net' ../tip.patch
+hg -R b tip -pv
+rm -r b
+
+echo % import of plain diff should be ok with --no-commit
+hg clone -r0 a b
+hg --cwd a diff -r0:1 > tip.patch
+hg --cwd b import --no-commit ../tip.patch
+hg --cwd b diff --nodates
+rm -r b
+
 echo % hg -R repo import
 # put the clone in a subdir - having a directory named "a"
 # used to hide a bug.
@@ -57,7 +71,7 @@ rm -r b
 cat > mkmsg.py <<EOF
 import email.Message, sys
 msg = email.Message.Message()
-msg.set_payload('email commit message\n' + open('tip.patch').read())
+msg.set_payload('email commit message\n' + open('tip.patch', 'rb').read())
 msg['Subject'] = 'email patch'
 msg['From'] = 'email patcher'
 sys.stdout.write(msg.as_string())

@@ -1,9 +1,10 @@
 # CVS conversion code inspired by hg-cvs-import and git-cvsimport
 
 import os, locale, re, socket
+from cStringIO import StringIO
 from mercurial import util
 
-from common import NoRepo, commit, converter_source
+from common import NoRepo, commit, converter_source, checktool
 
 class convert_cvs(converter_source):
     def __init__(self, ui, path, rev=None):
@@ -12,6 +13,9 @@ class convert_cvs(converter_source):
         cvs = os.path.join(path, "CVS")
         if not os.path.exists(cvs):
             raise NoRepo("%s does not look like a CVS checkout" % path)
+
+        for tool in ('cvsps', 'cvs'):
+            checktool(tool)
 
         self.changeset = {}
         self.files = {}
@@ -67,7 +71,7 @@ class convert_cvs(converter_source):
                     elif l.startswith("Ancestor branch"):
                         ancestor = l[17:-1]
                         # figure out the parent later
-                        self.parent[id] = None
+                        self.parent[id] = self.lastbranch[ancestor]
                     elif l.startswith("Author"):
                         author = self.recode(l[8:-1])
                     elif l.startswith("Tag:") or l.startswith("Tags:"):
@@ -97,13 +101,14 @@ class convert_cvs(converter_source):
                             p = []
                         if branch == "HEAD":
                             branch = ""
-                        if branch and p[0] == None:
+                        if branch:
                             latest = None
                             # the last changeset that contains a base
                             # file is our parent
                             for r in oldrevs:
-                                latest = max(filerevids[r], latest)
-                            p = [latest]
+                                latest = max(filerevids.get(r, None), latest)
+                            if latest:
+                                p = [latest]
 
                         # add current commit to set
                         c = commit(author=author, date=date, parents=p,
@@ -196,7 +201,7 @@ class convert_cvs(converter_source):
 
         if conntype != "pserver":
             if conntype == "rsh":
-                rsh = os.environ.get("CVS_RSH" or "rsh")
+                rsh = os.environ.get("CVS_RSH") or "ssh"
                 if user:
                     cmd = [rsh, '-l', user, host] + cmd
                 else:
@@ -227,6 +232,20 @@ class convert_cvs(converter_source):
         return self.heads
 
     def _getfile(self, name, rev):
+
+        def chunkedread(fp, count):
+            # file-objects returned by socked.makefile() do not handle
+            # large read() requests very well.
+            chunksize = 65536
+            output = StringIO()
+            while count > 0:
+                data = fp.read(min(count, chunksize))
+                if not data:
+                    raise util.Abort("%d bytes missing from remote file" % count)
+                count -= len(data)
+                output.write(data)
+            return output.getvalue()
+
         if rev.endswith("(DEAD)"):
             raise IOError
 
@@ -245,14 +264,14 @@ class convert_cvs(converter_source):
                 self.readp.readline() # entries
                 mode = self.readp.readline()[:-1]
                 count = int(self.readp.readline()[:-1])
-                data = self.readp.read(count)
+                data = chunkedread(self.readp, count)
             elif line.startswith(" "):
                 data += line[1:]
             elif line.startswith("M "):
                 pass
             elif line.startswith("Mbinary "):
                 count = int(self.readp.readline()[:-1])
-                data = self.readp.read(count)
+                data = chunkedread(self.readp, count)
             else:
                 if line == "ok\n":
                     return (data, "x" in mode and "x" or "")

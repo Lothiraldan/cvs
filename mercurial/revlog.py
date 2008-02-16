@@ -31,8 +31,13 @@ REVLOG_DEFAULT_VERSION = REVLOG_DEFAULT_FORMAT | REVLOG_DEFAULT_FLAGS
 
 class RevlogError(Exception):
     pass
+
 class LookupError(RevlogError):
-    pass
+    def __init__(self, name, message=None):
+        if message is None:
+            message = _('not found: %s') % name
+        RevlogError.__init__(self, message)
+        self.name = name
 
 def getoffset(q):
     return int(q >> 16)
@@ -107,8 +112,6 @@ class lazyparser(object):
     # lazyparser is not safe to use on windows if win32 extensions not
     # available. it keeps file handle open, which make it not possible
     # to break hardlinks on local cloned repos.
-    safe_to_use = os.name != 'nt' or (not util.is_win_9x() and
-                                      hasattr(util, 'win32api'))
 
     def __init__(self, dataf, size):
         self.dataf = dataf
@@ -321,7 +324,7 @@ class revlogoldio(object):
             e = _unpack(indexformatv0, cur)
             # transform to revlogv1 format
             e2 = (offset_type(e[0], 0), e[1], -1, e[2], e[3],
-                  nodemap[e[4]], nodemap[e[5]], e[6])
+                  nodemap.get(e[4], nullrev), nodemap.get(e[5], nullrev), e[6])
             index.append(e2)
             nodemap[e[6]] = n
             n += 1
@@ -357,7 +360,7 @@ class revlogio(object):
         except AttributeError:
             size = 0
 
-        if lazyparser.safe_to_use and not inline and size > 1000000:
+        if util.openhardlinks() and not inline and size > 1000000:
             # big index, let's parse it on demand
             parser = lazyparser(fp, size)
             index = lazyindex(parser)
@@ -516,7 +519,7 @@ class revlog(object):
         try:
             return self.nodemap[node]
         except KeyError:
-            raise LookupError(_('%s: no node %s') % (self.indexfile, hex(node)))
+            raise LookupError(hex(node), _('%s: no node %s') % (self.indexfile, hex(node)))
     def node(self, rev):
         return self.index[rev][7]
     def linkrev(self, node):
@@ -836,7 +839,8 @@ class revlog(object):
                 for n in self.nodemap:
                     if n.startswith(bin_id) and hex(n).startswith(id):
                         if node is not None:
-                            raise LookupError(_("Ambiguous identifier"))
+                            raise LookupError(hex(node),
+                                              _("Ambiguous identifier"))
                         node = n
                 if node is not None:
                     return node
@@ -855,7 +859,7 @@ class revlog(object):
         if n:
             return n
 
-        raise LookupError(_("No match found"))
+        raise LookupError(id, _("No match found"))
 
     def cmp(self, node, text):
         """compare text with a given file revision"""
@@ -1166,13 +1170,13 @@ class revlog(object):
 
             for p in (p1, p2):
                 if not p in self.nodemap:
-                    raise LookupError(_("unknown parent %s") % short(p))
+                    raise LookupError(hex(p), _("unknown parent %s") % short(p))
 
             if not chain:
                 # retrieve the parent revision of the delta chain
                 chain = p1
                 if not chain in self.nodemap:
-                    raise LookupError(_("unknown base %s") % short(chain[:4]))
+                    raise LookupError(hex(chain), _("unknown base %s") % short(chain[:4]))
 
             # full versions are inserted when the needed deltas become
             # comparable to the uncompressed text or when the previous
@@ -1233,21 +1237,31 @@ class revlog(object):
 
         return node
 
-    def strip(self, rev, minlink):
-        if self.count() == 0 or rev >= self.count():
+    def strip(self, minlink):
+        """truncate the revlog on the first revision with a linkrev >= minlink
+
+        This function is called when we're stripping revision minlink and
+        its descendants from the repository.
+
+        We have to remove all revisions with linkrev >= minlink, because
+        the equivalent changelog revisions will be renumbered after the
+        strip.
+
+        So we truncate the revlog on the first of these revisions, and
+        trust that the caller has saved the revisions that shouldn't be
+        removed and that it'll readd them after this truncation.
+        """
+        if self.count() == 0:
             return
 
         if isinstance(self.index, lazyindex):
             self._loadindexmap()
 
-        # When stripping away a revision, we need to make sure it
-        # does not actually belong to an older changeset.
-        # The minlink parameter defines the oldest revision
-        # we're allowed to strip away.
-        while minlink > self.index[rev][4]:
-            rev += 1
-            if rev >= self.count():
-                return
+        for rev in xrange(0, self.count()):
+            if self.index[rev][4] >= minlink:
+                break
+        else:
+            return
 
         # first truncate the files on disk
         end = self.start(rev)

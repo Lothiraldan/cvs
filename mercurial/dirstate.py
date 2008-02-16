@@ -74,7 +74,7 @@ class dirstate(object):
         if cwd == self._root: return ''
         # self._root ends with a path separator if self._root is '/' or 'C:\'
         rootsep = self._root
-        if not rootsep.endswith(os.sep):
+        if not util.endswithsep(rootsep):
             rootsep += os.sep
         if cwd.startswith(rootsep):
             return cwd[len(rootsep):]
@@ -87,7 +87,7 @@ class dirstate(object):
             cwd = self.getcwd()
         path = util.pathto(self._root, cwd, f)
         if self._slash:
-            return path.replace(os.sep, '/')
+            return util.normpath(path)
         return path
 
     def __getitem__(self, key):
@@ -235,7 +235,7 @@ class dirstate(object):
         self._changepath(f, 'n', True)
         s = os.lstat(self._join(f))
         self._map[f] = ('n', s.st_mode, s.st_size, s.st_mtime, 0)
-        if self._copymap.has_key(f):
+        if f in self._copymap:
             del self._copymap[f]
 
     def normallookup(self, f):
@@ -286,7 +286,7 @@ class dirstate(object):
             self._changepath(f, '?')
             del self._map[f]
         except KeyError:
-            self._ui.warn(_("not in dirstate: %s!\n") % f)
+            self._ui.warn(_("not in dirstate: %s\n") % f)
 
     def clear(self):
         self._map = {}
@@ -420,7 +420,7 @@ class dirstate(object):
 
         # self._root may end with a path separator when self._root == '/'
         common_prefix_len = len(self._root)
-        if not self._root.endswith(os.sep):
+        if not util.endswithsep(self._root):
             common_prefix_len += 1
 
         normpath = util.normpath
@@ -568,7 +568,7 @@ class dirstate(object):
                         nonexistent = False
                 # XXX: what to do with file no longer present in the fs
                 # who are not removed in the dirstate ?
-                if nonexistent and type_ in "nm":
+                if nonexistent and type_ in "nma":
                     dadd(fn)
                     continue
             # check the common case first

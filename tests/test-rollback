@@ -13,3 +13,16 @@ hg rollback
 hg verify
 hg parents
 hg status
+
+echo % Test issue 902
+hg commit -m "test"
+hg branch test
+hg rollback
+hg branch
+
+echo % Test rollback of hg before issue 902 was fixed
+hg commit -m "test"
+hg branch test
+rm .hg/undo.branch
+hg rollback
+hg branch

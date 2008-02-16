@@ -19,9 +19,11 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     - Darcs
     - git
     - Subversion
+    - GNU Arch
 
     Accepted destination formats:
     - Mercurial
+    - Subversion (history on branches is not preserved)
 
     If no revision is given, all revisions will be converted. Otherwise,
     convert will only import up to the named revision (given in a format
@@ -56,7 +58,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
       exclude path/to/file
 
       rename from/file to/file
-    
+
     The 'include' directive causes a file, or all files under a
     directory, to be included in the destination repository, and the
     exclusion of all other files and dirs not explicitely included.
@@ -64,6 +66,24 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     The 'rename' directive renames a file or directory.  To rename from a
     subdirectory into the root of the repository, use '.' as the path to
     rename to.
+
+    Back end options:
+
+    --config convert.hg.clonebranches=False   (boolean)
+        hg target: XXX not documented
+    --config convert.hg.saverev=True          (boolean)
+        hg source: allow target to preserve source revision ID
+    --config convert.hg.tagsbranch=default    (branch name)
+        hg target: XXX not documented
+    --config convert.hg.usebranchnames=True   (boolean)
+        hg target: preserve branch names
+
+    --config convert.svn.branches=branches    (directory name)
+        svn source: specify the directory containing branches
+    --config convert.svn.tags=tags            (directory name)
+        svn source: specify the directory containing tags
+    --config convert.svn.trunk=trunk          (directory name)
+        svn source: specify the name of the trunk branch
     """
     return convcmd.convert(ui, src, dest, revmapfile, **opts)
 

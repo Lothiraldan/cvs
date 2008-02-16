@@ -26,7 +26,7 @@ if [ $? -ne 0 ]; then
     svnpath='/'$svnpath
 fi
 
-svnurl=file://$svnpath/svn-repo/trunk
+svnurl=file://$svnpath/svn-repo/trunk/test
 svn import -m init t $svnurl | fix_path
 
 echo % update svn repository
@@ -49,7 +49,7 @@ svn ci -m changeb
 cd ..
 
 echo % test incremental conversion
-hg convert $svnurl
+hg convert -v $svnurl | sed 's/source:.*/source:/'
 
 echo % test filemap
 echo 'include b' > filemap
@@ -57,6 +57,13 @@ hg convert --filemap filemap $svnurl fmap
 echo '[extensions]' >> $HGRCPATH
 echo 'hgext.graphlog =' >> $HGRCPATH
 hg glog -R fmap --template '#rev# #desc|firstline# files: #files#\n'
+
+echo % test stop revision
+hg convert --rev 1 $svnurl stoprev
+# Check convert_revision extra-records.
+# This is also the only place testing more than one extra field
+# in a revision.
+hg --cwd stoprev tip --debug | grep extra | sed 's/=.*/=/'
 
 ########################################
 
@@ -113,6 +120,61 @@ echo % test incremental conversion
 hg convert $svnurl A-hg
 
 cd A-hg
+hg glog --template '#rev# #desc|firstline# files: #files#\n'
+hg tags -q
+cd ..
+
+########################################
+
+echo "# now tests that it works with trunk/tags layout, but no branches yet"
+echo
+echo % initial svn import
+mkdir projB
+cd projB
+mkdir trunk
+mkdir tags
+cd ..
+
+svnurl=file://$svnpath/svn-repo/projB
+svn import -m "init projB" projB $svnurl | fix_path
+
+
+echo % update svn repository
+svn co $svnurl/trunk B | fix_path
+cd B
+echo hello > letter.txt
+svn add letter.txt
+svn ci -m hello
+
+echo world >> letter.txt
+svn ci -m world
+
+svn copy -m "tag v0.1" $svnurl/trunk $svnurl/tags/v0.1
+
+echo 'nice day today!' >> letter.txt
+svn ci -m "nice day"
+cd ..
+
+echo % convert to hg once
+hg convert $svnurl B-hg
+
+echo % update svn repository again
+cd B
+echo "see second letter" >> letter.txt
+echo "nice to meet you" > letter2.txt
+svn add letter2.txt
+svn ci -m "second letter"
+
+svn copy -m "tag v0.2" $svnurl/trunk $svnurl/tags/v0.2
+
+echo "blah-blah-blah" >> letter2.txt
+svn ci -m "work in progress"
+cd ..
+
+echo % test incremental conversion
+hg convert $svnurl B-hg
+
+cd B-hg
 hg glog --template '#rev# #desc|firstline# files: #files#\n'
 hg tags -q
 cd ..
