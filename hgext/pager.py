@@ -47,7 +47,7 @@ from mercurial import dispatch
 def uisetup(ui):
     def pagecmd(ui, options, cmd, cmdfunc):
         p = ui.config("pager", "pager", os.environ.get("PAGER"))
-        if p and sys.stdout.isatty():
+        if p and sys.stdout.isatty() and '--debugger' not in sys.argv:
             attend = ui.configlist('pager', 'attend')
             if (cmd in attend or
                 (cmd not in ui.configlist('pager', 'ignore') and not attend)):
