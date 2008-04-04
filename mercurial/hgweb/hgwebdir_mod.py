@@ -6,7 +6,7 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os
+import os, mimetools, cStringIO
 from mercurial.i18n import gettext as _
 from mercurial.repo import RepoError
 from mercurial import ui, hg, util, templater, templatefilters
@@ -55,7 +55,7 @@ class hgwebdir(object):
                 self.repos.extend(cleannames(cp.items('paths')))
             if cp.has_section('collections'):
                 for prefix, root in cp.items('collections'):
-                    for path in util.walkrepos(root):
+                    for path in util.walkrepos(root, followsym=True):
                         repo = os.path.normpath(path)
                         name = repo
                         if name.startswith(prefix):
@@ -81,8 +81,17 @@ class hgwebdir(object):
 
                 virtual = req.env.get("PATH_INFO", "").strip('/')
                 tmpl = self.templater(req)
-                ctype = tmpl('mimetype', encoding=util._encoding)
-                ctype = templater.stringify(ctype)
+                try:
+                    ctype = tmpl('mimetype', encoding=util._encoding)
+                    ctype = templater.stringify(ctype)
+                except KeyError:
+                    # old templates with inline HTTP headers?
+                    if 'mimetype' in tmpl:
+                        raise
+                    header = tmpl('header', encoding=util._encoding)
+                    header_file = cStringIO.StringIO(templater.stringify(header))
+                    msg = mimetools.Message(header_file, 0)
+                    ctype = msg['content-type']
 
                 # a static file
                 if virtual.startswith('static/') or 'static' in req.form:
@@ -181,7 +190,9 @@ class hgwebdir(object):
                 if u.configbool("web", "hidden", untrusted=True):
                     continue
 
-                parts = [req.env['PATH_INFO'].rstrip('/'), name]
+                parts = [name]
+                if 'PATH_INFO' in req.env:
+                    parts.insert(0, req.env['PATH_INFO'].rstrip('/'))
                 if req.env['SCRIPT_NAME']:
                     parts.insert(0, req.env['SCRIPT_NAME'])
                 url = ('/'.join(parts).replace("//", "/")) + '/'
@@ -246,7 +257,13 @@ class hgwebdir(object):
     def templater(self, req):
 
         def header(**map):
-            yield tmpl('header', encoding=util._encoding, **map)
+            header = tmpl('header', encoding=util._encoding, **map)
+            if 'mimetype' not in tmpl:
+                # old template with inline HTTP headers
+                header_file = cStringIO.StringIO(templater.stringify(header))
+                msg = mimetools.Message(header_file, 0)
+                header = header_file.read()
+            yield header
 
         def footer(**map):
             yield tmpl("footer", **map)

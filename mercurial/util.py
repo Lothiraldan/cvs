@@ -1000,7 +1000,10 @@ if os.name == 'nt':
         pass
 
     def set_binary(fd):
-        msvcrt.setmode(fd.fileno(), os.O_BINARY)
+        # When run without console, pipes may expose invalid
+        # fileno(), usually set to -1.
+        if hasattr(fd, 'fileno') and fd.fileno() >= 0:
+            msvcrt.setmode(fd.fileno(), os.O_BINARY)
 
     def pconvert(path):
         return '/'.join(splitpath(path))
@@ -1702,19 +1705,47 @@ def ellipsis(text, maxlength=400):
     else:
         return "%s..." % (text[:maxlength-3])
 
-def walkrepos(path):
+def walkrepos(path, followsym=False, seen_dirs=None):
     '''yield every hg repository under path, recursively.'''
     def errhandler(err):
         if err.filename == path:
             raise err
+    if followsym and hasattr(os.path, 'samestat'):
+        def _add_dir_if_not_there(dirlst, dirname):
+            match = False
+            samestat = os.path.samestat
+            dirstat = os.stat(dirname)
+            for lstdirstat in dirlst:
+                if samestat(dirstat, lstdirstat):
+                    match = True
+                    break
+            if not match:
+                dirlst.append(dirstat)
+            return not match
+    else:
+        followsym = False
 
-    for root, dirs, files in os.walk(path, onerror=errhandler):
+    if (seen_dirs is None) and followsym:
+        seen_dirs = []
+        _add_dir_if_not_there(seen_dirs, path)
+    for root, dirs, files in os.walk(path, topdown=True, onerror=errhandler):
         if '.hg' in dirs:
             dirs[:] = [] # don't descend further
             yield root # found a repository
             qroot = os.path.join(root, '.hg', 'patches')
-            if os.path.exists(os.path.join(qroot, '.hg')):
+            if os.path.isdir(os.path.join(qroot, '.hg')):
                 yield qroot # we have a patch queue repo here
+        elif followsym:
+            newdirs = []
+            for d in dirs:
+                fname = os.path.join(root, d)
+                if _add_dir_if_not_there(seen_dirs, fname):
+                    if os.path.islink(fname):
+                        for hgname in walkrepos(fname, True, seen_dirs):
+                            yield hgname
+                    else:
+                        newdirs.append(d)
+            dirs[:] = newdirs
 
 _rcpath = None
 

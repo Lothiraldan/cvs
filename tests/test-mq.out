@@ -52,6 +52,7 @@ list of commands:
 
 use "hg -v help mq" to show aliases and global options
 adding a
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 adding b/z
 % qinit
@@ -323,6 +324,7 @@ diff --git a/new b/copy
 copy from new
 copy to copy
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
+created new head
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
 adding branch
 adding changesets
@@ -330,6 +332,7 @@ adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
 Patch queue now empty
+(working directory not at tip)
 applying bar
 Now at: bar
 diff --git a/bar b/bar
@@ -363,6 +366,7 @@ adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
 Patch queue now empty
+(working directory not at tip)
 applying bar
 Now at: bar
 diff --git a/foo b/bleh
@@ -401,6 +405,7 @@ Now at: addbucephalus
 8ba2a2f3e77b55d03051ff9c24ad65e7  bucephalus
 % strip again
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+created new head
 merging foo
 0 files updated, 1 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
@@ -455,6 +460,7 @@ main repo:
     rev 0: add foo
 patch repo:
     rev 0: checkpoint
+updating working directory
 3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 main repo:
@@ -466,9 +472,15 @@ main repo:
     rev 0: add foo
 patch repo:
     rev 0: checkpoint
+updating working directory
 3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 main repo:
     rev 0: add foo
 patch repo:
     rev 0: checkpoint
+% test applying on an empty file (issue 1033)
+adding a
+Patch queue now empty
+applying changea
+Now at: changea

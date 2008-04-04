@@ -5,12 +5,13 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from common import NoRepo, SKIPREV, mapfile
+from common import NoRepo, MissingTool, SKIPREV, mapfile
 from cvs import convert_cvs
 from darcs import darcs_source
 from git import convert_git
 from hg import mercurial_source, mercurial_sink
 from subversion import debugsvnlog, svn_source, svn_sink
+from monotone import monotone_source
 from gnuarch import gnuarch_source
 import filemap
 
@@ -32,6 +33,7 @@ source_converters = [
     ('svn', svn_source),
     ('hg', mercurial_source),
     ('darcs', darcs_source),
+    ('mtn', monotone_source),
     ('gnuarch', gnuarch_source),
     ]
 
@@ -46,7 +48,7 @@ def convertsource(ui, path, type, rev):
         try:
             if not type or name == type:
                 return source(ui, path, rev)
-        except NoRepo, inst:
+        except (NoRepo, MissingTool), inst:
             exceptions.append(inst)
     if not ui.quiet:
         for inst in exceptions:

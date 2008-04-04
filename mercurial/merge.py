@@ -7,29 +7,26 @@
 
 from node import nullid, nullrev
 from i18n import _
-import errno, util, os, heapq, filemerge
+import errno, util, os, filemerge, copies
 
-def checkunknown(wctx, mctx):
+def _checkunknown(wctx, mctx):
     "check for collisions between unknown files and files in mctx"
-    man = mctx.manifest()
     for f in wctx.unknown():
-        if f in man:
-            if mctx.filectx(f).cmp(wctx.filectx(f).data()):
-                raise util.Abort(_("untracked file in working directory differs"
-                                   " from file in requested revision: '%s'")
-                                 % f)
+        if f in mctx and mctx[f].cmp(wctx[f].data()):
+            raise util.Abort(_("untracked file in working directory differs"
+                               " from file in requested revision: '%s'") % f)
 
-def checkcollision(mctx):
+def _checkcollision(mctx):
     "check for case folding collisions in the destination context"
     folded = {}
-    for fn in mctx.manifest():
+    for fn in mctx:
         fold = fn.lower()
         if fold in folded:
             raise util.Abort(_("case-folding collision between %s and %s")
                              % (fn, folded[fold]))
         folded[fold] = fn
 
-def forgetremoved(wctx, mctx, branchmerge):
+def _forgetremoved(wctx, mctx, branchmerge):
     """
     Forget removed files
 
@@ -45,248 +42,17 @@ def forgetremoved(wctx, mctx, branchmerge):
     """
 
     action = []
-    man = mctx.manifest()
     state = branchmerge and 'r' or 'f'
     for f in wctx.deleted():
-        if f not in man:
+        if f not in mctx:
             action.append((f, state))
 
     if not branchmerge:
         for f in wctx.removed():
-            if f not in man:
+            if f not in mctx:
                 action.append((f, "f"))
 
     return action
-
-def findcopies(repo, m1, m2, ma, limit):
-    """
-    Find moves and copies between m1 and m2 back to limit linkrev
-    """
-
-    def nonoverlap(d1, d2, d3):
-        "Return list of elements in d1 not in d2 or d3"
-        l = [d for d in d1 if d not in d3 and d not in d2]
-        l.sort()
-        return l
-
-    def dirname(f):
-        s = f.rfind("/")
-        if s == -1:
-            return ""
-        return f[:s]
-
-    def dirs(files):
-        d = {}
-        for f in files:
-            f = dirname(f)
-            while f not in d:
-                d[f] = True
-                f = dirname(f)
-        return d
-
-    wctx = repo.workingctx()
-
-    def makectx(f, n):
-        if len(n) == 20:
-            return repo.filectx(f, fileid=n)
-        return wctx.filectx(f)
-    ctx = util.cachefunc(makectx)
-
-    def findold(fctx):
-        "find files that path was copied from, back to linkrev limit"
-        old = {}
-        seen = {}
-        orig = fctx.path()
-        visit = [fctx]
-        while visit:
-            fc = visit.pop()
-            s = str(fc)
-            if s in seen:
-                continue
-            seen[s] = 1
-            if fc.path() != orig and fc.path() not in old:
-                old[fc.path()] = 1
-            if fc.rev() < limit:
-                continue
-            visit += fc.parents()
-
-        old = old.keys()
-        old.sort()
-        return old
-
-    copy = {}
-    fullcopy = {}
-    diverge = {}
-
-    def checkcopies(c, man, aman):
-        '''check possible copies for filectx c'''
-        for of in findold(c):
-            fullcopy[c.path()] = of # remember for dir rename detection
-            if of not in man: # original file not in other manifest?
-                if of in ma:
-                    diverge.setdefault(of, []).append(c.path())
-                continue
-            # if the original file is unchanged on the other branch,
-            # no merge needed
-            if man[of] == aman.get(of):
-                continue
-            c2 = ctx(of, man[of])
-            ca = c.ancestor(c2)
-            if not ca: # unrelated?
-                continue
-            # named changed on only one side?
-            if ca.path() == c.path() or ca.path() == c2.path():
-                if c == ca and c2 == ca: # no merge needed, ignore copy
-                    continue
-                copy[c.path()] = of
-
-    if not repo.ui.configbool("merge", "followcopies", True):
-        return {}, {}
-
-    # avoid silly behavior for update from empty dir
-    if not m1 or not m2 or not ma:
-        return {}, {}
-
-    repo.ui.debug(_("  searching for copies back to rev %d\n") % limit)
-
-    u1 = nonoverlap(m1, m2, ma)
-    u2 = nonoverlap(m2, m1, ma)
-
-    if u1:
-        repo.ui.debug(_("  unmatched files in local:\n   %s\n")
-                      % "\n   ".join(u1))
-    if u2:
-        repo.ui.debug(_("  unmatched files in other:\n   %s\n")
-                      % "\n   ".join(u2))
-
-    for f in u1:
-        checkcopies(ctx(f, m1[f]), m2, ma)
-
-    for f in u2:
-        checkcopies(ctx(f, m2[f]), m1, ma)
-
-    diverge2 = {}
-    for of, fl in diverge.items():
-        if len(fl) == 1:
-            del diverge[of] # not actually divergent
-        else:
-            diverge2.update(dict.fromkeys(fl)) # reverse map for below
-
-    if fullcopy:
-        repo.ui.debug(_("  all copies found (* = to merge, ! = divergent):\n"))
-        for f in fullcopy:
-            note = ""
-            if f in copy: note += "*"
-            if f in diverge2: note += "!"
-            repo.ui.debug(_("   %s -> %s %s\n") % (f, fullcopy[f], note))
-
-    del diverge2
-
-    if not fullcopy or not repo.ui.configbool("merge", "followdirs", True):
-        return copy, diverge
-
-    repo.ui.debug(_("  checking for directory renames\n"))
-
-    # generate a directory move map
-    d1, d2 = dirs(m1), dirs(m2)
-    invalid = {}
-    dirmove = {}
-
-    # examine each file copy for a potential directory move, which is
-    # when all the files in a directory are moved to a new directory
-    for dst, src in fullcopy.items():
-        dsrc, ddst = dirname(src), dirname(dst)
-        if dsrc in invalid:
-            # already seen to be uninteresting
-            continue
-        elif dsrc in d1 and ddst in d1:
-            # directory wasn't entirely moved locally
-            invalid[dsrc] = True
-        elif dsrc in d2 and ddst in d2:
-            # directory wasn't entirely moved remotely
-            invalid[dsrc] = True
-        elif dsrc in dirmove and dirmove[dsrc] != ddst:
-            # files from the same directory moved to two different places
-            invalid[dsrc] = True
-        else:
-            # looks good so far
-            dirmove[dsrc + "/"] = ddst + "/"
-
-    for i in invalid:
-        if i in dirmove:
-            del dirmove[i]
-
-    del d1, d2, invalid
-
-    if not dirmove:
-        return copy, diverge
-
-    for d in dirmove:
-        repo.ui.debug(_("  dir %s -> %s\n") % (d, dirmove[d]))
-
-    # check unaccounted nonoverlapping files against directory moves
-    for f in u1 + u2:
-        if f not in fullcopy:
-            for d in dirmove:
-                if f.startswith(d):
-                    # new file added in a directory that was moved, move it
-                    copy[f] = dirmove[d] + f[len(d):]
-                    repo.ui.debug(_("  file %s -> %s\n") % (f, copy[f]))
-                    break
-
-    return copy, diverge
-
-def symmetricdifference(repo, rev1, rev2):
-    """symmetric difference of the sets of ancestors of rev1 and rev2
-
-    I.e. revisions that are ancestors of rev1 or rev2, but not both.
-    """
-    # basic idea:
-    # - mark rev1 and rev2 with different colors
-    # - walk the graph in topological order with the help of a heap;
-    #   for each revision r:
-    #     - if r has only one color, we want to return it
-    #     - add colors[r] to its parents
-    #
-    # We keep track of the number of revisions in the heap that
-    # we may be interested in.  We stop walking the graph as soon
-    # as this number reaches 0.
-    WHITE = 1
-    BLACK = 2
-    ALLCOLORS = WHITE | BLACK
-    colors = {rev1: WHITE, rev2: BLACK}
-
-    cl = repo.changelog
-
-    visit = [-rev1, -rev2]
-    heapq.heapify(visit)
-    n_wanted = len(visit)
-    ret = []
-
-    while n_wanted:
-        r = -heapq.heappop(visit)
-        wanted = colors[r] != ALLCOLORS
-        n_wanted -= wanted
-        if wanted:
-            ret.append(r)
-
-        for p in cl.parentrevs(r):
-            if p == nullrev:
-                continue
-            if p not in colors:
-                # first time we see p; add it to visit
-                n_wanted += wanted
-                colors[p] = colors[r]
-                heapq.heappush(visit, -p)
-            elif colors[p] != ALLCOLORS and colors[p] != colors[r]:
-                # at first we thought we wanted p, but now
-                # we know we don't really want it
-                n_wanted -= 1
-                colors[p] |= colors[r]
-
-        del colors[r]
-
-    return ret
 
 def manifestmerge(repo, p1, p2, pa, overwrite, partial):
     """
@@ -305,8 +71,7 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
     ma = pa.manifest()
     backwards = (pa == p2)
     action = []
-    copy = {}
-    diverge = {}
+    copy, copied, diverge = {}, {}, {}
 
     def fmerge(f, f2=None, fa=None):
         """merge flags"""
@@ -335,18 +100,13 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
         repo.ui.debug(" %s: %s -> %s\n" % (f, msg, m))
         action.append((f, m) + args)
 
-    if not (backwards or overwrite):
-        rev1 = p1.rev()
-        if rev1 is None:
-            # p1 is a workingctx
-            rev1 = p1.parents()[0].rev()
-        limit = min(symmetricdifference(repo, rev1, p2.rev()))
-        copy, diverge = findcopies(repo, m1, m2, ma, limit)
-
-    for of, fl in diverge.items():
-        act("divergent renames", "dr", of, fl)
-
-    copied = dict.fromkeys(copy.values())
+    if pa and not (backwards or overwrite):
+        if repo.ui.configbool("merge", "followcopies", True):
+            dirs = repo.ui.configbool("merge", "followdirs", True)
+            copy, diverge = copies.copies(repo, p1, p2, pa, dirs)
+        copied = dict.fromkeys(copy.values())
+        for of, fl in diverge.items():
+            act("divergent renames", "dr", of, fl)
 
     # Compare manifests
     for f, n in m1.iteritems():
@@ -588,7 +348,6 @@ def update(repo, node, branchmerge, force, partial):
                 else:
                     raise util.Abort(_("branch %s not found") % wc.branch())
         overwrite = force and not branchmerge
-        forcemerge = force and branchmerge
         pl = wc.parents()
         p1, p2 = pl[0], repo.changectx(node)
         pa = p1.ancestor(p2)
@@ -598,27 +357,40 @@ def update(repo, node, branchmerge, force, partial):
         ### check phase
         if not overwrite and len(pl) > 1:
             raise util.Abort(_("outstanding uncommitted merges"))
-        if pa == p1 or pa == p2: # is there a linear path from p1 to p2?
-            if branchmerge:
-                if p1.branch() != p2.branch() and pa != p2:
+        if branchmerge:
+            if pa == p2:
+                raise util.Abort(_("can't merge with ancestor"))
+            elif pa == p1:
+                if p1.branch() != p2.branch():
                     fastforward = True
                 else:
-                    raise util.Abort(_("there is nothing to merge, just use "
-                                       "'hg update' or look at 'hg heads'"))
-        elif not (overwrite or branchmerge):
-            raise util.Abort(_("update spans branches, use 'hg merge' "
-                               "or 'hg update -C' to lose changes"))
-        if branchmerge and not forcemerge:
-            if wc.files():
+                    raise util.Abort(_("nothing to merge (use 'hg update'"
+                                       " or check 'hg heads')"))
+            if not force and (wc.files() or wc.deleted()):
                 raise util.Abort(_("outstanding uncommitted changes"))
+        elif not overwrite:
+            if pa == p1 or pa == p2: # linear
+                pass # all good
+            elif p1.branch() == p2.branch():
+                if wc.files() or wc.deleted():
+                    raise util.Abort(_("crosses branches (use 'hg merge' or "
+                                       "'hg update -C' to discard changes)"))
+                raise util.Abort(_("crosses branches (use 'hg merge' "
+                                   "or 'hg update -C')"))
+            elif wc.files() or wc.deleted():
+                raise util.Abort(_("crosses named branches (use "
+                                   "'hg update -C' to discard changes)"))
+            else:
+                # Allow jumping branches if there are no changes
+                overwrite = True
 
         ### calculate phase
         action = []
         if not force:
-            checkunknown(wc, p2)
+            _checkunknown(wc, p2)
         if not util.checkfolding(repo.path):
-            checkcollision(p2)
-        action += forgetremoved(wc, p2, branchmerge)
+            _checkcollision(p2)
+        action += _forgetremoved(wc, p2, branchmerge)
         action += manifestmerge(repo, wc, p2, pa, overwrite, partial)
 
         ### apply phase

@@ -148,7 +148,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
 
         abspath = origsource
         copy = False
-        if src_repo.local() and islocal(dest):
+        if src_repo.cancopy() and islocal(dest):
             abspath = os.path.abspath(util.drop_scheme('file', origsource))
             copy = not pull and not rev
 
@@ -243,6 +243,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
             fp.close()
 
             if update:
+                dest_repo.ui.status(_("updating working directory\n"))
                 if not checkout:
                     try:
                         checkout = dest_repo.lookup("default")

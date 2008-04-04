@@ -34,3 +34,9 @@ class repository(object):
             raise NoCapability(_('cannot %s; remote repository does not '
                                  'support the %r capability') %
                                (purpose, name))
+
+    def local(self):
+        return False
+
+    def cancopy(self):
+        return self.local()

@@ -6,10 +6,10 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from node import hex, nullid, nullrev, short
-from repo import RepoError
+from repo import RepoError, NoCapability
 from i18n import _
 import os, re, sys, urllib
-import hg, util, revlog, bundlerepo, extensions
+import hg, util, revlog, bundlerepo, extensions, copies
 import difflib, patch, time, help, mdiff, tempfile
 import version, socket
 import archival, changegroup, cmdutil, hgweb.server, sshserver, hbisect
@@ -227,7 +227,10 @@ def backout(ui, repo, node=None, rev=None, **opts):
             raise util.Abort(_('cannot use --parent on non-merge changeset'))
         parent = p1
 
+    # the backout should appear on the same branch
+    branch = repo.dirstate.branch()
     hg.clean(repo, node, show_stats=False)
+    repo.dirstate.setbranch(branch)
     revert_opts = opts.copy()
     revert_opts['date'] = None
     revert_opts['all'] = True
@@ -539,6 +542,9 @@ def commit(ui, repo, *pats, **opts):
     If a list of files is omitted, all changes reported by "hg status"
     will be committed.
 
+    If you are committing the result of a merge, do not provide any
+    file names or -I/-X filters.
+
     If no commit message is specified, the configured editor is started to
     enter a message.
 
@@ -547,7 +553,20 @@ def commit(ui, repo, *pats, **opts):
     def commitfunc(ui, repo, files, message, match, opts):
         return repo.commit(files, message, opts['user'], opts['date'], match,
                            force_editor=opts.get('force_editor'))
-    cmdutil.commit(ui, repo, commitfunc, pats, opts)
+
+    node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
+    if not node:
+        return
+    cl = repo.changelog
+    rev = cl.rev(node)
+    parents = cl.parentrevs(rev)
+    if rev - 1 in parents:
+        # one of the parents was the old tip
+        return
+    if (parents == (nullrev, nullrev) or
+        len(cl.heads(cl.node(parents[0]))) > 1 and
+        (parents[1] == nullrev or len(cl.heads(cl.node(parents[1]))) > 1)):
+        ui.status(_('created new head\n'))
 
 def copy(ui, repo, *pats, **opts):
     """mark files as copied for the next commit
@@ -574,15 +593,17 @@ def debugancestor(ui, repo, *args):
     if len(args) == 3:
         index, rev1, rev2 = args
         r = revlog.revlog(util.opener(os.getcwd(), audit=False), index)
+        lookup = r.lookup
     elif len(args) == 2:
         if not repo:
             raise util.Abort(_("There is no Mercurial repository here "
                                "(.hg not found)"))
         rev1, rev2 = args
         r = repo.changelog
+        lookup = repo.lookup
     else:
         raise util.Abort(_('either two or three arguments required'))
-    a = r.ancestor(r.lookup(rev1), r.lookup(rev2))
+    a = r.ancestor(lookup(rev1), lookup(rev2))
     ui.write("%d:%s\n" % (r.rev(a), hex(a)))
 
 def debugcomplete(ui, cmd='', **opts):
@@ -695,23 +716,26 @@ def debugsetparents(ui, repo, rev1, rev2=None):
     finally:
         del wlock
 
-def debugstate(ui, repo):
+def debugstate(ui, repo, nodates=None):
     """show the contents of the current dirstate"""
     k = repo.dirstate._map.items()
     k.sort()
+    timestr = ""
+    showdate = not nodates
     for file_, ent in k:
-        if ent[3] == -1:
-            # Pad or slice to locale representation
-            locale_len = len(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(0)))
-            timestr = 'unset'
-            timestr = timestr[:locale_len] + ' '*(locale_len - len(timestr))
-        else:
-            timestr = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ent[3]))
+        if showdate:
+            if ent[3] == -1:
+                # Pad or slice to locale representation
+                locale_len = len(time.strftime("%Y-%m-%d %H:%M:%S ", time.localtime(0)))
+                timestr = 'unset'
+                timestr = timestr[:locale_len] + ' '*(locale_len - len(timestr))
+            else:
+                timestr = time.strftime("%Y-%m-%d %H:%M:%S ", time.localtime(ent[3]))
         if ent[1] & 020000:
             mode = 'lnk'
         else:
             mode = '%3o' % (ent[1] & 0777)
-        ui.write("%c %s %10d %s %s\n" % (ent[0], mode, ent[2], timestr, file_))
+        ui.write("%c %s %10d %s%s\n" % (ent[0], mode, ent[2], timestr, file_))
     for f in repo.dirstate.copies():
         ui.write(_("copy: %s -> %s\n") % (repo.dirstate.copied(f), f))
 
@@ -2024,7 +2048,7 @@ def pull(ui, repo, source="default", **opts):
     if revs:
         try:
             revs = [other.lookup(rev) for rev in revs]
-        except repo.NoCapability:
+        except NoCapability:
             error = _("Other repository doesn't support revision lookup, "
                       "so a rev cannot be specified.")
             raise util.Abort(error)
@@ -2118,51 +2142,74 @@ def remove(ui, repo, *pats, **opts):
 
     Schedule the indicated files for removal from the repository.
 
-    This only removes files from the current branch, not from the
-    entire project history.  If the files still exist in the working
-    directory, they will be deleted from it.  If invoked with --after,
-    files are marked as removed, but not actually unlinked unless --force
-    is also given. Without exact file names, --after will only mark
-    files as removed if they are no longer in the working directory.
+    This only removes files from the current branch, not from the entire
+    project history. -A can be used to remove only files that have already
+    been deleted, -f can be used to force deletion, and -Af can be used
+    to remove files from the next revision without deleting them.
+
+    The following table details the behavior of remove for different file
+    states (columns) and option combinations (rows). The file states are
+    Added, Clean, Modified and Missing (as reported by hg status). The
+    actions are Warn, Remove (from branch) and Delete (from disk).
+
+           A  C  M  !
+    none   W  RD W  R
+    -f     R  RD RD R
+    -A     W  W  W  R
+    -Af    R  R  R  R
 
     This command schedules the files to be removed at the next commit.
     To undo a remove before that, see hg revert.
-
-    Modified files and added files are not removed by default.  To
-    remove them, use the -f/--force option.
     """
-    if not opts['after'] and not pats:
+
+    after, force = opts.get('after'), opts.get('force')
+    if not pats and not after:
         raise util.Abort(_('no files specified'))
+
     files, matchfn, anypats = cmdutil.matchpats(repo, pats, opts)
-    exact = dict.fromkeys(files)
     mardu = map(dict.fromkeys, repo.status(files=files, match=matchfn))[:5]
     modified, added, removed, deleted, unknown = mardu
+
     remove, forget = [], []
     for src, abs, rel, exact in cmdutil.walk(repo, pats, opts):
+
         reason = None
-        if abs in modified and not opts['force']:
-            reason = _('is modified (use -f to force removal)')
-        elif abs in added:
-            if opts['force']:
-                forget.append(abs)
-                continue
-            reason = _('has been marked for add (use -f to force removal)')
-            exact = 1 # force the message
-        elif abs not in repo.dirstate:
-            reason = _('is not managed')
-        elif opts['after'] and not exact and abs not in deleted:
+        if abs in removed or abs in unknown:
             continue
-        elif abs in removed:
-            continue
-        if reason:
-            if exact:
-                ui.warn(_('not removing %s: file %s\n') % (rel, reason))
-        else:
-            if ui.verbose or not exact:
-                ui.status(_('removing %s\n') % rel)
+
+        # last column
+        elif abs in deleted:
             remove.append(abs)
+
+        # rest of the third row
+        elif after and not force:
+            reason = _('still exists (use -f to force removal)')
+
+        # rest of the first column
+        elif abs in added:
+            if not force:
+                reason = _('has been marked for add (use -f to force removal)')
+            else:
+                forget.append(abs)
+
+        # rest of the third column
+        elif abs in modified:
+            if not force:
+                reason = _('is modified (use -f to force removal)')
+            else:
+                remove.append(abs)
+
+        # rest of the second column
+        elif not reason:
+            remove.append(abs)
+
+        if reason:
+            ui.warn(_('not removing %s: file %s\n') % (rel, reason))
+        elif ui.verbose or not exact:
+            ui.status(_('removing %s\n') % rel)
+
     repo.forget(forget)
-    repo.remove(remove, unlink=opts['force'] or not opts['after'])
+    repo.remove(remove, unlink=not after)
 
 def rename(ui, repo, *pats, **opts):
     """rename files; equivalent of copy + remove
@@ -2375,8 +2422,19 @@ def revert(ui, repo, *pats, **opts):
                     pass
                 repo.dirstate.remove(f)
 
+            normal = None
+            if node == parent:
+                # We're reverting to our parent. If possible, we'd like status
+                # to report the file as clean. We have to use normallookup for
+                # merges to avoid losing information about merged/dirty files.
+                if p2 != nullid:
+                    normal = repo.dirstate.normallookup
+                else:
+                    normal = repo.dirstate.normal
             for f in revert[0]:
                 checkout(f)
+                if normal:
+                    normal(f)
 
             for f in add[0]:
                 checkout(f)
@@ -2459,10 +2517,7 @@ def serve(ui, repo, **opts):
     class service:
         def init(self):
             util.set_signal_handler()
-            try:
-                self.httpd = hgweb.server.create_server(parentui, repo)
-            except socket.error, inst:
-                raise util.Abort(_('cannot start server: ') + inst.args[1])
+            self.httpd = hgweb.server.create_server(parentui, repo)
 
             if not ui.verbose: return
 
@@ -2471,12 +2526,12 @@ def serve(ui, repo, **opts):
             else:
                 prefix = ''
 
-            if self.httpd.port != 80:
-                ui.status(_('listening at http://%s:%d/%s\n') %
-                          (self.httpd.addr, self.httpd.port, prefix))
-            else:
-                ui.status(_('listening at http://%s/%s\n') %
-                          (self.httpd.addr, prefix))
+            port = ':%d' % self.httpd.port
+            if port == ':80':
+                port = ''
+
+            ui.status(_('listening at http://%s%s/%s (%s:%d)\n') %
+                      (self.httpd.fqaddr, port, prefix, self.httpd.addr, self.httpd.port))
 
         def run(self):
             self.httpd.serve_forever()
@@ -2544,6 +2599,22 @@ def status(ui, repo, *pats, **opts):
 
     explicit_changetypes = changetypes + (('clean', 'C', clean),)
 
+    copy = {}
+    showcopy = {}
+    if ((all or opts.get('copies')) and not opts.get('no_status')):
+        if opts.get('rev') == []:
+            # fast path, more correct with merge parents
+            showcopy = copy = repo.dirstate.copies().copy()
+        else:
+            ctxn = repo.changectx(nullid)
+            ctx1 = repo.changectx(node1)
+            ctx2 = repo.changectx(node2)
+            if node2 is None:
+                ctx2 = repo.workingctx()
+            copy, diverge = copies.copies(repo, ctx1, ctx2, ctxn)
+            for k, v in copy.items():
+                copy[v] = k
+
     end = opts['print0'] and '\0' or '\n'
 
     for opt, char, changes in ([ct for ct in explicit_changetypes
@@ -2557,13 +2628,11 @@ def status(ui, repo, *pats, **opts):
 
         for f in changes:
             ui.write(format % repo.pathto(f, cwd))
-            if ((all or opts.get('copies')) and not opts.get('no_status')):
-                copied = repo.dirstate.copied(f)
-                if copied:
-                    ui.write('  %s%s' % (repo.pathto(copied, cwd), end))
+            if f in copy and (f in added or f in showcopy):
+                ui.write('  %s%s' % (repo.pathto(copy[f], cwd), end))
 
-def tag(ui, repo, name, rev_=None, **opts):
-    """add a tag for the current or given revision
+def tag(ui, repo, name1, *names, **opts):
+    """add one or more tags for the current or given revision
 
     Name a particular revision using <name>.
 
@@ -2582,43 +2651,49 @@ def tag(ui, repo, name, rev_=None, **opts):
 
     See 'hg help dates' for a list of formats valid for -d/--date.
     """
-    if name in ['tip', '.', 'null']:
-        raise util.Abort(_("the name '%s' is reserved") % name)
-    if rev_ is not None:
-        ui.warn(_("use of 'hg tag NAME [REV]' is deprecated, "
-                  "please use 'hg tag [-r REV] NAME' instead\n"))
-        if opts['rev']:
-            raise util.Abort(_("use only one form to specify the revision"))
+
+    rev_ = None
+    names = (name1,) + names
+    if len(names) != len(dict.fromkeys(names)):
+        raise util.Abort(_('tag names must be unique'))
+    for n in names:
+        if n in ['tip', '.', 'null']:
+            raise util.Abort(_('the name \'%s\' is reserved') % n)
     if opts['rev'] and opts['remove']:
         raise util.Abort(_("--rev and --remove are incompatible"))
     if opts['rev']:
         rev_ = opts['rev']
     message = opts['message']
     if opts['remove']:
-        tagtype = repo.tagtype(name)
-
-        if not tagtype:
-            raise util.Abort(_('tag %s does not exist') % name)
-        if opts['local'] and tagtype == 'global':
-           raise util.Abort(_('%s tag is global') % name)
-        if not opts['local'] and tagtype == 'local':
-           raise util.Abort(_('%s tag is local') % name)
-
+        expectedtype = opts['local'] and 'local' or 'global'
+        for n in names:
+            if not repo.tagtype(n):
+                raise util.Abort(_('tag \'%s\' does not exist') % n)
+            if repo.tagtype(n) != expectedtype:
+                raise util.Abort(_('tag \'%s\' is not a %s tag') %
+                                 (n, expectedtype))
         rev_ = nullid
         if not message:
-            message = _('Removed tag %s') % name
-    elif name in repo.tags() and not opts['force']:
-        raise util.Abort(_('a tag named %s already exists (use -f to force)')
-                         % name)
+            message = _('Removed tag %s') % ', '.join(names)
+    elif not opts['force']:
+        for n in names:
+            if n in repo.tags():
+                raise util.Abort(_('tag \'%s\' already exists '
+                                   '(use -f to force)') % n)
     if not rev_ and repo.dirstate.parents()[1] != nullid:
         raise util.Abort(_('uncommitted merge - please provide a '
                            'specific revision'))
     r = repo.changectx(rev_).node()
 
     if not message:
-        message = _('Added tag %s for changeset %s') % (name, short(r))
+        message = (_('Added tag %s for changeset %s') %
+                   (', '.join(names), short(r)))
 
-    repo.tag(name, r, message, opts['local'], opts['user'], opts['date'])
+    date = opts.get('date')
+    if date:
+        date = util.parsedate(date)
+
+    repo.tag(names, r, message, opts['local'], opts['user'], date)
 
 def tags(ui, repo):
     """list repository tags
@@ -2656,7 +2731,14 @@ def tags(ui, repo):
 def tip(ui, repo, **opts):
     """show the tip revision
 
-    Show the tip revision.
+    The tip revision (usually just called the tip) is the most
+    recently added changeset in the repository, the most recently
+    changed head.
+
+    If you have just made a commit, that commit will be the tip. If
+    you have just pulled changes from another repository, the tip of
+    that repository becomes the current tip. The "tip" tag is special
+    and cannot be renamed or assigned to a different changeset.
     """
     cmdutil.show_changeset(ui, repo, opts).show(nullrev+repo.changelog.count())
 
@@ -2688,17 +2770,17 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None):
 
     Update the working directory to the specified revision, or the
     tip of the current branch if none is specified.
-    See 'hg help dates' for a list of formats valid for -d/--date.
 
-    If there are no outstanding changes in the working directory and
-    there is a linear relationship between the current version and the
-    requested version, the result is the requested version.
+    If the requested revision is a descendant of the working
+    directory, any outstanding changes in the working directory will
+    be merged into the result. If it is not directly descended but is
+    on the same named branch, update aborts with a suggestion to use
+    merge or update -C instead.
 
-    To merge the working directory with another revision, use the
-    merge command.
+    If the requested revision is on a different named branch and the
+    working directory is clean, update quietly switches branches.
 
-    By default, update will refuse to run if doing so would require
-    discarding local changes.
+    See 'hg help dates' for a list of formats valid for --date.
     """
     if rev and node:
         raise util.Abort(_("please specify just one revision"))
@@ -2856,7 +2938,7 @@ table = {
          [('f', 'force', None,
            _('run even when remote repository is unrelated')),
           ('r', 'rev', [],
-           _('a changeset you would like to bundle')),
+           _('a changeset up to which you would like to bundle')),
           ('', 'base', [],
            _('a base changeset to specify instead of a destination')),
           ('a', 'all', None,
@@ -2927,7 +3009,10 @@ table = {
         (debugsetparents,
          [],
          _('hg debugsetparents REV1 [REV2]')),
-    "debugstate": (debugstate, [], _('hg debugstate')),
+    "debugstate":
+        (debugstate,
+         [('', 'nodates', None, _('do not display the saved mtime'))],
+         _('hg debugstate [OPTS]')),
     "debugwalk": (debugwalk, walkopts, _('hg debugwalk [OPTION]... [FILE]...')),
     "^diff":
         (diff,
@@ -2943,7 +3028,7 @@ table = {
            _('ignore changes in the amount of white space')),
           ('B', 'ignore-blank-lines', None,
            _('ignore changes whose lines are all blank')),
-          ('U', 'unified', 3,
+          ('U', 'unified', '',
            _('number of lines of context to show'))
          ] + walkopts,
          _('hg diff [OPTION]... [-r REV1 [-r REV2]] [FILE]...')),
@@ -3005,7 +3090,8 @@ table = {
            _('run even when remote repository is unrelated')),
           ('n', 'newest-first', None, _('show newest record first')),
           ('', 'bundle', '', _('file to store the bundles into')),
-          ('r', 'rev', [], _('a specific revision up to which you would like to pull')),
+          ('r', 'rev', [],
+           _('a specific revision up to which you would like to pull')),
          ] + logopts + remoteopts,
          _('hg incoming [-p] [-n] [-M] [-f] [-r REV]...'
            ' [--bundle FILENAME] [SOURCE]')),
@@ -3053,7 +3139,8 @@ table = {
         (outgoing,
          [('f', 'force', None,
            _('run even when remote repository is unrelated')),
-          ('r', 'rev', [], _('a specific revision you would like to push')),
+          ('r', 'rev', [],
+           _('a specific revision up to which you would like to push')),
           ('n', 'newest-first', None, _('show newest record first')),
          ] + logopts + remoteopts,
          _('hg outgoing [-M] [-p] [-n] [-f] [-r REV]... [DEST]')),
@@ -3076,14 +3163,16 @@ table = {
     "^push":
         (push,
          [('f', 'force', None, _('force push')),
-          ('r', 'rev', [], _('a specific revision you would like to push')),
+          ('r', 'rev', [],
+           _('a specific revision up to which you would like to push')),
          ] + remoteopts,
          _('hg push [-f] [-r REV]... [-e CMD] [--remotecmd CMD] [DEST]')),
     "recover": (recover, [], _('hg recover')),
     "^remove|rm":
         (remove,
-         [('A', 'after', None, _('record remove without deleting')),
-          ('f', 'force', None, _('remove file even if modified')),
+         [('A', 'after', None, _('record delete for missing files')),
+          ('f', 'force', None,
+           _('remove (and delete) file even if added or modified')),
          ] + walkopts,
          _('hg remove [OPTION]... FILE...')),
     "rename|mv":
@@ -3109,8 +3198,8 @@ table = {
           ('d', 'daemon', None, _('run server in background')),
           ('', 'daemon-pipefds', '', _('used internally by daemon mode')),
           ('E', 'errorlog', '', _('name of error log file to write to')),
-          ('p', 'port', 0, _('port to use (default: 8000)')),
-          ('a', 'address', '', _('address to use')),
+          ('p', 'port', 0, _('port to listen on (default: 8000)')),
+          ('a', 'address', '', _('address to listen on (default: all interfaces)')),
           ('', 'prefix', '', _('prefix path to serve from (default: server root)')),
           ('n', 'name', '',
            _('name to show in web pages (default: working dir)')),
@@ -3153,7 +3242,7 @@ table = {
           # -l/--local is already there, commitopts cannot be used
           ('m', 'message', '', _('use <text> as commit message')),
          ] + commitopts2,
-         _('hg tag [-l] [-m TEXT] [-d DATE] [-u USER] [-r REV] NAME')),
+         _('hg tag [-l] [-m TEXT] [-d DATE] [-u USER] [-r REV] NAME...')),
     "tags": (tags, [], _('hg tags')),
     "tip":
         (tip,

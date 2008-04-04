@@ -124,21 +124,29 @@ class localrepository(repo.repository):
 
     tag_disallowed = ':\r\n'
 
-    def _tag(self, name, node, message, local, user, date, parent=None,
+    def _tag(self, names, node, message, local, user, date, parent=None,
              extra={}):
         use_dirstate = parent is None
 
+        if isinstance(names, str):
+            allchars = names
+            names = (names,)
+        else:
+            allchars = ''.join(names)
         for c in self.tag_disallowed:
-            if c in name:
+            if c in allchars:
                 raise util.Abort(_('%r cannot be used in a tag name') % c)
 
-        self.hook('pretag', throw=True, node=hex(node), tag=name, local=local)
+        for name in names:
+            self.hook('pretag', throw=True, node=hex(node), tag=name,
+                      local=local)
 
-        def writetag(fp, name, munge, prevtags):
+        def writetags(fp, names, munge, prevtags):
             fp.seek(0, 2)
             if prevtags and prevtags[-1] != '\n':
                 fp.write('\n')
-            fp.write('%s %s\n' % (hex(node), munge and munge(name) or name))
+            for name in names:
+                fp.write('%s %s\n' % (hex(node), munge and munge(name) or name))
             fp.close()
 
         prevtags = ''
@@ -151,8 +159,9 @@ class localrepository(repo.repository):
                 prevtags = fp.read()
 
             # local tags are stored in the current charset
-            writetag(fp, name, None, prevtags)
-            self.hook('tag', node=hex(node), tag=name, local=local)
+            writetags(fp, names, None, prevtags)
+            for name in names:
+                self.hook('tag', node=hex(node), tag=name, local=local)
             return
 
         if use_dirstate:
@@ -172,7 +181,7 @@ class localrepository(repo.repository):
                 fp.write(prevtags)
 
         # committed tags are stored in UTF-8
-        writetag(fp, name, util.fromlocal, prevtags)
+        writetags(fp, names, util.fromlocal, prevtags)
 
         if use_dirstate and '.hgtags' not in self.dirstate:
             self.add(['.hgtags'])
@@ -180,20 +189,24 @@ class localrepository(repo.repository):
         tagnode = self.commit(['.hgtags'], message, user, date, p1=parent,
                               extra=extra)
 
-        self.hook('tag', node=hex(node), tag=name, local=local)
+        for name in names:
+            self.hook('tag', node=hex(node), tag=name, local=local)
 
         return tagnode
 
-    def tag(self, name, node, message, local, user, date):
-        '''tag a revision with a symbolic name.
+    def tag(self, names, node, message, local, user, date):
+        '''tag a revision with one or more symbolic names.
 
-        if local is True, the tag is stored in a per-repository file.
-        otherwise, it is stored in the .hgtags file, and a new
+        names is a list of strings or, when adding a single tag, names may be a
+        string.
+
+        if local is True, the tags are stored in a per-repository file.
+        otherwise, they are stored in the .hgtags file, and a new
         changeset is committed with the change.
 
         keyword arguments:
 
-        local: whether to store tag in non-version-controlled file
+        local: whether to store tags in non-version-controlled file
         (default False)
 
         message: commit message to use if committing
@@ -202,14 +215,12 @@ class localrepository(repo.repository):
 
         date: date tuple to use if committing'''
 
-        date = util.parsedate(date)
         for x in self.status()[:5]:
             if '.hgtags' in x:
                 raise util.Abort(_('working copy of .hgtags is changed '
                                    '(please commit .hgtags manually)'))
 
-
-        self._tag(name, node, message, local, user, date)
+        self._tag(names, node, message, local, user, date)
 
     def tags(self):
         '''return a mapping of tag to node'''
@@ -452,9 +463,6 @@ class localrepository(repo.repository):
             pass
         raise repo.RepoError(_("unknown revision '%s'") % key)
 
-    def dev(self):
-        return os.lstat(self.path).st_dev
-
     def local(self):
         return True
 
@@ -625,8 +633,8 @@ class localrepository(repo.repository):
 
     def invalidate(self):
         for a in "changelog manifest".split():
-            if hasattr(self, a):
-                self.__delattr__(a)
+            if a in self.__dict__:
+                delattr(self, a)
         self.tagscache = None
         self._tagstypecache = None
         self.nodetagscache = None
@@ -744,6 +752,8 @@ class localrepository(repo.repository):
         if files:
             files = util.unique(files)
         try:
+            wlock = self.wlock()
+            lock = self.lock()
             commit = []
             remove = []
             changed = []
@@ -771,6 +781,11 @@ class localrepository(repo.repository):
             if use_dirstate:
                 p1, p2 = self.dirstate.parents()
                 update_dirstate = True
+
+                if (not force and p2 != nullid and
+                    (files or match != util.always)):
+                    raise util.Abort(_('cannot partially commit a merge '
+                                       '(do not specify files or patterns)'))
             else:
                 p1, p2 = p1, p2 or nullid
                 update_dirstate = (self.dirstate.parents()[0] == p1)
@@ -802,8 +817,6 @@ class localrepository(repo.repository):
 
             self.hook("precommit", throw=True, parent1=xp1, parent2=xp2)
 
-            wlock = self.wlock()
-            lock = self.lock()
             tr = self.transaction()
             trp = weakref.proxy(tr)
 
@@ -885,13 +898,12 @@ class localrepository(repo.repository):
             if branchname:
                 extra["branch"] = branchname
 
-            if use_dirstate:
-                lines = [line.rstrip() for line in text.rstrip().splitlines()]
-                while lines and not lines[0]:
-                    del lines[0]
-                if not lines:
-                    raise util.Abort(_("empty commit message"))
-                text = '\n'.join(lines)
+            lines = [line.rstrip() for line in text.rstrip().splitlines()]
+            while lines and not lines[0]:
+                del lines[0]
+            if not lines and use_dirstate:
+                raise util.Abort(_("empty commit message"))
+            text = '\n'.join(lines)
 
             n = self.changelog.add(mn, changed + removed, text, trp, p1, p2,
                                    user, date, extra)
@@ -2063,7 +2075,7 @@ class localrepository(repo.repository):
         l = fp.readline()
         try:
             total_files, total_bytes = map(int, l.split(' ', 1))
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             raise util.UnexpectedOutput(
                 _('Unexpected response from remote server:'), l)
         self.ui.status(_('%d files to transfer, %s of data\n') %

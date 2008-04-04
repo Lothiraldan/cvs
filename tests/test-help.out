@@ -80,7 +80,7 @@ list of commands:
  serve        export the repository via HTTP
  showconfig   show combined config settings from all hgrc files
  status       show changed files in the working directory
- tag          add a tag for the current or given revision
+ tag          add one or more tags for the current or given revision
  tags         list repository tags
  tip          show the tip revision
  unbundle     apply one or more changegroup files
@@ -129,7 +129,7 @@ use "hg -v help" to show aliases and global options
  serve        export the repository via HTTP
  showconfig   show combined config settings from all hgrc files
  status       show changed files in the working directory
- tag          add a tag for the current or given revision
+ tag          add one or more tags for the current or given revision
  tags         list repository tags
  tip          show the tip revision
  unbundle     apply one or more changegroup files
@@ -205,7 +205,7 @@ options:
  -w --ignore-all-space     ignore white space when comparing lines
  -b --ignore-space-change  ignore changes in the amount of white space
  -B --ignore-blank-lines   ignore changes whose lines are all blank
- -U --unified              number of lines of context to show (default: 3)
+ -U --unified              number of lines of context to show
  -I --include              include names matching the given patterns
  -X --exclude              exclude names matching the given patterns
 

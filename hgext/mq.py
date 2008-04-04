@@ -766,6 +766,9 @@ class queue:
     def push(self, repo, patch=None, force=False, list=False,
              mergeq=None):
         wlock = repo.wlock()
+        if repo.dirstate.parents()[0] != repo.changelog.tip():
+            self.ui.status(_("(working directory not at tip)\n"))
+
         try:
             patch = self.lookup(patch)
             # Suppose our series file is: A B C and the current 'top'
@@ -1613,7 +1616,10 @@ def clone(ui, source, dest=None, **opts):
                 destrev = heads.keys()
                 destrev.append(sr.changelog.parents(qbase)[0])
     elif sr.capable('lookup'):
-        qbase = sr.lookup('qbase')
+        try:
+            qbase = sr.lookup('qbase')
+        except RepoError:
+            pass
     ui.note(_('cloning main repo\n'))
     sr, dr = hg.clone(ui, sr.url(), dest,
                       pull=opts['pull'],

@@ -1,3 +1,4 @@
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 pushing to ../a
 searching for changes
@@ -23,9 +24,12 @@ adding manifests
 adding file changes
 added 2 changesets with 1 changes to 1 files
 adding foo
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+created new head
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+created new head
 merging foo
 0 files updated, 1 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)

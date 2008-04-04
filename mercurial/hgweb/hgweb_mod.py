@@ -6,7 +6,7 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os, mimetypes, re
+import os, mimetypes, re, mimetools, cStringIO
 from mercurial.node import hex, nullid, short
 from mercurial.repo import RepoError
 from mercurial import mdiff, ui, hg, util, archival, patch, hook
@@ -172,8 +172,8 @@ class hgweb(object):
         if 'REPO_NAME' in req.env:
             req.url += req.env['REPO_NAME'] + '/'
 
-        if req.env.get('PATH_INFO'):
-            parts = req.env.get('PATH_INFO').strip('/').split('/')
+        if 'PATH_INFO' in req.env:
+            parts = req.env['PATH_INFO'].strip('/').split('/')
             repo_parts = req.env.get('REPO_NAME', '').split('/')
             if parts[:len(repo_parts)] == repo_parts:
                 parts = parts[len(repo_parts):]
@@ -226,15 +226,24 @@ class hgweb(object):
         try:
 
             tmpl = self.templater(req)
-            ctype = tmpl('mimetype', encoding=self.encoding)
-            ctype = templater.stringify(ctype)
+            try:
+                ctype = tmpl('mimetype', encoding=self.encoding)
+                ctype = templater.stringify(ctype)
+            except KeyError:
+                # old templates with inline HTTP headers?
+                if 'mimetype' in tmpl:
+                    raise
+                header = tmpl('header', encoding=self.encoding)
+                header_file = cStringIO.StringIO(templater.stringify(header))
+                msg = mimetools.Message(header_file, 0)
+                ctype = msg['content-type']
 
             if cmd == '':
                 req.form['cmd'] = [tmpl.cache['default']]
                 cmd = req.form['cmd'][0]
 
             if cmd not in webcommands.__all__:
-                msg = 'No such method: %s' % cmd
+                msg = 'no such method: %s' % cmd
                 raise ErrorResponse(HTTP_BAD_REQUEST, msg)
             elif cmd == 'file' and 'raw' in req.form.get('style', []):
                 self.ctype = ctype
@@ -248,7 +257,10 @@ class hgweb(object):
 
         except revlog.LookupError, err:
             req.respond(HTTP_NOT_FOUND, ctype)
-            req.write(tmpl('error', error='revision not found: %s' % err.name))
+            msg = str(err)
+            if 'manifest' not in msg:
+                msg = 'revision not found: %s' % err.name
+            req.write(tmpl('error', error=msg))
         except (RepoError, revlog.RevlogError), inst:
             req.respond(HTTP_SERVER_ERROR, ctype)
             req.write(tmpl('error', error=str(inst)))
@@ -279,7 +291,13 @@ class hgweb(object):
         # some functions for the templater
 
         def header(**map):
-            yield tmpl('header', encoding=self.encoding, **map)
+            header = tmpl('header', encoding=self.encoding, **map)
+            if 'mimetype' not in tmpl:
+                # old template with inline HTTP headers
+                header_file = cStringIO.StringIO(templater.stringify(header))
+                msg = mimetools.Message(header_file, 0)
+                header = header_file.read()
+            yield header
 
         def footer(**map):
             yield tmpl("footer", **map)
@@ -364,6 +382,20 @@ class hgweb(object):
         # ctx.branch() == 'default', but branchtags() is
         # an empty dict. Using dict.get avoids a traceback.
         if self.repo.branchtags().get(branch) == ctx.node():
+            branches.append({"name": branch})
+        return branches
+
+    def nodeinbranch(self, ctx):
+        branches = []
+        branch = ctx.branch()
+        if branch != 'default' and self.repo.branchtags().get(branch) != ctx.node():
+            branches.append({"name": branch})
+        return branches
+
+    def nodebranchnodefault(self, ctx):
+        branches = []
+        branch = ctx.branch()
+        if branch != 'default':
             branches.append({"name": branch})
         return branches
 
@@ -458,6 +490,7 @@ class hgweb(object):
                              "rev": i,
                              "node": hex(n),
                              "tags": self.nodetagsdict(n),
+                             "inbranch": self.nodeinbranch(ctx),
                              "branches": self.nodebranchdict(ctx)})
 
             if limit > 0:
@@ -529,6 +562,7 @@ class hgweb(object):
                            rev=ctx.rev(),
                            node=hex(n),
                            tags=self.nodetagsdict(n),
+                           inbranch=self.nodeinbranch(ctx),
                            branches=self.nodebranchdict(ctx))
 
                 if count >= self.maxchanges:
@@ -572,6 +606,8 @@ class hgweb(object):
                     files=files,
                     archives=self.archivelist(hex(n)),
                     tags=self.nodetagsdict(n),
+                    branch=self.nodebranchnodefault(ctx),
+                    inbranch=self.nodeinbranch(ctx),
                     branches=self.nodebranchdict(ctx))
 
     def filelog(self, tmpl, fctx):
@@ -642,6 +678,7 @@ class hgweb(object):
                     author=fctx.user(),
                     date=fctx.date(),
                     desc=fctx.description(),
+                    branch=self.nodebranchnodefault(fctx),
                     parent=self.siblings(fctx.parents()),
                     child=self.siblings(fctx.children()),
                     rename=self.renamelink(fl, n),
@@ -689,6 +726,7 @@ class hgweb(object):
                     date=fctx.date(),
                     desc=fctx.description(),
                     rename=self.renamelink(fl, n),
+                    branch=self.nodebranchnodefault(fctx),
                     parent=self.siblings(fctx.parents()),
                     child=self.siblings(fctx.children()),
                     permissions=fctx.manifest().flags(f))
@@ -717,7 +755,7 @@ class hgweb(object):
                 files[short] = (f, n)
 
         if not files:
-            raise ErrorResponse(HTTP_NOT_FOUND, 'Path not found: ' + path)
+            raise ErrorResponse(HTTP_NOT_FOUND, 'path not found: ' + path)
 
         def filelist(**map):
             fl = files.keys()
@@ -757,6 +795,7 @@ class hgweb(object):
                     dentries=dirlist,
                     archives=self.archivelist(hex(node)),
                     tags=self.nodetagsdict(node),
+                    inbranch=self.nodeinbranch(ctx),
                     branches=self.nodebranchdict(ctx))
 
     def tags(self, tmpl):
@@ -837,6 +876,7 @@ class hgweb(object):
                     rev=i,
                     node=hn,
                     tags=self.nodetagsdict(n),
+                    inbranch=self.nodeinbranch(ctx),
                     branches=self.nodebranchdict(ctx)))
 
             yield l
@@ -869,6 +909,7 @@ class hgweb(object):
                     file=path,
                     node=hex(n),
                     rev=fctx.rev(),
+                    branch=self.nodebranchnodefault(fctx),
                     parent=self.siblings(parents),
                     child=self.siblings(fctx.children()),
                     diff=diff)

@@ -8,7 +8,7 @@
 
 from i18n import _
 from node import hex, nullid, short
-import base85, cmdutil, mdiff, util, context, revlog, diffhelpers
+import base85, cmdutil, mdiff, util, context, revlog, diffhelpers, copies
 import cStringIO, email.Parser, os, popen2, re, sha, errno
 import sys, tempfile, zlib
 
@@ -505,7 +505,7 @@ class patchfile:
         return -1
 
 class hunk:
-    def __init__(self, desc, num, lr, context, gitpatch=None):
+    def __init__(self, desc, num, lr, context, create=False, remove=False):
         self.number = num
         self.desc = desc
         self.hunk = [ desc ]
@@ -515,7 +515,8 @@ class hunk:
             self.read_context_hunk(lr)
         else:
             self.read_unified_hunk(lr)
-        self.gitpatch = gitpatch
+        self.create = create
+        self.remove = remove and not create
 
     def read_unified_hunk(self, lr):
         m = unidesc.match(self.desc)
@@ -640,6 +641,7 @@ class hunk:
         self.hunk[0] = self.desc
 
     def reverse(self):
+        self.create, self.remove = self.remove, self.create
         origlena = self.lena
         origstarta = self.starta
         self.lena = self.lenb
@@ -670,12 +672,10 @@ class hunk:
         return len(self.a) == self.lena and len(self.b) == self.lenb
 
     def createfile(self):
-        create = self.gitpatch is None or self.gitpatch.op == 'ADD'
-        return self.starta == 0 and self.lena == 0 and create
+        return self.starta == 0 and self.lena == 0 and self.create
 
     def rmfile(self):
-        remove = self.gitpatch is None or self.gitpatch.op == 'DELETE'
-        return self.startb == 0 and self.lenb == 0 and remove
+        return self.startb == 0 and self.lenb == 0 and self.remove
 
     def fuzzit(self, l, fuzz, toponly):
         # this removes context lines from the top and bottom of list 'l'.  It
@@ -800,13 +800,13 @@ def selectfile(afile_orig, bfile_orig, hunk, strip, reverse):
             while i < pathlen - 1 and path[i] == '/':
                 i += 1
             count -= 1
-        return path[i:].rstrip()
+        return path[:i].lstrip(), path[i:].rstrip()
 
     nulla = afile_orig == "/dev/null"
     nullb = bfile_orig == "/dev/null"
-    afile = pathstrip(afile_orig, strip)
+    abase, afile = pathstrip(afile_orig, strip)
     gooda = not nulla and os.path.exists(afile)
-    bfile = pathstrip(bfile_orig, strip)
+    bbase, bfile = pathstrip(bfile_orig, strip)
     if afile == bfile:
         goodb = gooda
     else:
@@ -815,16 +815,20 @@ def selectfile(afile_orig, bfile_orig, hunk, strip, reverse):
     if reverse:
         createfunc = hunk.rmfile
     missing = not goodb and not gooda and not createfunc()
+    # If afile is "a/b/foo" and bfile is "a/b/foo.orig" we assume the
+    # diff is between a file and its backup. In this case, the original
+    # file should be patched (see original mpatch code).
+    isbackup = (abase == bbase and bfile.startswith(afile))
     fname = None
     if not missing:
         if gooda and goodb:
-            fname = (afile in bfile) and afile or bfile
+            fname = isbackup and afile or bfile
         elif gooda:
             fname = afile
 
     if not fname:
         if not nullb:
-            fname = (afile in bfile) and afile or bfile
+            fname = isbackup and afile or bfile
         elif not nulla:
             fname = afile
         else:
@@ -912,7 +916,9 @@ def iterhunks(ui, fp, sourcefile=None):
                 if context == None and x.startswith('***************'):
                     context = True
                 gpatch = changed.get(bfile[2:], (None, None))[1]
-                current_hunk = hunk(x, hunknum + 1, lr, context, gpatch)
+                create = afile == '/dev/null' or gpatch and gpatch.op == 'ADD'
+                remove = bfile == '/dev/null' or gpatch and gpatch.op == 'DELETE'
+                current_hunk = hunk(x, hunknum + 1, lr, context, create, remove)
             except PatchError, err:
                 ui.debug(err)
                 current_hunk = None
@@ -1049,9 +1055,9 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, reverse=False,
     return err
 
 def diffopts(ui, opts={}, untrusted=False):
-    def get(key, name=None):
+    def get(key, name=None, getter=ui.configbool):
         return (opts.get(key) or
-                ui.configbool('diff', name or key, None, untrusted=untrusted))
+                getter('diff', name or key, None, untrusted=untrusted))
     return mdiff.diffopts(
         text=opts.get('text'),
         git=get('git'),
@@ -1060,7 +1066,7 @@ def diffopts(ui, opts={}, untrusted=False):
         ignorews=get('ignore_all_space', 'ignorews'),
         ignorewsamount=get('ignore_space_change', 'ignorewsamount'),
         ignoreblanklines=get('ignore_blank_lines', 'ignoreblanklines'),
-        context=get('unified'))
+        context=get('unified', getter=ui.config))
 
 def updatedir(ui, repo, patches):
     '''Update dirstate after patch application according to metadata'''
@@ -1202,36 +1208,6 @@ def diff(repo, node1=None, node2=None, files=None, match=util.always,
             execf2 = mc.execf
             linkf2 = mc.linkf
 
-    # returns False if there was no rename between ctx1 and ctx2
-    # returns None if the file was created between ctx1 and ctx2
-    # returns the (file, node) present in ctx1 that was renamed to f in ctx2
-    # This will only really work if c1 is the Nth 1st parent of c2.
-    def renamed(c1, c2, man, f):
-        startrev = c1.rev()
-        c = c2
-        crev = c.rev()
-        if crev is None:
-            crev = repo.changelog.count()
-        orig = f
-        files = (f,)
-        while crev > startrev:
-            if f in files:
-                try:
-                    src = getfilectx(f, c).renamed()
-                except revlog.LookupError:
-                    return None
-                if src:
-                    f = src[0]
-            crev = c.parents()[0].rev()
-            # try to reuse
-            c = getctx(crev)
-            files = c.files()
-        if f not in man:
-            return None
-        if f == orig:
-            return False
-        return f
-
     if repo.ui.quiet:
         r = None
     else:
@@ -1239,28 +1215,9 @@ def diff(repo, node1=None, node2=None, files=None, match=util.always,
         r = [hexfunc(node) for node in [node1, node2] if node]
 
     if opts.git:
-        copied = {}
-        c1, c2 = ctx1, ctx2
-        files = added
-        man = man1
-        if node2 and ctx1.rev() >= ctx2.rev():
-            # renamed() starts at c2 and walks back in history until c1.
-            # Since ctx1.rev() >= ctx2.rev(), invert ctx2 and ctx1 to
-            # detect (inverted) copies.
-            c1, c2 = ctx2, ctx1
-            files = removed
-            man = ctx2.manifest()
-        for f in files:
-            src = renamed(c1, c2, man, f)
-            if src:
-                copied[f] = src
-        if ctx1 == c2:
-            # invert the copied dict
-            copied = dict([(v, k) for (k, v) in copied.iteritems()])
-        # If we've renamed file foo to bar (copied['bar'] = 'foo'),
-        # avoid showing a diff for foo if we're going to show
-        # the rename to bar.
-        srcs = [x[1] for x in copied.iteritems() if x[0] in added]
+        copy, diverge = copies.copies(repo, ctx1, ctx2, repo.changectx(nullid))
+        for k, v in copy.items():
+            copy[v] = k
 
     all = modified + added + removed
     all.sort()
@@ -1286,8 +1243,8 @@ def diff(repo, node1=None, node2=None, files=None, match=util.always,
 
             if f in added:
                 mode = gitmode(execf2(f), linkf2(f))
-                if f in copied:
-                    a = copied[f]
+                if f in copy:
+                    a = copy[f]
                     omode = gitmode(man1.execf(a), man1.linkf(a))
                     addmodehdr(header, omode, mode)
                     if a in removed and a not in gone:
@@ -1303,7 +1260,8 @@ def diff(repo, node1=None, node2=None, files=None, match=util.always,
                 if util.binary(tn):
                     dodiff = 'binary'
             elif f in removed:
-                if f in srcs:
+                # have we already reported a copy above?
+                if f in copy and copy[f] in added and copy[copy[f]] == f:
                     dodiff = False
                 else:
                     mode = gitmode(man1.execf(f), man1.linkf(f))

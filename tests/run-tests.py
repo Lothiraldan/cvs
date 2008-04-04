@@ -24,6 +24,12 @@ SKIPPED_PREFIX = 'skipped: '
 
 required_tools = ["python", "diff", "grep", "unzip", "gunzip", "bunzip2", "sed"]
 
+defaults = {
+    'jobs': ('HGTEST_JOBS', 1),
+    'timeout': ('HGTEST_TIMEOUT', 180),
+    'port': ('HGTEST_PORT', 20059),
+}
+
 parser = optparse.OptionParser("%prog [options] [tests]")
 parser.add_option("-C", "--annotate", action="store_true",
     help="output files annotated with coverage")
@@ -36,19 +42,23 @@ parser.add_option("-f", "--first", action="store_true",
 parser.add_option("-i", "--interactive", action="store_true",
     help="prompt to accept changed output")
 parser.add_option("-j", "--jobs", type="int",
-    help="number of jobs to run in parallel")
+    help="number of jobs to run in parallel"
+         " (default: $%s or %d)" % defaults['jobs'])
 parser.add_option("--keep-tmpdir", action="store_true",
-    help="keep temporary directory after running tests (best used with --tmpdir)")
+    help="keep temporary directory after running tests"
+         " (best used with --tmpdir)")
 parser.add_option("-R", "--restart", action="store_true",
     help="restart at last error")
 parser.add_option("-p", "--port", type="int",
-    help="port on which servers should listen")
+    help="port on which servers should listen"
+         " (default: $%s or %d)" % defaults['port'])
 parser.add_option("-r", "--retest", action="store_true",
     help="retest failed tests")
 parser.add_option("-s", "--cover_stdlib", action="store_true",
     help="print a test coverage report inc. standard libraries")
 parser.add_option("-t", "--timeout", type="int",
-    help="kill errant tests after TIMEOUT seconds")
+    help="kill errant tests after TIMEOUT seconds"
+         " (default: $%s or %d)" % defaults['timeout'])
 parser.add_option("--tmpdir", type="string",
     help="run tests in the given temporary directory")
 parser.add_option("-v", "--verbose", action="store_true",
@@ -56,7 +66,9 @@ parser.add_option("-v", "--verbose", action="store_true",
 parser.add_option("--with-hg", type="string",
     help="test existing install at given location")
 
-parser.set_defaults(jobs=1, port=20059, timeout=180)
+for option, default in defaults.items():
+    defaults[option] = os.environ.get(*default)
+parser.set_defaults(**defaults)
 (options, args) = parser.parse_args()
 verbose = options.verbose
 coverage = options.cover or options.cover_stdlib or options.annotate
@@ -267,7 +279,7 @@ def run(cmd):
                        % options.timeout)
     return ret, splitnewlines(output)
 
-def run_one(test, skips):
+def run_one(test, skips, fails):
     '''tristate output:
     None -> skipped
     True -> passed
@@ -278,6 +290,11 @@ def run_one(test, skips):
             skips.append((test, msg))
         else:
             print "\nSkipping %s: %s" % (test, msg)
+        return None
+
+    def fail(msg):
+        fails.append((test, msg))
+        print "\nERROR: %s %s" % (test, msg)
         return None
 
     vlog("# Test", test)
@@ -342,7 +359,6 @@ def run_one(test, skips):
         signal.alarm(0)
 
     skipped = (ret == SKIPPED_STATUS)
-    diffret = 0
     # If reference output file exists, check test output against it
     if os.path.exists(ref):
         f = open(ref, "r")
@@ -350,19 +366,20 @@ def run_one(test, skips):
         f.close()
     else:
         ref_out = []
-    if not skipped and out != ref_out:
-        diffret = 1
-        print "\nERROR: %s output changed" % (test)
-        show_diff(ref_out, out)
     if skipped:
         missing = extract_missing_features(out)
         if not missing:
             missing = ['irrelevant']
         skip(missing[-1])
+    elif out != ref_out:
+        if ret:
+            fail("output changed and returned error code %d" % ret)
+        else:
+            fail("output changed")
+        show_diff(ref_out, out)
+        ret = 1
     elif ret:
-        print "\nERROR: %s failed with error code %d" % (test, ret)
-    elif diffret:
-        ret = diffret
+        fail("returned error code %d" % ret)
 
     if not verbose:
         sys.stdout.write(skipped and 's' or '.')
@@ -474,13 +491,17 @@ def run_children(tests):
     failures = 0
     tested, skipped, failed = 0, 0, 0
     skips = []
+    fails = []
     while fps:
         pid, status = os.wait()
         fp = fps.pop(pid)
         l = fp.read().splitlines()
         test, skip, fail = map(int, l[:3])
-        for s in l[3:]:
+        split = -fail or len(l)
+        for s in l[3:split]:
             skips.append(s.split(" ", 1))
+        for s in l[split:]:
+            fails.append(s.split(" ", 1))
         tested += test
         skipped += skip
         failed += fail
@@ -489,6 +510,8 @@ def run_children(tests):
     print
     for s in skips:
         print "Skipped %s: %s" % (s[0], s[1])
+    for s in fails:
+        print "Failed %s: %s" % (s[0], s[1])
     print "# Ran %d tests, %d skipped, %d failed." % (
         tested, skipped, failed)
     sys.exit(failures != 0)
@@ -526,11 +549,12 @@ def run_tests(tests):
                 tests = orig
 
         skips = []
+        fails = []
         for test in tests:
             if options.retest and not os.path.exists(test + ".err"):
                 skipped += 1
                 continue
-            ret = run_one(test, skips)
+            ret = run_one(test, skips, fails)
             if ret is None:
                 skipped += 1
             elif not ret:
@@ -540,6 +564,7 @@ def run_tests(tests):
                     if answer.lower() in "y yes".split():
                         rename(test + ".err", test + ".out")
                         tested += 1
+                        fails.pop()
                         continue
                 failed += 1
                 if options.first:
@@ -551,11 +576,15 @@ def run_tests(tests):
             fp.write('%d\n%d\n%d\n' % (tested, skipped, failed))
             for s in skips:
                 fp.write("%s %s\n" % s)
+            for s in fails:
+                fp.write("%s %s\n" % s)
             fp.close()
         else:
             print
             for s in skips:
                 print "Skipped %s: %s" % s
+            for s in fails:
+                print "Failed %s: %s" % s
             print "# Ran %d tests, %d skipped, %d failed." % (
                 tested, skipped, failed)
 

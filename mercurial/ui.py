@@ -60,6 +60,11 @@ class ui(object):
                 self.ucdata = dupconfig(self.parentui.ucdata)
             if self.parentui.overlay:
                 self.overlay = dupconfig(self.parentui.overlay)
+            if self.parentui is not parentui and parentui.overlay is not None:
+                if self.overlay is None:
+                    self.overlay = util.configparser()
+                updateconfig(parentui.overlay, self.overlay)
+            self.buffers = parentui.buffers
 
     def __getattr__(self, key):
         return getattr(self.parentui, key)
@@ -346,6 +351,8 @@ class ui(object):
                 pass
         if not user:
             raise util.Abort(_("Please specify a username."))
+        if "\n" in user:
+            raise util.Abort(_("username %s contains a newline\n") % `user`)
         return user
 
     def shortuser(self, user):
@@ -477,4 +484,3 @@ class ui(object):
                 self.config("ui", "editor") or
                 os.environ.get("VISUAL") or
                 os.environ.get("EDITOR", "vi"))
-

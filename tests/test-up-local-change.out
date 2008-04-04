@@ -1,4 +1,5 @@
 adding a
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 diff -r 33aaa84a386b a
@@ -95,13 +96,14 @@ diff -r 802f095af299 a
 +abc
 1 files updated, 0 files merged, 1 files removed, 0 files unresolved
 adding b
+created new head
 M a
 changeset:   1:802f095af299
 user:        test
 date:        Mon Jan 12 13:46:40 1970 +0000
 summary:     2
 
-abort: update spans branches, use 'hg merge' or 'hg update -C' to lose changes
+abort: crosses branches (use 'hg merge' or 'hg update -C' to discard changes)
 failed
 abort: outstanding uncommitted changes
 failed

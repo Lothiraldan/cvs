@@ -10,7 +10,7 @@ of the GNU General Public License, incorporated herein by reference.
 from node import nullid
 from i18n import _
 import struct, os, bisect, stat, strutil, util, errno, ignore
-import cStringIO, osutil
+import cStringIO, osutil, sys
 
 _unknown = ('?', 0, 0, 0)
 _format = ">cllll"
@@ -63,6 +63,9 @@ class dirstate(object):
         elif name == '_slash':
             self._slash = self._ui.configbool('ui', 'slash') and os.sep != '/'
             return self._slash
+        elif name == '_checkexec':
+            self._checkexec = util.checkexec(self._root)
+            return self._checkexec
         else:
             raise AttributeError, name
 
@@ -241,6 +244,21 @@ class dirstate(object):
 
     def normallookup(self, f):
         'mark a file normal, but possibly dirty'
+        if self._pl[1] != nullid and f in self._map:
+            # if there is a merge going on and the file was either
+            # in state 'm' or dirty before being removed, restore that state.
+            entry = self._map[f]
+            if entry[0] == 'r' and entry[2] in (-1, -2):
+                source = self._copymap.get(f)
+                if entry[2] == -1:
+                    self.merge(f)
+                elif entry[2] == -2:
+                    self.normaldirty(f)
+                if source:
+                    self.copy(source, f)
+                return
+            if entry[0] == 'm' or entry[0] == 'n' and entry[2] == -2:
+                return
         self._dirty = True
         self._changepath(f, 'n', True)
         self._map[f] = ('n', 0, -1, -1, 0)
@@ -267,8 +285,15 @@ class dirstate(object):
         'mark a file removed'
         self._dirty = True
         self._changepath(f, 'r')
-        self._map[f] = ('r', 0, 0, 0, 0)
-        if f in self._copymap:
+        size = 0
+        if self._pl[1] != nullid and f in self._map:
+            entry = self._map[f]
+            if entry[0] == 'm':
+                size = -1
+            elif entry[0] == 'n' and entry[2] == -2:
+                size = -2
+        self._map[f] = ('r', 0, size, 0, 0)
+        if size == 0 and f in self._copymap:
             del self._copymap[f]
 
     def merge(self, f):
@@ -310,6 +335,16 @@ class dirstate(object):
     def write(self):
         if not self._dirty:
             return
+        st = self._opener("dirstate", "w", atomictemp=True)
+
+        try:
+            gran = int(self._ui.config('dirstate', 'granularity', 1))
+        except ValueError:
+            gran = 1
+        limit = sys.maxint
+        if gran > 0:
+            limit = util.fstat(st).st_mtime - gran
+
         cs = cStringIO.StringIO()
         copymap = self._copymap
         pack = struct.pack
@@ -318,10 +353,11 @@ class dirstate(object):
         for f, e in self._map.iteritems():
             if f in copymap:
                 f = "%s\0%s" % (f, copymap[f])
+            if e[3] > limit and e[0] == 'n':
+                e = (e[0], 0, -1, -1, 0)
             e = pack(_format, e[0], e[1], e[2], e[3], len(f))
             write(e)
             write(f)
-        st = self._opener("dirstate", "w", atomictemp=True)
         st.write(cs.getvalue())
         st.rename()
         self._dirty = self._dirtypl = False
@@ -578,8 +614,9 @@ class dirstate(object):
             if type_ == 'n':
                 if not st:
                     st = lstat(_join(fn))
-                if (size >= 0 and (size != st.st_size
-                                   or (mode ^ st.st_mode) & 0100)
+                if (size >= 0 and
+                    (size != st.st_size
+                     or ((mode ^ st.st_mode) & 0100 and self._checkexec))
                     or size == -2
                     or fn in self._copymap):
                     madd(fn)
