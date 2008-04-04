@@ -1047,6 +1047,9 @@ def grep(ui, repo, pattern, *pats, **opts):
             self.colstart = colstart
             self.colend = colend
 
+        def __hash__(self):
+            return hash((self.linenum, self.line))
+
         def __eq__(self, other):
             return self.line == other.line
 
@@ -3037,7 +3040,7 @@ table = {
            _('ignore changes in the amount of white space')),
           ('B', 'ignore-blank-lines', None,
            _('ignore changes whose lines are all blank')),
-          ('U', 'unified', 3,
+          ('U', 'unified', '',
            _('number of lines of context to show'))
          ] + walkopts,
          _('hg diff [OPTION]... [-r REV1 [-r REV2]] [FILE]...')),
