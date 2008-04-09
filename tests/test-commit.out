@@ -1,28 +1,25 @@
 % commit date test
 transaction abort!
 rollback completed
+abort: empty commit message
 abort: impossible time zone offset: 4444444
-transaction abort!
-rollback completed
 abort: invalid date: '1\t15.1' 
-transaction abort!
-rollback completed
 abort: invalid date: 'foo bar' 
+abort: date exceeds 32 bits: 111111111111
+% commit added file that has been deleted
 nothing changed
-% partial commit test
-trouble committing bar!
-abort: No such file or directory: .../test/bar
+abort: file bar not found!
 adding dir/file
 dir/file
 adding dir.file
-abort: no match under directory .../test/dir!
-abort: no match under directory .../test/bleh!
-abort: no match under directory .../test/dir2!
+abort: no match under directory dir!
+abort: no match under directory .!
+abort: no match under directory ../dir2!
 dir/file
 does-not-exist: No such file or directory
-abort: file .../test/does-not-exist not found!
-abort: file .../test/baz not tracked!
-abort: file .../test/quux not tracked!
+abort: file does-not-exist not found!
+abort: file baz not tracked!
+abort: file quux not tracked!
 dir/file
 % partial subdir commit test
 adding bar/bar
@@ -95,3 +92,14 @@ user:        test
 date:        Mon Jan 12 13:46:40 1970 +0000
 summary:     commit-foo-subdir
 
+adding a
+1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+created new head
+merging a
+0 files updated, 1 files merged, 0 files removed, 0 files unresolved
+(branch merge, don't forget to commit)
+% should fail because we are specifying a file name
+abort: cannot partially commit a merge (do not specify files or patterns)
+% should fail because we are specifying a pattern
+abort: cannot partially commit a merge (do not specify files or patterns)
+% should succeed

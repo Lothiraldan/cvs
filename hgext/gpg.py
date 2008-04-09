@@ -198,11 +198,18 @@ def sign(ui, repo, *revs, **opts):
 
     If no revision is given, the parent of the working directory is used,
     or tip if no revision is checked out.
+
+    See 'hg help dates' for a list of formats valid for -d/--date.
     """
 
     mygpg = newgpg(ui, **opts)
     sigver = "0"
     sigmessage = ""
+
+    date = opts.get('date')
+    if date:
+        opts['date'] = util.parsedate(date)
+
     if revs:
         nodes = [repo.lookup(n) for n in revs]
     else:

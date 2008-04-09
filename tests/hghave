@@ -21,6 +21,9 @@ def matchoutput(cmd, regexp, ignorestatus=False):
     ret = fh.close()
     return (ignorestatus or ret is None) and r.search(s)
 
+def has_baz():
+    return matchoutput('baz --version 2>&1', r'baz Bazaar version')
+
 def has_cvs():
     return matchoutput('cvs --version 2>&1', r'Concurrent Versions System')
 
@@ -28,7 +31,11 @@ def has_cvsps():
     return matchoutput('cvsps -h -q 2>&1', r'cvsps version', True)
 
 def has_darcs():
-    return matchoutput('darcs', 'darcs version', True)
+    return matchoutput('darcs', r'darcs version', True)
+
+def has_mtn():
+    return matchoutput('mtn --version', r'monotone', True) and not matchoutput(
+        'mtn --version', r'monotone 0\.(\d|[12]\d|3[01])[^\d]', True)
 
 def has_eol_in_paths():
     try:
@@ -85,7 +92,34 @@ def has_svn_bindings():
 def has_symlink():
     return hasattr(os, "symlink")
 
+def has_tla():
+    return matchoutput('tla --version 2>&1', r'The GNU Arch Revision')
+
+def has_unix_permissions():
+    d = tempfile.mkdtemp(prefix=tempprefix, dir=".")
+    try:
+        fname = os.path.join(d, 'foo')
+        for umask in (077, 007, 022):
+            os.umask(umask)
+            f = open(fname, 'w')
+            f.close()
+            mode = os.stat(fname).st_mode
+            os.unlink(fname)
+            if mode & 0777 != ~umask & 0666:
+                return False
+        return True
+    finally:
+        os.rmdir(d)
+
+def has_pygments():
+    try:
+        import pygments
+        return True
+    except ImportError:
+        return False
+
 checks = {
+    "baz": (has_baz, "GNU Arch baz client"),
     "cvs": (has_cvs, "cvs client"),
     "cvsps": (has_cvsps, "cvsps utility"),
     "darcs": (has_darcs, "darcs client"),
@@ -95,9 +129,13 @@ checks = {
     "git": (has_git, "git command line client"),
     "hotshot": (has_hotshot, "python hotshot module"),
     "lsprof": (has_lsprof, "python lsprof module"),
+    "mtn": (has_mtn, "monotone client (> 0.31)"),
     "svn": (has_svn, "subversion client and admin tools"),
     "svn-bindings": (has_svn_bindings, "subversion python bindings"),
     "symlink": (has_symlink, "symbolic links"),
+    "tla": (has_tla, "GNU Arch tla client"),
+    "unix-permissions": (has_unix_permissions, "unix-style permissions"),
+    "pygments": (has_pygments, "Pygments source highlighting library"),
 }
 
 def list_features():
@@ -133,14 +171,14 @@ if __name__ == '__main__':
             feature = feature[3:]
 
         if feature not in checks:
-            error('hghave: unknown feature: ' + feature)
+            error('skipped: unknown feature: ' + feature)
             continue
 
         check, desc = checks[feature]
         if not negate and not check():
-            error('hghave: missing feature: ' + desc)
+            error('skipped: missing feature: ' + desc)
         elif negate and check():
-            error('hghave: system supports %s' % desc)
+            error('skipped: system supports %s' % desc)
 
     if failures != 0:
         sys.exit(1)

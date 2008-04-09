@@ -13,8 +13,7 @@
 
 import win32api
 
-from i18n import _
-import errno, os, pywintypes, win32con, win32file, win32process
+import errno, os, sys, pywintypes, win32con, win32file, win32process
 import cStringIO, winerror
 import osutil
 from win32com.shell import shell,shellcon
@@ -147,9 +146,18 @@ class WinOSError(WinError, OSError):
                          self.win_strerror)
 
 def os_link(src, dst):
-    # NB will only succeed on NTFS
     try:
         win32file.CreateHardLink(dst, src)
+        # CreateHardLink sometimes succeeds on mapped drives but
+        # following nlinks() returns 1. Check it now and bail out.
+        if nlinks(src) < 2:
+            try:
+                win32file.DeleteFile(dst)
+            except:
+                pass
+            # Fake hardlinking error
+            raise WinOSError((18, 'CreateHardLink', 'The system cannot '
+                              'move the file to a different disk drive'))
     except pywintypes.error, details:
         raise WinOSError(details)
 
@@ -177,6 +185,37 @@ def testpid(pid):
     except pywintypes.error, details:
         return details[0] != winerror.ERROR_INVALID_PARAMETER
     return True
+
+def lookup_reg(key, valname=None, scope=None):
+    ''' Look up a key/value name in the Windows registry.
+
+    valname: value name. If unspecified, the default value for the key
+    is used.
+    scope: optionally specify scope for registry lookup, this can be
+    a sequence of scopes to look up in order. Default (CURRENT_USER,
+    LOCAL_MACHINE).
+    '''
+    try:
+        from _winreg import HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, \
+            QueryValueEx, OpenKey
+    except ImportError:
+        return None
+
+    def query_val(scope, key, valname):
+        try:
+            keyhandle = OpenKey(scope, key)
+            return QueryValueEx(keyhandle, valname)[0]
+        except EnvironmentError:
+            return None
+
+    if scope is None:
+        scope = (HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE)
+    elif not isinstance(scope, (list, tuple)):
+        scope = (scope,)
+    for s in scope:
+        val = query_val(s, key, valname)
+        if val is not None:
+            return val
 
 def system_rcpath_win32():
     '''return default os-specific hgrc search path'''
@@ -215,7 +254,8 @@ def user_rcpath_win32():
         appdir = shell.SHGetPathFromIDList(
             shell.SHGetSpecialFolderLocation(0, shellcon.CSIDL_APPDATA))
         userdir = os.path.dirname(appdir)
-    return os.path.join(userdir, 'mercurial.ini')
+    return [os.path.join(userdir, 'mercurial.ini'),
+            os.path.join(userdir, '.hgrc')]
 
 class posixfile_nt(object):
     '''file object with posix-like semantics.  on windows, normal
@@ -227,6 +267,9 @@ class posixfile_nt(object):
     # but does not work at all. wrap win32 file api instead.
 
     def __init__(self, name, mode='rb'):
+        self.closed = False
+        self.name = name
+        self.mode = mode
         access = 0
         if 'r' in mode or '+' in mode:
             access |= win32file.GENERIC_READ
@@ -250,9 +293,6 @@ class posixfile_nt(object):
                                                0)
         except pywintypes.error, err:
             raise WinIOError(err, name)
-        self.closed = False
-        self.name = name
-        self.mode = mode
 
     def __iter__(self):
         for line in self.read().splitlines(True):
@@ -285,6 +325,10 @@ class posixfile_nt(object):
         except pywintypes.error, err:
             raise WinIOError(err)
 
+    def writelines(self, sequence):
+        for s in sequence:
+            self.write(s)
+
     def seek(self, pos, whence=0):
         try:
             win32file.SetFilePointer(self.handle, int(pos), whence)
@@ -304,10 +348,8 @@ class posixfile_nt(object):
             self.closed = True
 
     def flush(self):
-        try:
-            win32file.FlushFileBuffers(self.handle)
-        except pywintypes.error, err:
-            raise WinIOError(err)
+        # we have no application-level buffering
+        pass
 
     def truncate(self, pos=0):
         try:

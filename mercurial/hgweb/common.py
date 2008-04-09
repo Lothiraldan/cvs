@@ -8,6 +8,11 @@
 
 import errno, mimetypes, os
 
+HTTP_OK = 200
+HTTP_BAD_REQUEST = 400
+HTTP_NOT_FOUND = 404
+HTTP_SERVER_ERROR = 500
+
 class ErrorResponse(Exception):
     def __init__(self, code, message=None):
         Exception.__init__(self)
@@ -21,7 +26,7 @@ def _statusmessage(code):
     from BaseHTTPServer import BaseHTTPRequestHandler
     responses = BaseHTTPRequestHandler.responses
     return responses.get(code, ('Error', 'Unknown error'))[0]
-    
+
 def statusmessage(code):
     return '%d %s' % (code, _statusmessage(code))
 
@@ -36,11 +41,11 @@ def get_mtime(repo_path):
         return os.stat(store_path).st_mtime
 
 def staticfile(directory, fname, req):
-    """return a file inside directory with guessed content-type header
+    """return a file inside directory with guessed Content-Type header
 
     fname always uses '/' as directory separator and isn't allowed to
     contain unusual path components.
-    Content-type is guessed using the mimetypes module.
+    Content-Type is guessed using the mimetypes module.
     Return an empty string if fname is illegal or file not found.
 
     """
@@ -54,16 +59,15 @@ def staticfile(directory, fname, req):
     try:
         os.stat(path)
         ct = mimetypes.guess_type(path)[0] or "text/plain"
-        req.header([('Content-type', ct),
-                    ('Content-length', str(os.path.getsize(path)))])
+        req.respond(HTTP_OK, ct, length = os.path.getsize(path))
         return file(path, 'rb').read()
     except TypeError:
-        raise ErrorResponse(500, 'illegal file name')
+        raise ErrorResponse(HTTP_SERVER_ERROR, 'illegal file name')
     except OSError, err:
         if err.errno == errno.ENOENT:
-            raise ErrorResponse(404)
+            raise ErrorResponse(HTTP_NOT_FOUND)
         else:
-            raise ErrorResponse(500, err.strerror)
+            raise ErrorResponse(HTTP_SERVER_ERROR, err.strerror)
 
 def style_map(templatepath, style):
     """Return path to mapfile for a given style.
@@ -97,3 +101,18 @@ def paritygen(stripecount, offset=0):
             parity = 1 - parity
             count = 0
 
+def countgen(start=0, step=1):
+    """count forever -- useful for line numbers"""
+    while True:
+        yield start
+        start += step
+
+def get_contact(config):
+    """Return repo contact information or empty string.
+
+    web.contact is the primary source, but if that is not set, try
+    ui.username or $EMAIL as a fallback to display something useful.
+    """
+    return (config("web", "contact") or
+            config("ui", "username") or
+            os.environ.get("EMAIL") or "")

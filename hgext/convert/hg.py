@@ -15,8 +15,9 @@
 
 import os, time
 from mercurial.i18n import _
-from mercurial.node import *
-from mercurial import hg, lock, revlog, util
+from mercurial.repo import RepoError
+from mercurial.node import bin, hex, nullid
+from mercurial import hg, revlog, util
 
 from common import NoRepo, commit, converter_source, converter_sink
 
@@ -30,15 +31,19 @@ class mercurial_sink(converter_sink):
         if os.path.isdir(path) and len(os.listdir(path)) > 0:
             try:
                 self.repo = hg.repository(self.ui, path)
-            except hg.RepoError, err:
+                if not self.repo.local():
+                    raise NoRepo(_('%s is not a local Mercurial repo') % path)
+            except RepoError, err:
                 ui.print_exc()
                 raise NoRepo(err.args[0])
         else:
             try:
                 ui.status(_('initializing destination %s repository\n') % path)
                 self.repo = hg.repository(self.ui, path, create=True)
+                if not self.repo.local():
+                    raise NoRepo(_('%s is not a local Mercurial repo') % path)
                 self.created.append(path)
-            except hg.RepoError, err:
+            except RepoError, err:
                 ui.print_exc()
                 raise NoRepo("could not create hg repo %s as sink" % path)
         self.lock = None
@@ -46,11 +51,13 @@ class mercurial_sink(converter_sink):
         self.filemapmode = False
 
     def before(self):
+        self.ui.debug(_('run hg sink pre-conversion action\n'))
         self.wlock = self.repo.wlock()
         self.lock = self.repo.lock()
         self.repo.dirstate.clear()
 
     def after(self):
+        self.ui.debug(_('run hg sink post-conversion action\n'))
         self.repo.dirstate.invalidate()
         self.lock = None
         self.wlock = None
@@ -80,30 +87,43 @@ class mercurial_sink(converter_sink):
         except OSError:
             pass
 
-    def setbranch(self, branch, pbranch, parents):
-        if (not self.clonebranches) or (branch == self.lastbranch):
+    def setbranch(self, branch, pbranches):
+        if not self.clonebranches:
             return
 
+        setbranch = (branch != self.lastbranch)
         self.lastbranch = branch
-        self.after()
         if not branch:
             branch = 'default'
-        if not pbranch:
-            pbranch = 'default'
+        pbranches = [(b[0], b[1] and b[1] or 'default') for b in pbranches]
+        pbranch = pbranches and pbranches[0][1] or 'default'
 
         branchpath = os.path.join(self.path, branch)
-        try:
-            self.repo = hg.repository(self.ui, branchpath)
-        except:
-            if not parents:
-                self.repo = hg.repository(self.ui, branchpath, create=True)
-            else:
-                self.ui.note(_('cloning branch %s to %s\n') % (pbranch, branch))
-                hg.clone(self.ui, os.path.join(self.path, pbranch),
-                         branchpath, rev=parents, update=False,
-                         stream=True)
+        if setbranch:
+            self.after()
+            try:
                 self.repo = hg.repository(self.ui, branchpath)
-        self.before()
+            except:
+                self.repo = hg.repository(self.ui, branchpath, create=True)
+            self.before()
+
+        # pbranches may bring revisions from other branches (merge parents)
+        # Make sure we have them, or pull them.
+        missings = {}
+        for b in pbranches:
+            try:
+                self.repo.lookup(b[0])
+            except:
+                missings.setdefault(b[1], []).append(b[0])
+
+        if missings:
+            self.after()
+            for pbranch, heads in missings.iteritems():
+                pbranchpath = os.path.join(self.path, pbranch)
+                prepo = hg.repository(self.ui, pbranchpath)
+                self.ui.note(_('pulling from %s into %s\n') % (pbranch, branch))
+                self.repo.pull(prepo, [prepo.lookup(h) for h in heads])
+            self.before()
 
     def putcommit(self, files, parents, commit):
         seen = {}
@@ -136,7 +156,7 @@ class mercurial_sink(converter_sink):
                                     bin(p1), bin(p2), extra=extra)
             self.repo.dirstate.clear()
             text = "(octopus merge fixup)\n"
-            p2 = hg.hex(self.repo.changelog.tip())
+            p2 = hex(self.repo.changelog.tip())
 
         if self.filemapmode and nparents == 1:
             man = self.repo.manifest
@@ -175,10 +195,10 @@ class mercurial_sink(converter_sink):
                 extra['branch'] = self.tagsbranch
             try:
                 tagparent = self.repo.changectx(self.tagsbranch).node()
-            except hg.RepoError, inst:
+            except RepoError, inst:
                 tagparent = nullid
             self.repo.rawcommit([".hgtags"], "update tags", "convert-repo",
-                                date, tagparent, nullid)
+                                date, tagparent, nullid, extra=extra)
             return hex(self.repo.changelog.tip())
 
     def setfilemapmode(self, active):
@@ -193,8 +213,8 @@ class mercurial_source(converter_source):
             # try to provoke an exception if this isn't really a hg
             # repo, but some other bogus compatible-looking url
             if not self.repo.local():
-                raise hg.RepoError()
-        except hg.RepoError:
+                raise RepoError()
+        except RepoError:
             ui.print_exc()
             raise NoRepo("%s is not a local Mercurial repo" % path)
         self.lastrev = None
@@ -274,3 +294,9 @@ class mercurial_source(converter_source):
                                   'a')
         self.convertfp.write('%s %s\n' % (destrev, rev))
         self.convertfp.flush()
+
+    def before(self):
+        self.ui.debug(_('run hg source pre-conversion action\n'))
+
+    def after(self):
+        self.ui.debug(_('run hg source post-conversion action\n'))

@@ -5,9 +5,9 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from node import *
+from node import nullid, nullrev, short
 from i18n import _
-import ancestor, bdiff, repo, revlog, util, os, errno
+import ancestor, bdiff, revlog, util, os, errno
 
 class changectx(object):
     """A changecontext object makes access to data related to a particular
@@ -33,6 +33,12 @@ class changectx(object):
 
     def __repr__(self):
         return "<changectx %s>" % str(self)
+
+    def __hash__(self):
+        try:
+            return hash(self._rev)
+        except AttributeError:
+            return id(self)
 
     def __eq__(self, other):
         try:
@@ -100,13 +106,15 @@ class changectx(object):
             try:
                 return self._manifest[path], self._manifest.flags(path)
             except KeyError:
-                raise revlog.LookupError(path, _("'%s' not found in manifest") % path)
+                raise revlog.LookupError(self._node, path,
+                                         _('not found in manifest'))
         if '_manifestdelta' in self.__dict__ or path in self.files():
             if path in self._manifestdelta:
                 return self._manifestdelta[path], self._manifestdelta.flags(path)
         node, flag = self._repo.manifest.find(self._changeset[0], path)
         if not node:
-            raise revlog.LookupError(path, _("'%s' not found in manifest") % path)
+            raise revlog.LookupError(self._node, path,
+                                     _('not found in manifest'))
 
         return node, flag
 
@@ -159,12 +167,11 @@ class filectx(object):
         if filelog:
             self._filelog = filelog
 
-        if fileid is None:
-            if changectx is None:
-                self._changeid = changeid
-            else:
-                self._changectx = changectx
-        else:
+        if changeid is not None:
+            self._changeid = changeid
+        if changectx is not None:
+            self._changectx = changectx
+        if fileid is not None:
             self._fileid = fileid
 
     def __getattr__(self, name):
@@ -175,7 +182,10 @@ class filectx(object):
             self._filelog = self._repo.file(self._path)
             return self._filelog
         elif name == '_changeid':
-            self._changeid = self._filelog.linkrev(self._filenode)
+            if '_changectx' in self.__dict__:
+                self._changeid = self._changectx.rev()
+            else:
+                self._changeid = self._filelog.linkrev(self._filenode)
             return self._changeid
         elif name == '_filenode':
             if '_fileid' in self.__dict__:
@@ -186,6 +196,9 @@ class filectx(object):
         elif name == '_filerev':
             self._filerev = self._filelog.rev(self._filenode)
             return self._filerev
+        elif name == '_repopath':
+            self._repopath = self._path
+            return self._repopath
         else:
             raise AttributeError, name
 
@@ -202,6 +215,12 @@ class filectx(object):
 
     def __repr__(self):
         return "<filectx %s>" % str(self)
+
+    def __hash__(self):
+        try:
+            return hash((self._path, self._fileid))
+        except AttributeError:
+            return id(self)
 
     def __eq__(self, other):
         try:
@@ -229,8 +248,11 @@ class filectx(object):
     def rev(self):
         if '_changectx' in self.__dict__:
             return self._changectx.rev()
+        if '_changeid' in self.__dict__:
+            return self._changectx.rev()
         return self._filelog.linkrev(self._filenode)
 
+    def linkrev(self): return self._filelog.linkrev(self._filenode)
     def node(self): return self._changectx.node()
     def user(self): return self._changectx.user()
     def date(self): return self._changectx.date()
@@ -241,18 +263,42 @@ class filectx(object):
     def changectx(self): return self._changectx
 
     def data(self): return self._filelog.read(self._filenode)
-    def renamed(self): return self._filelog.renamed(self._filenode)
     def path(self): return self._path
     def size(self): return self._filelog.size(self._filerev)
 
     def cmp(self, text): return self._filelog.cmp(self._filenode, text)
+
+    def renamed(self):
+        """check if file was actually renamed in this changeset revision
+
+        If rename logged in file revision, we report copy for changeset only
+        if file revisions linkrev points back to the changeset in question
+        or both changeset parents contain different file revisions.
+        """
+
+        renamed = self._filelog.renamed(self._filenode)
+        if not renamed:
+            return renamed
+
+        if self.rev() == self.linkrev():
+            return renamed
+
+        name = self.path()
+        fnode = self._filenode
+        for p in self._changectx.parents():
+            try:
+                if fnode == p.filenode(name):
+                    return None
+            except revlog.LookupError:
+                pass
+        return renamed
 
     def parents(self):
         p = self._path
         fl = self._filelog
         pl = [(p, n, fl) for n in self._filelog.parents(self._filenode)]
 
-        r = self.renamed()
+        r = self._filelog.renamed(self._filenode)
         if r:
             pl[0] = (r[0], r[1], None)
 
@@ -318,7 +364,7 @@ class filectx(object):
             return [getctx(p, n) for p, n in pl if n != nullrev]
 
         # use linkrev to find the first changeset where self appeared
-        if self.rev() != self._filelog.linkrev(self._filenode):
+        if self.rev() != self.linkrev():
             base = self.filectx(self.filerev())
         else:
             base = self
@@ -373,7 +419,7 @@ class filectx(object):
                 pl = [(n.path(), n.filenode()) for n in c.parents()]
                 acache[(c._path, None)] = pl
 
-        flcache = {self._path:self._filelog, fc2._path:fc2._filelog}
+        flcache = {self._repopath:self._filelog, fc2._repopath:fc2._filelog}
         def parents(vertex):
             if vertex in acache:
                 return acache[vertex]
@@ -483,7 +529,7 @@ class workingctx(changectx):
                 return self._manifest.flags(path)
             except KeyError:
                 return ''
-        
+
         pnode = self._parents[0].changeset()[0]
         orig = self._repo.dirstate.copies().get(path, path)
         node, flag = self._repo.manifest.find(pnode, orig)

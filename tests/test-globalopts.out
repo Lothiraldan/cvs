@@ -1,5 +1,6 @@
 adding a
 adding b
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 pulling from ../b
 searching for changes
@@ -24,6 +25,12 @@ user:        test
 date:        Thu Jan 01 00:00:01 1970 +0000
 summary:     b
 
+%% implicit -R
+0: a
+0: a
+abort: There is no Mercurial repository here (.hg not found)!
+abort: a/a not under root
+abort: There is no Mercurial repository here (.hg not found)!
 %% abbrev of long option
 changeset:   1:b6c483daf290
 tag:         tip
@@ -147,6 +154,7 @@ list of commands:
  annotate     show changeset information per file line
  archive      create unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
+ bisect       subdivision search of changesets
  branch       set or show the current branch name
  branches     list repository named branches
  bundle       create a changegroup file
@@ -181,7 +189,7 @@ list of commands:
  serve        export the repository via HTTP
  showconfig   show combined config settings from all hgrc files
  status       show changed files in the working directory
- tag          add a tag for the current or given revision
+ tag          add one or more tags for the current or given revision
  tags         list repository tags
  tip          show the tip revision
  unbundle     apply one or more changegroup files
@@ -199,6 +207,7 @@ list of commands:
  annotate     show changeset information per file line
  archive      create unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
+ bisect       subdivision search of changesets
  branch       set or show the current branch name
  branches     list repository named branches
  bundle       create a changegroup file
@@ -233,7 +242,7 @@ list of commands:
  serve        export the repository via HTTP
  showconfig   show combined config settings from all hgrc files
  status       show changed files in the working directory
- tag          add a tag for the current or given revision
+ tag          add one or more tags for the current or given revision
  tags         list repository tags
  tip          show the tip revision
  unbundle     apply one or more changegroup files

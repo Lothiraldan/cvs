@@ -66,7 +66,7 @@
 # push changes to, they can manage their own subscriptions.
 
 from mercurial.i18n import _
-from mercurial.node import *
+from mercurial.node import bin, short
 from mercurial import patch, cmdutil, templater, util, mail
 import email.Parser, fnmatch, socket, time
 
@@ -135,7 +135,7 @@ class notifier(object):
     def fixmail(self, addr):
         '''try to clean up email addresses.'''
 
-        addr = templater.email(addr.strip())
+        addr = util.email(addr.strip())
         if self.domain:
             a = addr.find('@localhost')
             if a != -1:
@@ -210,9 +210,7 @@ class notifier(object):
             del msg['From']
             msg['From'] = sender
 
-        msg['Date'] = util.datestr(date=util.makedate(),
-                                   format="%a, %d %b %Y %H:%M:%S",
-                                   timezone=True)
+        msg['Date'] = util.datestr(format="%a, %d %b %Y %H:%M:%S %1%2")
         fix_subject()
         fix_sender()
 
@@ -231,13 +229,11 @@ class notifier(object):
         else:
             self.ui.status(_('notify: sending %d subscribers %d changes\n') %
                            (len(self.subs), count))
-            mail.sendmail(self.ui, templater.email(msg['From']),
+            mail.sendmail(self.ui, util.email(msg['From']),
                           self.subs, msgtext)
 
     def diff(self, node, ref):
         maxdiff = int(self.ui.config('notify', 'maxdiff', 300))
-        if maxdiff == 0:
-            return
         prev = self.repo.changelog.parents(node)[0]
         self.ui.pushbuffer()
         patch.diff(self.repo, prev, ref)
@@ -247,6 +243,8 @@ class notifier(object):
             # s may be nil, don't include the header if it is
             if s:
                 self.ui.write('\ndiffstat:\n\n%s' % s)
+        if maxdiff == 0:
+            return
         if maxdiff > 0 and len(difflines) > maxdiff:
             self.ui.write(_('\ndiffs (truncated from %d to %d lines):\n\n') %
                           (len(difflines), maxdiff))

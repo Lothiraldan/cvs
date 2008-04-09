@@ -35,7 +35,7 @@ foo
 <h2>Mercurial Error</h2>
 
 <p>
-An error occured while processing your request:
+An error occurred while processing your request:
 </p>
 <p>
 Not Found
@@ -43,8 +43,8 @@ Not Found
 
 
 <div class="logo">
-powered by<br/>
-<a href="http://www.selenic.com/mercurial/">mercurial</a>
+<a href="http://www.selenic.com/mercurial/">
+<img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial"></a>
 </div>
 
 </body>
@@ -59,12 +59,49 @@ error: revision not found: spam
 400
 
 
-error: No such method: spam
+error: no such method: spam
 % should give a 404 - file does not exist
 404 Not Found
 
 
-error: Path not found: bork/
+error: bork@2ef0ac749a14: not found in manifest
+404 Not Found
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="icon" href="/static/hgicon.png" type="image/png">
+<meta name="robots" content="index, nofollow" />
+<link rel="stylesheet" href="/static/style.css" type="text/css" />
+
+<title>Mercurial Error</title>
+</head>
+<body>
+
+<h2>Mercurial Error</h2>
+
+<p>
+An error occurred while processing your request:
+</p>
+<p>
+bork@2ef0ac749a14: not found in manifest
+</p>
+
+
+<div class="logo">
+<a href="http://www.selenic.com/mercurial/">
+<img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial"></a>
+</div>
+
+</body>
+</html>
+
+404 Not Found
+
+
+error: bork@2ef0ac749a14: not found in manifest
+% stop and restart
+9 log lines written
 % static file
 200 Script output follows
 
@@ -104,19 +141,30 @@ tr.dark, .parity1 { background-color:#f6f6f0; }
 tr.dark:hover, .parity1:hover { background-color:#edece6; }
 td { padding:2px 5px; font-size:12px; vertical-align:top; }
 td.link { padding:2px 5px; font-family:sans-serif; font-size:10px; }
+td.indexlinks { white-space: nowrap; }
+td.indexlinks a {
+  padding: 2px 5px; line-height: 10px;
+  border: 1px solid;
+  color: #ffffff; background-color: #7777bb;
+  border-color: #aaaadd #333366 #333366 #aaaadd;
+  font-weight: bold;  text-align: center; text-decoration: none;
+  font-size: 10px;
+}
+td.indexlinks a:hover { background-color: #6666aa; }
 div.pre { font-family:monospace; font-size:12px; white-space:pre; }
 div.diff_info { font-family:monospace; color:#000099; background-color:#edece6; font-style:italic; }
 div.index_include { border:solid #d9d8d1; border-width:0px 0px 1px; padding:12px 8px; }
 div.search { margin:4px 8px; position:absolute; top:56px; right:12px }
 .linenr { color:#999999; text-decoration:none }
-a.rss_logo {
-	float:right; padding:3px 0px; width:35px; line-height:10px;
+div.rss_logo { float: right; white-space: nowrap; }
+div.rss_logo a {
+	padding:3px 6px; line-height:10px;
 	border:1px solid; border-color:#fcc7a5 #7d3302 #3e1a01 #ff954e;
 	color:#ffffff; background-color:#ff6600;
 	font-weight:bold; font-family:sans-serif; font-size:10px;
 	text-align:center; text-decoration:none;
 }
-a.rss_logo:hover { background-color:#ee5500; }
+div.rss_logo a:hover { background-color:#ee5500; }
 pre { margin: 0; }
 span.logtags span {
 	padding: 0px 4px;
@@ -134,3 +182,8 @@ span.logtags span.branchtag {
 	background-color: #aaffaa;
 	border-color: #ccffcc #00cc33 #00cc33 #ccffcc;
 }
+span.logtags span.inbranchtag {
+	background-color: #d5dde6;
+	border-color: #e3ecf4 #9398f4 #9398f4 #e3ecf4;
+}
+% errors

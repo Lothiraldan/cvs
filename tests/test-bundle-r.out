@@ -1,4 +1,5 @@
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+created new head
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
    rev    offset  length   base linkrev nodeid       p1           p2
      0         0       3      0       0 362fef284ce2 000000000000 000000000000
@@ -25,6 +26,7 @@ crosschecking files in changesets and manifests
 checking files
 4 files, 9 changesets, 7 total revisions
 searching for changes
+1 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -37,6 +39,7 @@ checking files
 1 files, 1 changesets, 1 total revisions
 0:5649c9d34dd8
 searching for changes
+2 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -49,6 +52,7 @@ checking files
 1 files, 2 changesets, 2 total revisions
 1:10b2180f755b
 searching for changes
+3 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -61,6 +65,7 @@ checking files
 1 files, 3 changesets, 3 total revisions
 2:d62976ca1e50
 searching for changes
+4 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -73,6 +78,7 @@ checking files
 1 files, 4 changesets, 4 total revisions
 3:ac69c658229d
 searching for changes
+2 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -85,6 +91,7 @@ checking files
 1 files, 2 changesets, 2 total revisions
 1:5f4f3ceb285e
 searching for changes
+3 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -97,6 +104,7 @@ checking files
 1 files, 3 changesets, 3 total revisions
 2:024e4e7df376
 searching for changes
+4 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -109,6 +117,7 @@ checking files
 2 files, 4 changesets, 5 total revisions
 3:1e3f6b843bd6
 searching for changes
+5 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -121,6 +130,7 @@ checking files
 3 files, 5 changesets, 6 total revisions
 4:80fe151401c2
 searching for changes
+5 changesets found
 adding changesets
 adding manifests
 adding file changes
@@ -148,13 +158,19 @@ rolling back last transaction
 % should fail
 abort: --base is incompatible with specifiying a destination
 abort: repository default-push not found!
+2 changesets found
+4 changesets found
+6 changesets found
+1 changesets found
+1 changesets found
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 % 2
 2:d62976ca1e50
 adding changesets
 transaction abort!
 rollback completed
-abort: unknown parent ac69c658229d!
+abort: 00changelog.i@ac69c658229d: unknown parent!
 % 2
 2:d62976ca1e50
 adding changesets
@@ -202,6 +218,8 @@ warning: detected divergent renames of afile to:
  adifferentfile
 2 files updated, 0 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
+7 changesets found
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 adding changesets
 adding manifests

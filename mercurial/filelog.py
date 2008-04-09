@@ -5,8 +5,8 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from revlog import *
-import os
+from node import bin, nullid
+from revlog import revlog
 
 class filelog(revlog):
     def __init__(self, opener, path):
@@ -58,7 +58,7 @@ class filelog(revlog):
         if self.parents(node)[0] != nullid:
             return False
         m = self._readmeta(node)
-        if m and m.has_key("copy"):
+        if m and "copy" in m:
             return (m["copy"], bin(m["copyrev"]))
         return False
 

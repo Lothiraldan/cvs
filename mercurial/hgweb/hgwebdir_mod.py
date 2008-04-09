@@ -6,10 +6,12 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os, mimetools, cStringIO
+import os
 from mercurial.i18n import gettext as _
-from mercurial import ui, hg, util, templater
-from common import ErrorResponse, get_mtime, staticfile, style_map, paritygen
+from mercurial.repo import RepoError
+from mercurial import ui, hg, util, templater, templatefilters
+from common import ErrorResponse, get_mtime, staticfile, style_map, paritygen,\
+                   get_contact, HTTP_OK, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
 from hgweb_mod import hgweb
 from request import wsgirequest
 
@@ -26,6 +28,7 @@ class hgwebdir(object):
         self.style = None
         self.stripecount = None
         self.repos_sorted = ('name', False)
+        self._baseurl = None
         if isinstance(config, (list, tuple)):
             self.repos = cleannames(config)
             self.repos_sorted = ('', False)
@@ -46,11 +49,13 @@ class hgwebdir(object):
                     self.style = cp.get('web', 'style')
                 if cp.has_option('web', 'stripes'):
                     self.stripecount = int(cp.get('web', 'stripes'))
+                if cp.has_option('web', 'baseurl'):
+                    self._baseurl = cp.get('web', 'baseurl')
             if cp.has_section('paths'):
                 self.repos.extend(cleannames(cp.items('paths')))
             if cp.has_section('collections'):
                 for prefix, root in cp.items('collections'):
-                    for path in util.walkrepos(root):
+                    for path in util.walkrepos(root, followsym=True):
                         repo = os.path.normpath(path)
                         name = repo
                         if name.startswith(prefix):
@@ -75,7 +80,10 @@ class hgwebdir(object):
             try:
 
                 virtual = req.env.get("PATH_INFO", "").strip('/')
-                
+                tmpl = self.templater(req)
+                ctype = tmpl('mimetype', encoding=util._encoding)
+                ctype = templater.stringify(ctype)
+
                 # a static file
                 if virtual.startswith('static/') or 'static' in req.form:
                     static = os.path.join(templater.templatepath(), 'static')
@@ -88,11 +96,12 @@ class hgwebdir(object):
 
                 # top-level index
                 elif not virtual:
-                    tmpl = self.templater(req)
-                    self.makeindex(req, tmpl)
+                    req.respond(HTTP_OK, ctype)
+                    req.write(self.makeindex(req, tmpl))
                     return
 
                 # nested indexes and hgwebs
+
                 repos = dict(self.repos)
                 while virtual:
                     real = repos.get(virtual)
@@ -103,15 +112,16 @@ class hgwebdir(object):
                             hgweb(repo).run_wsgi(req)
                             return
                         except IOError, inst:
-                            raise ErrorResponse(500, inst.strerror)
-                        except hg.RepoError, inst:
-                            raise ErrorResponse(500, str(inst))
+                            msg = inst.strerror
+                            raise ErrorResponse(HTTP_SERVER_ERROR, msg)
+                        except RepoError, inst:
+                            raise ErrorResponse(HTTP_SERVER_ERROR, str(inst))
 
                     # browse subdirectories
                     subdir = virtual + '/'
                     if [r for r in repos if r.startswith(subdir)]:
-                        tmpl = self.templater(req)
-                        self.makeindex(req, tmpl, subdir)
+                        req.respond(HTTP_OK, ctype)
+                        req.write(self.makeindex(req, tmpl, subdir))
                         return
 
                     up = virtual.rfind('/')
@@ -120,12 +130,12 @@ class hgwebdir(object):
                     virtual = virtual[:up]
 
                 # prefixes not found
-                tmpl = self.templater(req)
-                req.respond(404, tmpl("notfound", repo=virtual))
-                
+                req.respond(HTTP_NOT_FOUND, ctype)
+                req.write(tmpl("notfound", repo=virtual))
+
             except ErrorResponse, err:
-                tmpl = self.templater(req)
-                req.respond(err.code, tmpl('error', error=err.message or ''))
+                req.respond(err.code, ctype)
+                req.write(tmpl('error', error=err.message or ''))
         finally:
             tmpl = None
 
@@ -142,7 +152,7 @@ class hgwebdir(object):
         def entries(sortcolumn="", descending=False, subdir="", **map):
             def sessionvars(**map):
                 fields = []
-                if req.form.has_key('style'):
+                if 'style' in req.form:
                     style = req.form['style'][0]
                     if style != get('web', 'style', ''):
                         fields.append(('style', style))
@@ -171,9 +181,11 @@ class hgwebdir(object):
                 if u.configbool("web", "hidden", untrusted=True):
                     continue
 
-                parts = [req.env['PATH_INFO'], name]
+                parts = [name]
+                if 'PATH_INFO' in req.env:
+                    parts.insert(0, req.env['PATH_INFO'].rstrip('/'))
                 if req.env['SCRIPT_NAME']:
-                	parts.insert(0, req.env['SCRIPT_NAME'])
+                    parts.insert(0, req.env['SCRIPT_NAME'])
                 url = ('/'.join(parts).replace("//", "/")) + '/'
 
                 # update time with local timezone
@@ -182,9 +194,7 @@ class hgwebdir(object):
                 except OSError:
                     continue
 
-                contact = (get("ui", "username") or # preferred
-                           get("web", "contact") or # deprecated
-                           get("web", "author", "")) # also
+                contact = get_contact(get)
                 description = get("web", "description", "")
                 name = get("web", "name", name)
                 row = dict(contact=contact or "unknown",
@@ -215,7 +225,7 @@ class hgwebdir(object):
 
         sortable = ["name", "description", "contact", "lastchange"]
         sortcolumn, descending = self.repos_sorted
-        if req.form.has_key('sort'):
+        if 'sort' in req.form:
             sortcolumn = req.form['sort'][0]
             descending = sortcolumn.startswith('-')
             if descending:
@@ -227,18 +237,18 @@ class hgwebdir(object):
                  "%s%s" % ((not descending and column == sortcolumn)
                             and "-" or "", column))
                 for column in sortable]
-        req.write(tmpl("index", entries=entries, subdir=subdir,
-                       sortcolumn=sortcolumn, descending=descending,
-                       **dict(sort)))
+
+        if self._baseurl is not None:
+            req.env['SCRIPT_NAME'] = self._baseurl
+
+        return tmpl("index", entries=entries, subdir=subdir,
+                    sortcolumn=sortcolumn, descending=descending,
+                    **dict(sort))
 
     def templater(self, req):
 
         def header(**map):
-            header_file = cStringIO.StringIO(
-                ''.join(tmpl("header", encoding=util._encoding, **map)))
-            msg = mimetools.Message(header_file, 0)
-            req.header(msg.items())
-            yield header_file.read()
+            yield tmpl('header', encoding=util._encoding, **map)
 
         def footer(**map):
             yield tmpl("footer", **map)
@@ -252,6 +262,9 @@ class hgwebdir(object):
         def config(section, name, default=None, untrusted=True):
             return self.parentui.config(section, name, default, untrusted)
 
+        if self._baseurl is not None:
+            req.env['SCRIPT_NAME'] = self._baseurl
+
         url = req.env.get('SCRIPT_NAME', '')
         if not url.endswith('/'):
             url += '/'
@@ -263,12 +276,12 @@ class hgwebdir(object):
         style = self.style
         if style is None:
             style = config('web', 'style', '')
-        if req.form.has_key('style'):
+        if 'style' in req.form:
             style = req.form['style'][0]
         if self.stripecount is None:
             self.stripecount = int(config('web', 'stripes', 1))
         mapfile = style_map(templater.templatepath(), style)
-        tmpl = templater.templater(mapfile, templater.common_filters,
+        tmpl = templater.templater(mapfile, templatefilters.filters,
                                    defaults={"header": header,
                                              "footer": footer,
                                              "motd": motd,

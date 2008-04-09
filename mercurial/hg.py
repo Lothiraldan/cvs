@@ -6,8 +6,6 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from node import *
-from repo import *
 from i18n import _
 import localrepo, bundlerepo, httprepo, sshrepo, statichttprepo
 import errno, lock, os, shutil, util, extensions
@@ -105,20 +103,22 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     destination is local repository
     """
 
-    origsource = source
-    source, rev, checkout = parseurl(ui.expandpath(source), rev)
-
     if isinstance(source, str):
+        origsource = ui.expandpath(source)
+        source, rev, checkout = parseurl(origsource, rev)
         src_repo = repository(ui, source)
     else:
         src_repo = source
-        source = src_repo.url()
+        origsource = source = src_repo.url()
+        checkout = None
 
     if dest is None:
         dest = defaultdest(source)
         ui.status(_("destination directory: %s\n") % dest)
 
     def localpath(path):
+        if path.startswith('file://localhost/'):
+            return path[16:]
         if path.startswith('file://'):
             return path[7:]
         if path.startswith('file:'):
@@ -148,7 +148,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
 
         abspath = origsource
         copy = False
-        if src_repo.local() and islocal(dest):
+        if src_repo.cancopy() and islocal(dest):
             abspath = os.path.abspath(util.drop_scheme('file', origsource))
             copy = not pull and not rev
 
@@ -164,11 +164,10 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
 
         if copy:
             def force_copy(src, dst):
-                try:
-                    util.copyfiles(src, dst)
-                except OSError, inst:
-                    if inst.errno != errno.ENOENT:
-                        raise
+                if not os.path.exists(src):
+                    # Tolerate empty source repository and optional files
+                    return
+                util.copyfiles(src, dst)
 
             src_store = os.path.realpath(src_repo.spath)
             if not os.path.exists(dest):
@@ -244,6 +243,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
             fp.close()
 
             if update:
+                dest_repo.ui.status(_("updating working directory\n"))
                 if not checkout:
                     try:
                         checkout = dest_repo.lookup("default")

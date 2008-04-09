@@ -6,8 +6,9 @@ imerge - interactive merge
 '''
 
 from mercurial.i18n import _
-from mercurial.node import *
-from mercurial import commands, cmdutil, dispatch, fancyopts, hg, merge, util
+from mercurial.node import hex, short
+from mercurial import commands, cmdutil, dispatch, fancyopts
+from mercurial import hg, filemerge, util, revlog
 import os, tarfile
 
 class InvalidStateFileException(Exception): pass
@@ -77,8 +78,9 @@ class Imerge(object):
 
         try:
             parents = [self.repo.changectx(n) for n in status[:2]]
-        except LookupError:
-            raise util.Abort('merge parent %s not in repository' % short(p))
+        except revlog.LookupError, e:
+            raise util.Abort(_('merge parent %s not in repository') %
+                             short(e.name))
 
         status = status[2:]
         conflicts = int(status.pop(0)) * 3
@@ -118,7 +120,7 @@ class Imerge(object):
         # this could be greatly improved
         realmerge = os.environ.get('HGMERGE')
         if not interactive:
-            os.environ['HGMERGE'] = 'merge'
+            os.environ['HGMERGE'] = 'internal:merge'
 
         # The filemerge ancestor algorithm does not work if self.wctx
         # already has two parents (in normal merge it doesn't yet). But
@@ -126,7 +128,7 @@ class Imerge(object):
         self.wctx._parents.pop()
         try:
             # TODO: we should probably revert the file if merge fails
-            return merge.filemerge(self.repo, fn, fd, fo, self.wctx, p2)
+            return filemerge.filemerge(self.repo, fn, fd, fo, self.wctx, p2)
         finally:
             self.wctx._parents.append(p2)
             if realmerge:
@@ -135,13 +137,13 @@ class Imerge(object):
                 del os.environ['HGMERGE']
 
     def start(self, rev=None):
-        _filemerge = merge.filemerge
-        def filemerge(repo, fw, fd, fo, wctx, mctx):
+        _filemerge = filemerge.filemerge
+        def filemerge_(repo, fw, fd, fo, wctx, mctx):
             self.conflicts[fw] = (fd, fo)
 
-        merge.filemerge = filemerge
+        filemerge.filemerge = filemerge_
         commands.merge(self.ui, self.repo, rev=rev)
-        merge.filemerge = _filemerge
+        filemerge.filemerge = _filemerge
 
         self.wctx = self.repo.workingctx()
         self.save()

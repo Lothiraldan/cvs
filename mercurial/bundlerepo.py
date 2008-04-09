@@ -10,10 +10,10 @@ This software may be used and distributed according to the terms
 of the GNU General Public License, incorporated herein by reference.
 """
 
-from node import *
+from node import hex, nullid, short
 from i18n import _
-import changegroup, util, os, struct, bz2, tempfile, mdiff
-import localrepo, changelog, manifest, filelog, revlog
+import changegroup, util, os, struct, bz2, tempfile, shutil, mdiff
+import repo, localrepo, changelog, manifest, filelog, revlog
 
 class bundlerevlog(revlog.revlog):
     def __init__(self, opener, indexfile, bundlefile,
@@ -48,7 +48,8 @@ class bundlerevlog(revlog.revlog):
                 continue
             for p in (p1, p2):
                 if not p in self.nodemap:
-                    raise revlog.LookupError(hex(p1), _("unknown parent %s") % short(p1))
+                    raise revlog.LookupError(p1, self.indexfile,
+                                             _("unknown parent"))
             if linkmapper is None:
                 link = n
             else:
@@ -152,10 +153,18 @@ class bundlefilelog(bundlerevlog, filelog.filelog):
 
 class bundlerepository(localrepo.localrepository):
     def __init__(self, ui, path, bundlename):
-        localrepo.localrepository.__init__(self, ui, path)
+        self._tempparent = None
+        try:
+            localrepo.localrepository.__init__(self, ui, path)
+        except repo.RepoError:
+            self._tempparent = tempfile.mkdtemp()
+            tmprepo = localrepo.instance(ui,self._tempparent,1)
+            localrepo.localrepository.__init__(self, ui, self._tempparent)
 
-        self._url = 'bundle:' + bundlename
-        if path: self._url += '+' + path
+        if path:
+            self._url = 'bundle:' + path + '+' + bundlename
+        else:
+            self._url = 'bundle:' + bundlename
 
         self.tempfile = None
         self.bundlefile = open(bundlename, "rb")
@@ -218,9 +227,6 @@ class bundlerepository(localrepo.localrepository):
     def url(self):
         return self._url
 
-    def dev(self):
-        return -1
-
     def file(self, f):
         if not self.bundlefilespos:
             self.bundlefile.seek(self.filestart)
@@ -252,6 +258,11 @@ class bundlerepository(localrepo.localrepository):
         tempfile = getattr(self, 'tempfile', None)
         if tempfile is not None:
             os.unlink(tempfile)
+        if self._tempparent:
+            shutil.rmtree(self._tempparent, True)
+
+    def cancopy(self):
+        return False
 
 def instance(ui, path, create):
     if create:

@@ -19,6 +19,8 @@
 
 # Modified by Benoit Boissinot:
 #  - fix for digest auth (inspired from urllib2.py @ Python v2.4)
+# Modified by Dirkjan Ochtman:
+#  - import md5 function from a local util module
 
 """An HTTP handler for urllib2 that supports HTTP 1.1 and keepalive.
 
@@ -129,7 +131,7 @@ class ConnectionManager:
     def add(self, host, connection, ready):
         self._lock.acquire()
         try:
-            if not self._hostmap.has_key(host): self._hostmap[host] = []
+            if not host in self._hostmap: self._hostmap[host] = []
             self._hostmap[host].append(connection)
             self._connmap[connection] = host
             self._readymap[connection] = ready
@@ -159,7 +161,7 @@ class ConnectionManager:
         conn = None
         self._lock.acquire()
         try:
-            if self._hostmap.has_key(host):
+            if host in self._hostmap:
                 for c in self._hostmap[host]:
                     if self._readymap[c]:
                         self._readymap[c] = 0
@@ -175,7 +177,7 @@ class ConnectionManager:
         else:
             return dict(self._hostmap)
 
-class HTTPHandler(urllib2.HTTPHandler):
+class KeepAliveHandler:
     def __init__(self):
         self._cm = ConnectionManager()
 
@@ -314,6 +316,9 @@ class HTTPHandler(urllib2.HTTPHandler):
         except socket.error, err: # XXX what error?
             raise urllib2.URLError(err)
 
+class HTTPHandler(KeepAliveHandler, urllib2.HTTPHandler):
+    pass
+
 class HTTPResponse(httplib.HTTPResponse):
     # we need to subclass HTTPResponse in order to
     # 1) add readline() and readlines() methods
@@ -447,7 +452,7 @@ def error_handler(url):
     keepalive_handler.close_all()
 
 def continuity(url):
-    import md5
+    from util import md5
     format = '%25s: %s'
 
     # first fetch the file with the normal http handler

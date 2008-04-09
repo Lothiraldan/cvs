@@ -5,8 +5,8 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from node import *
 from i18n import _
+from repo import RepoError
 import os, sys, atexit, signal, pdb, traceback, socket, errno, shlex, time
 import util, commands, hg, lock, fancyopts, revlog, version, extensions, hook
 import cmdutil
@@ -65,7 +65,7 @@ def _runcatch(ui, args):
     except cmdutil.UnknownCommand, inst:
         ui.warn(_("hg: unknown command '%s'\n") % inst.args[0])
         commands.help_(ui, 'shortlist')
-    except hg.RepoError, inst:
+    except RepoError, inst:
         ui.warn(_("abort: %s!\n") % inst)
     except lock.LockHeld, inst:
         if inst.errno == errno.ETIMEDOUT:
@@ -150,8 +150,7 @@ def _runcatch(ui, args):
 
     return -1
 
-def _findrepo():
-    p = os.getcwd()
+def _findrepo(p):
     while not os.path.isdir(os.path.join(p, ".hg")):
         oldp, p = p, os.path.dirname(p)
         if p == oldp:
@@ -254,7 +253,7 @@ def _dispatch(ui, args):
         os.chdir(cwd[-1])
 
     # read the local repository .hgrc into a local ui object
-    path = _findrepo() or ""
+    path = _findrepo(os.getcwd()) or ""
     if not path:
         lui = ui
     if path:
@@ -275,6 +274,15 @@ def _dispatch(ui, args):
     for name, module in extensions.extensions():
         if name in _loaded:
             continue
+
+        # setup extensions
+        # TODO this should be generalized to scheme, where extensions can
+        #      redepend on other extensions.  then we should toposort them, and
+        #      do initialization in correct order
+        extsetup = getattr(module, 'extsetup', None)
+        if extsetup:
+            extsetup()
+
         cmdtable = getattr(module, 'cmdtable', {})
         overrides = [cmd for cmd in cmdtable if cmd in commands.table]
         if overrides:
@@ -331,26 +339,31 @@ def _dispatch(ui, args):
         try:
             repo = hg.repository(ui, path=path)
             ui = repo.ui
-            ui.setconfig("bundle", "mainreporoot", repo.root)
             if not repo.local():
                 raise util.Abort(_("repository '%s' is not local") % path)
-        except hg.RepoError:
+            ui.setconfig("bundle", "mainreporoot", repo.root)
+        except RepoError:
             if cmd not in commands.optionalrepo.split():
+                if args and not path: # try to infer -R from command args
+                    repos = map(_findrepo, args)
+                    guess = repos[0]
+                    if guess and repos.count(guess) == len(repos):
+                        return _dispatch(ui, ['--repository', guess] + fullargs)
                 if not path:
-                    raise hg.RepoError(_("There is no Mercurial repository here"
-                                         " (.hg not found)"))
+                    raise RepoError(_("There is no Mercurial repository here"
+                                      " (.hg not found)"))
                 raise
         d = lambda: func(ui, repo, *args, **cmdoptions)
     else:
         d = lambda: func(ui, *args, **cmdoptions)
 
     # run pre-hook, and abort if it fails
-    ret = hook.hook(ui, repo, "pre-%s" % cmd, False, args=" ".join(fullargs))
+    ret = hook.hook(lui, repo, "pre-%s" % cmd, False, args=" ".join(fullargs))
     if ret:
         return ret
     ret = _runcommand(ui, options, cmd, d)
     # run post-hook, passing command result
-    hook.hook(ui, repo, "post-%s" % cmd, False, args=" ".join(fullargs),
+    hook.hook(lui, repo, "post-%s" % cmd, False, args=" ".join(fullargs),
               result = ret)
     return ret
 

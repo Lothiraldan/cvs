@@ -33,6 +33,12 @@ hg -v imerge st
 echo % next
 hg imerge next
 
+echo % resolve and unresolve
+hg imerge resolve foo
+hg -v imerge st
+hg imerge unresolve foo
+hg -v imerge st
+
 echo % merge next
 hg --traceback imerge
 
@@ -45,6 +51,11 @@ hg imerge merge foo
 echo % save
 echo foo > foo2
 hg imerge save ../savedmerge
+
+echo % merge auto
+hg up -C 1
+hg --traceback imerge --auto
+cat foo2
 
 echo % load
 hg up -C 0
@@ -60,5 +71,11 @@ hg imerge
 hg up 0
 echo % nothing to merge
 hg imerge
+
+cd ..
+hg -q clone -r 0 base clone
+cd clone
+echo % load unknown parent
+hg imerge load ../savedmerge
 
 exit 0

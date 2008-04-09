@@ -42,6 +42,12 @@ echo % qinit -c
 hg --cwd c qinit -c
 hg -R c/.hg/patches st
 
+echo % qnew should refuse bad patch names
+hg -R c qnew series
+hg -R c qnew status
+hg -R c qnew guards
+hg -R c qnew .hgignore
+
 echo % qnew implies add
 
 hg -R c qnew test.patch
@@ -260,6 +266,14 @@ hg ci -Ama
 hg strip tip 2>&1 | sed 's/\(saving bundle to \).*/\1/'
 hg unbundle .hg/strip-backup/*
 
+echo % strip with local changes, should complain
+hg up
+echo y>y
+hg add y
+hg strip tip | sed 's/\(saving bundle to \).*/\1/'
+echo % --force strip with local changes
+hg strip -f tip 2>&1 | sed 's/\(saving bundle to \).*/\1/'
+
 echo '% cd b; hg qrefresh'
 hg init refresh
 cd refresh
@@ -296,6 +310,13 @@ hg st
 
 echo % mq tags
 hg log --template '{rev} {tags}\n' -r qparent:qtip
+
+echo % bad node in status
+hg qpop
+hg strip -qn tip
+hg tip 2>&1 | sed -e 's/unknown node .*/unknown node/'
+hg branches 2>&1 | sed -e 's/unknown node .*/unknown node/'
+hg qpop
 
 cat >>$HGRCPATH <<EOF
 [diff]
@@ -474,3 +495,13 @@ cd qclonedest2
 qlog
 cd ..
 
+echo % 'test applying on an empty file (issue 1033)'
+hg init empty
+cd empty
+touch a
+hg ci -Am addempty
+echo a > a
+hg qnew -f -e changea
+hg qpop
+hg qpush
+cd ..

@@ -1,5 +1,6 @@
 # common code for the convert extension
 import base64, errno
+import os
 import cPickle as pickle
 from mercurial import util
 from mercurial.i18n import _
@@ -17,10 +18,13 @@ def decodeargs(s):
     s = base64.decodestring(s)
     return pickle.loads(s)
 
-def checktool(exe, name=None):
+class MissingTool(Exception): pass
+
+def checktool(exe, name=None, abort=True):
     name = name or exe
     if not util.find_exe(exe):
-        raise util.Abort('cannot find required "%s" tool' % name)
+        exc = abort and util.Abort or MissingTool
+        raise exc(_('cannot find required "%s" tool') % name)
 
 class NoRepo(Exception): pass
 
@@ -29,8 +33,8 @@ SKIPREV = 'SKIP'
 class commit(object):
     def __init__(self, author, date, desc, parents, branch=None, rev=None,
                  extra={}):
-        self.author = author
-        self.date = date
+        self.author = author or 'unknown'
+        self.date = date or '0 0'
         self.desc = desc
         self.parents = parents
         self.branch = branch
@@ -104,13 +108,13 @@ class converter_source(object):
 
     def getchangedfiles(self, rev, i):
         """Return the files changed by rev compared to parent[i].
-    
+
         i is an index selecting one of the parents of rev.  The return
         value should be the list of files that are different in rev and
         this parent.
 
         If rev has no parents, i is None.
-    
+
         This function is only needed to support --filemap
         """
         raise NotImplementedError()
@@ -176,12 +180,11 @@ class converter_sink(object):
         tags: {tagname: sink_rev_id, ...}"""
         raise NotImplementedError()
 
-    def setbranch(self, branch, pbranch, parents):
+    def setbranch(self, branch, pbranches):
         """Set the current branch name. Called before the first putfile
         on the branch.
         branch: branch name for subsequent commits
-        pbranch: branch name of parent commit
-        parents: destination revisions of parent"""
+        pbranches: (converted parent revision, parent branch) tuples"""
         pass
 
     def setfilemapmode(self, active):
@@ -212,7 +215,7 @@ class commandline(object):
     def postrun(self):
         pass
 
-    def _run(self, cmd, *args, **kwargs):
+    def _cmdline(self, cmd, *args, **kwargs):
         cmdline = [self.command, cmd] + list(args)
         for k, v in kwargs.iteritems():
             if len(k) == 1:
@@ -227,10 +230,13 @@ class commandline(object):
             except TypeError:
                 pass
         cmdline = [util.shellquote(arg) for arg in cmdline]
-        cmdline += ['<', util.nulldev]
+        cmdline += ['2>', util.nulldev, '<', util.nulldev]
         cmdline = ' '.join(cmdline)
         self.ui.debug(cmdline, '\n')
+        return cmdline
 
+    def _run(self, cmd, *args, **kwargs):
+        cmdline = self._cmdline(cmd, *args, **kwargs)
         self.prerun()
         try:
             return util.popen(cmdline)
@@ -241,6 +247,12 @@ class commandline(object):
         fp = self._run(cmd, *args, **kwargs)
         output = fp.read()
         self.ui.debug(output)
+        return output, fp.close()
+
+    def runlines(self, cmd, *args, **kwargs):
+        fp = self._run(cmd, *args, **kwargs)
+        output = fp.readlines()
+        self.ui.debug(''.join(output))
         return output, fp.close()
 
     def checkexit(self, status, output=''):
@@ -256,6 +268,52 @@ class commandline(object):
         self.checkexit(status, output)
         return output
 
+    def runlines0(self, cmd, *args, **kwargs):
+        output, status = self.runlines(cmd, *args, **kwargs)
+        self.checkexit(status, ''.join(output))
+        return output
+
+    def getargmax(self):
+        if '_argmax' in self.__dict__:
+            return self._argmax
+
+        # POSIX requires at least 4096 bytes for ARG_MAX
+        self._argmax = 4096
+        try:
+            self._argmax = os.sysconf("SC_ARG_MAX")
+        except:
+            pass
+
+        # Windows shells impose their own limits on command line length,
+        # down to 2047 bytes for cmd.exe under Windows NT/2k and 2500 bytes
+        # for older 4nt.exe. See http://support.microsoft.com/kb/830473 for
+        # details about cmd.exe limitations.
+
+        # Since ARG_MAX is for command line _and_ environment, lower our limit
+        # (and make happy Windows shells while doing this).
+
+        self._argmax = self._argmax/2 - 1
+        return self._argmax
+
+    def limit_arglist(self, arglist, cmd, *args, **kwargs):
+        limit = self.getargmax() - len(self._cmdline(cmd, *args, **kwargs))
+        bytes = 0
+        fl = []
+        for fn in arglist:
+            b = len(fn) + 3
+            if bytes + b < limit or len(fl) == 0:
+                fl.append(fn)
+                bytes += b
+            else:
+                yield fl
+                fl = [fn]
+                bytes = b
+        if fl:
+            yield fl
+
+    def xargs(self, arglist, cmd, *args, **kwargs):
+        for l in self.limit_arglist(arglist, cmd, *args, **kwargs):
+            self.run0(cmd, *(list(args) + l), **kwargs)
 
 class mapfile(dict):
     def __init__(self, ui, path):
@@ -267,6 +325,8 @@ class mapfile(dict):
         self._read()
 
     def _read(self):
+        if self.path is None:
+            return
         try:
             fp = open(self.path, 'r')
         except IOError, err:
@@ -279,7 +339,7 @@ class mapfile(dict):
                 self.order.append(key)
             super(mapfile, self).__setitem__(key, value)
         fp.close()
-            
+
     def __setitem__(self, key, value):
         if self.fp is None:
             try:

@@ -1,20 +1,7 @@
-====== .hgrc
-[ui]
-slash = True
-[defaults]
-backout = -d "0 0"
-commit = -d "0 0"
-debugrawcommit = -d "0 0"
-tag = -d "0 0"
-[extensions]
-mq=
-[defaults]
-log = --template "{rev}: {desc}\n"
-heads = --template "{rev}: {desc}\n"
-incoming = --template "{rev}: {desc}\n"
 ====== Setup main
 adding one
 ====== Bundle main
+2 changesets found
 ====== Incoming to fresh repo
 >> hg -R fresh incoming main.hg
 comparing with main.hg
@@ -28,7 +15,9 @@ comparing with bundle:fresh+main.hg
 adding two
 Patch queue now empty
 ====== Bundle queue
+1 changesets found
 ====== Clone base
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 ====== Incoming queue bundle
 >> hg -R .hg/patches incoming ../queue.hgq
@@ -51,6 +40,7 @@ merging series
 >> hg qseries
 two.patch
 ====== Clone base again
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 ====== Unbundle queue bundle
 >> hg -R .hg/patches unbundle --update ../queue.hgq

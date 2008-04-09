@@ -5,17 +5,27 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from common import NoRepo, SKIPREV, converter_source, converter_sink, mapfile
+from common import NoRepo, MissingTool, SKIPREV, mapfile
 from cvs import convert_cvs
 from darcs import darcs_source
 from git import convert_git
 from hg import mercurial_source, mercurial_sink
 from subversion import debugsvnlog, svn_source, svn_sink
+from monotone import monotone_source
+from gnuarch import gnuarch_source
 import filemap
 
 import os, shutil
 from mercurial import hg, util
 from mercurial.i18n import _
+
+orig_encoding = 'ascii'
+
+def recode(s):
+    if isinstance(s, unicode):
+        return s.encode(orig_encoding, 'replace')
+    else:
+        return s.decode('utf-8').encode(orig_encoding, 'replace')
 
 source_converters = [
     ('cvs', convert_cvs),
@@ -23,6 +33,8 @@ source_converters = [
     ('svn', svn_source),
     ('hg', mercurial_source),
     ('darcs', darcs_source),
+    ('mtn', monotone_source),
+    ('gnuarch', gnuarch_source),
     ]
 
 sink_converters = [
@@ -36,7 +48,7 @@ def convertsource(ui, path, type, rev):
         try:
             if not type or name == type:
                 return source(ui, path, rev)
-        except NoRepo, inst:
+        except (NoRepo, MissingTool), inst:
             exceptions.append(inst)
     if not ui.quiet:
         for inst in exceptions:
@@ -74,6 +86,8 @@ class converter(object):
             self.readauthormap(opts.get('authors'))
             self.authorfile = self.dest.authorfile()
 
+        self.splicemap = mapfile(ui, opts.get('splicemap'))
+
     def walktree(self, heads):
         '''Return a mapping that identifies the uncommitted parents of every
         uncommitted changeset.'''
@@ -98,6 +112,7 @@ class converter(object):
         visit = parents.keys()
         seen = {}
         children = {}
+        actives = []
 
         while visit:
             n = visit.pop(0)
@@ -106,49 +121,63 @@ class converter(object):
             # Ensure that nodes without parents are present in the 'children'
             # mapping.
             children.setdefault(n, [])
+            hasparent = False
             for p in parents[n]:
                 if not p in self.map:
                     visit.append(p)
+                    hasparent = True
                 children.setdefault(p, []).append(n)
+            if not hasparent:
+                actives.append(n)
 
-        s = []
-        removed = {}
-        visit = children.keys()
-        while visit:
-            n = visit.pop(0)
-            if n in removed: continue
-            dep = 0
-            if n in parents:
-                for p in parents[n]:
-                    if p in self.map: continue
-                    if p not in removed:
-                        # we're still dependent
-                        visit.append(n)
-                        dep = 1
-                        break
-
-            if not dep:
-                # all n's parents are in the list
-                removed[n] = 1
-                if n not in self.map:
-                    s.append(n)
-                if n in children:
-                    for c in children[n]:
-                        visit.insert(0, c)
+        del seen
+        del visit
 
         if self.opts.get('datesort'):
-            depth = {}
-            for n in s:
-                depth[n] = 0
-                pl = [p for p in self.commitcache[n].parents
-                      if p not in self.map]
-                if pl:
-                    depth[n] = max([depth[p] for p in pl]) + 1
+            dates = {}
+            def getdate(n):
+                if n not in dates:
+                    dates[n] = util.parsedate(self.commitcache[n].date)
+                return dates[n]
 
-            s = [(depth[n], util.parsedate(self.commitcache[n].date), n)
-                 for n in s]
-            s.sort()
-            s = [e[2] for e in s]
+            def picknext(nodes):
+                return min([(getdate(n), n) for n in nodes])[1]
+        else:
+            prev = [None]
+            def picknext(nodes):
+                # Return the first eligible child of the previously converted
+                # revision, or any of them.
+                next = nodes[0]
+                for n in nodes:
+                    if prev[0] in parents[n]:
+                        next = n
+                        break
+                prev[0] = next
+                return next
+
+        s = []
+        pendings = {}
+        while actives:
+            n = picknext(actives)
+            actives.remove(n)
+            s.append(n)
+
+            # Update dependents list
+            for c in children.get(n, []):
+                if c not in pendings:
+                    pendings[c] = [p for p in parents[c] if p not in self.map]
+                try:
+                    pendings[c].remove(n)
+                except ValueError:
+                    raise util.Abort(_('cycle detected between %s and %s')
+                                       % (recode(c), recode(n)))
+                if not pendings[c]:
+                    # Parents are converted, node is eligible
+                    actives.insert(0, c)
+                    pendings[c] = None
+
+        if len(s) != len(parents):
+            raise util.Abort(_("not all revisions were sorted"))
 
         return s
 
@@ -164,9 +193,12 @@ class converter(object):
     def readauthormap(self, authorfile):
         afile = open(authorfile, 'r')
         for line in afile:
+            if line.strip() == '':
+                continue
             try:
-                srcauthor = line.split('=')[0].strip()
-                dstauthor = line.split('=')[1].strip()
+                srcauthor, dstauthor = line.split('=', 1)
+                srcauthor = srcauthor.strip()
+                dstauthor = dstauthor.strip()
                 if srcauthor in self.authors and dstauthor != self.authors[srcauthor]:
                     self.ui.status(
                         'Overriding mapping for author %s, was %s, will be %s\n'
@@ -177,8 +209,8 @@ class converter(object):
                     self.authors[srcauthor] = dstauthor
             except IndexError:
                 self.ui.warn(
-                    'Ignoring bad line in author file map %s: %s\n'
-                    % (authorfile, line))
+                    'Ignoring bad line in author map file %s: %s\n'
+                    % (authorfile, line.rstrip()))
         afile.close()
 
     def cachecommit(self, rev):
@@ -201,15 +233,14 @@ class converter(object):
             self.map[rev] = dest
             return
         files, copies = changes
-        parents = [self.map[r] for r in commit.parents]
+        pbranches = []
         if commit.parents:
-            prev = commit.parents[0]
-            if prev not in self.commitcache:
-                self.cachecommit(prev)
-            pbranch = self.commitcache[prev].branch
-        else:
-            pbranch = None
-        self.dest.setbranch(commit.branch, pbranch, parents)
+            for prev in commit.parents:
+                if prev not in self.commitcache:
+                    self.cachecommit(prev)
+                pbranches.append((self.map[prev],
+                                  self.commitcache[prev].branch))
+        self.dest.setbranch(commit.branch, pbranches)
         for f, v in files:
             filenames.append(f)
             try:
@@ -225,11 +256,19 @@ class converter(object):
                         # Merely marks that a copy happened.
                         self.dest.copyfile(copyf, f)
 
+        try:
+            parents = self.splicemap[rev].replace(',', ' ').split()
+            self.ui.status('spliced in %s as parents of %s\n' %
+                           (parents, rev))
+            parents = [self.map.get(p, p) for p in parents]
+        except KeyError:
+            parents = [b[0] for b in pbranches]
         newnode = self.dest.putcommit(filenames, parents, commit)
         self.source.converted(rev, newnode)
         self.map[rev] = newnode
 
     def convert(self):
+
         try:
             self.source.before()
             self.dest.before()
@@ -248,7 +287,11 @@ class converter(object):
                 desc = self.commitcache[c].desc
                 if "\n" in desc:
                     desc = desc.splitlines()[0]
-                self.ui.status("%d %s\n" % (num, desc))
+                # convert log message to local encoding without using
+                # tolocal() because util._encoding conver() use it as
+                # 'utf-8'
+                self.ui.status("%d %s\n" % (num, recode(desc)))
+                self.ui.note(_("source: %s\n" % recode(c)))
                 self.copy(c)
 
             tags = self.source.gettags()
@@ -277,6 +320,8 @@ class converter(object):
         self.map.close()
 
 def convert(ui, src, dest=None, revmapfile=None, **opts):
+    global orig_encoding
+    orig_encoding = util._encoding
     util._encoding = 'UTF-8'
 
     if not dest:

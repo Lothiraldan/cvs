@@ -5,10 +5,10 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from node import *
+from node import hex, nullid, nullrev, short
 from i18n import _
 import os, sys, bisect, stat
-import mdiff, bdiff, util, templater, patch, errno
+import mdiff, bdiff, util, templater, templatefilters, patch, errno
 
 revrangesep = ':'
 
@@ -50,7 +50,7 @@ def findcmd(ui, cmd, table):
     """Return (aliases, command table entry) for command string."""
     choice = findpossible(ui, cmd, table)
 
-    if choice.has_key(cmd):
+    if cmd in choice:
         return choice[cmd]
 
     if len(choice) > 1:
@@ -64,6 +64,8 @@ def findcmd(ui, cmd, table):
     raise UnknownCommand(cmd)
 
 def bail_if_changed(repo):
+    if repo.dirstate.parents()[1] != nullid:
+        raise util.Abort(_('outstanding uncommitted merge'))
     modified, added, removed, deleted = repo.status()[:4]
     if modified or added or removed or deleted:
         raise util.Abort(_("outstanding uncommitted changes"))
@@ -86,6 +88,19 @@ def logmessage(opts):
             raise util.Abort(_("can't read commit message '%s': %s") %
                              (logfile, inst.strerror))
     return message
+
+def loglimit(opts):
+    """get the log limit according to option -l/--limit"""
+    limit = opts.get('limit')
+    if limit:
+        try:
+            limit = int(limit)
+        except ValueError:
+            raise util.Abort(_('limit must be a positive integer'))
+        if limit <= 0: raise util.Abort(_('limit must be positive'))
+    else:
+        limit = sys.maxint
+    return limit
 
 def setremoteconfig(ui, opts):
     "copy remote options to ui tree"
@@ -455,12 +470,12 @@ def copy(ui, repo, pats, opts, rename=False):
     if len(pats) == 1:
         raise util.Abort(_('no destination specified'))
     dest = pats.pop()
-    destdirexists = os.path.isdir(dest)
+    destdirexists = os.path.isdir(dest) and not os.path.islink(dest)
     if not destdirexists:
         if len(pats) > 1 or util.patkind(pats[0], None)[0]:
             raise util.Abort(_('with multiple sources, destination must be an '
                                'existing directory'))
-        if dest.endswith(os.sep) or os.altsep and dest.endswith(os.altsep):
+        if util.endswithsep(dest):
             raise util.Abort(_('destination %s is not a directory') % dest)
 
     tfn = targetpathfn
@@ -493,6 +508,15 @@ def service(opts, parentfn=None, initfn=None, runfn=None):
         rfd, wfd = os.pipe()
         args = sys.argv[:]
         args.append('--daemon-pipefds=%d,%d' % (rfd, wfd))
+        # Don't pass --cwd to the child process, because we've already
+        # changed directory.
+        for i in xrange(1,len(args)):
+            if args[i].startswith('--cwd='):
+                del args[i]
+                break
+            elif args[i].startswith('--cwd'):
+                del args[i:i+2]
+                break
         pid = os.spawnvp(os.P_NOWAIT | getattr(os, 'P_DETACH', 0),
                          args[0], args)
         os.close(wfd)
@@ -662,7 +686,7 @@ class changeset_templater(changeset_printer):
 
     def __init__(self, ui, repo, patch, mapfile, buffered):
         changeset_printer.__init__(self, ui, repo, patch, buffered)
-        filters = templater.common_filters.copy()
+        filters = templatefilters.filters.copy()
         filters['formatnode'] = (ui.debugflag and (lambda x: x)
                                  or (lambda x: x[:12]))
         self.t = templater.templater(mapfile, filters,
@@ -771,10 +795,10 @@ class changeset_templater(changeset_printer):
         def showcopies(**args):
             c = [{'name': x[0], 'source': x[1]} for x in copies]
             return showlist('file_copy', c, plural='file_copies', **args)
-        
+
         files = []
         def getfiles():
-            if not files: 
+            if not files:
                 files[:] = self.repo.status(
                     log.parents(changenode)[0], changenode)[:3]
             return files
@@ -891,7 +915,7 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
 
 def finddate(ui, repo, date):
     """Find the tipmost changeset that matches the given date spec"""
-    df = util.matchdate(date + " to " + date)
+    df = util.matchdate(date)
     get = util.cachefunc(lambda r: repo.changectx(r).changeset())
     changeiter, matchfn = walkchangerevs(ui, repo, [], get, {'rev':None})
     results = {}
@@ -956,7 +980,7 @@ def walkchangerevs(ui, repo, pats, change, opts):
     if follow:
         defrange = '%s:0' % repo.changectx().rev()
     else:
-        defrange = 'tip:0'
+        defrange = '-1:0'
     revs = revrange(repo, opts['rev'] or [defrange])
     wanted = {}
     slowpath = anypats or opts.get('removed')
@@ -1104,10 +1128,16 @@ def walkchangerevs(ui, repo, pats, change, opts):
 
 def commit(ui, repo, commitfunc, pats, opts):
     '''commit the specified files or all outstanding changes'''
+    date = opts.get('date')
+    if date:
+        opts['date'] = util.parsedate(date)
     message = logmessage(opts)
 
-    if opts['addremove']:
+    # extract addremove carefully -- this function can be called from a command
+    # that doesn't support addremove
+    if opts.get('addremove'):
         addremove(repo, pats, opts)
+
     fns, match, anypats = matchpats(repo, pats, opts)
     if pats:
         status = repo.status(files=fns, match=match)
@@ -1119,10 +1149,11 @@ def commit(ui, repo, commitfunc, pats, opts):
                 continue
             if f not in files:
                 rf = repo.wjoin(f)
+                rel = repo.pathto(f)
                 try:
                     mode = os.lstat(rf)[stat.ST_MODE]
                 except OSError:
-                    raise util.Abort(_("file %s not found!") % rf)
+                    raise util.Abort(_("file %s not found!") % rel)
                 if stat.S_ISDIR(mode):
                     name = f + '/'
                     if slist is None:
@@ -1131,12 +1162,12 @@ def commit(ui, repo, commitfunc, pats, opts):
                     i = bisect.bisect(slist, name)
                     if i >= len(slist) or not slist[i].startswith(name):
                         raise util.Abort(_("no match under directory %s!")
-                                         % rf)
+                                         % rel)
                 elif not (stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
                     raise util.Abort(_("can't commit %s: "
-                                       "unsupported file type!") % rf)
+                                       "unsupported file type!") % rel)
                 elif f not in repo.dirstate:
-                    raise util.Abort(_("file %s not tracked!") % rf)
+                    raise util.Abort(_("file %s not tracked!") % rel)
     else:
         files = []
     try:

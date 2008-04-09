@@ -7,10 +7,10 @@ This software may be used and distributed according to the terms
 of the GNU General Public License, incorporated herein by reference.
 """
 
-from node import *
+from node import nullid
 from i18n import _
-import struct, os, time, bisect, stat, strutil, util, re, errno, ignore
-import cStringIO, osutil
+import struct, os, bisect, stat, strutil, util, errno, ignore
+import cStringIO, osutil, sys
 
 _unknown = ('?', 0, 0, 0)
 _format = ">cllll"
@@ -63,6 +63,9 @@ class dirstate(object):
         elif name == '_slash':
             self._slash = self._ui.configbool('ui', 'slash') and os.sep != '/'
             return self._slash
+        elif name == '_checkexec':
+            self._checkexec = util.checkexec(self._root)
+            return self._checkexec
         else:
             raise AttributeError, name
 
@@ -74,7 +77,7 @@ class dirstate(object):
         if cwd == self._root: return ''
         # self._root ends with a path separator if self._root is '/' or 'C:\'
         rootsep = self._root
-        if not rootsep.endswith(os.sep):
+        if not util.endswithsep(rootsep):
             rootsep += os.sep
         if cwd.startswith(rootsep):
             return cwd[len(rootsep):]
@@ -87,7 +90,7 @@ class dirstate(object):
             cwd = self.getcwd()
         path = util.pathto(self._root, cwd, f)
         if self._slash:
-            return path.replace(os.sep, '/')
+            return util.normpath(path)
         return path
 
     def __getitem__(self, key):
@@ -197,7 +200,8 @@ class dirstate(object):
 
     def _incpathcheck(self, f):
         if '\r' in f or '\n' in f:
-            raise util.Abort(_("'\\n' and '\\r' disallowed in filenames"))
+            raise util.Abort(_("'\\n' and '\\r' disallowed in filenames: %r")
+                             % f)
         # shadows
         if f in self._dirs:
             raise util.Abort(_('directory %r already in dirstate') % f)
@@ -235,11 +239,26 @@ class dirstate(object):
         self._changepath(f, 'n', True)
         s = os.lstat(self._join(f))
         self._map[f] = ('n', s.st_mode, s.st_size, s.st_mtime, 0)
-        if self._copymap.has_key(f):
+        if f in self._copymap:
             del self._copymap[f]
 
     def normallookup(self, f):
         'mark a file normal, but possibly dirty'
+        if self._pl[1] != nullid and f in self._map:
+            # if there is a merge going on and the file was either
+            # in state 'm' or dirty before being removed, restore that state.
+            entry = self._map[f]
+            if entry[0] == 'r' and entry[2] in (-1, -2):
+                source = self._copymap.get(f)
+                if entry[2] == -1:
+                    self.merge(f)
+                elif entry[2] == -2:
+                    self.normaldirty(f)
+                if source:
+                    self.copy(source, f)
+                return
+            if entry[0] == 'm' or entry[0] == 'n' and entry[2] == -2:
+                return
         self._dirty = True
         self._changepath(f, 'n', True)
         self._map[f] = ('n', 0, -1, -1, 0)
@@ -266,8 +285,15 @@ class dirstate(object):
         'mark a file removed'
         self._dirty = True
         self._changepath(f, 'r')
-        self._map[f] = ('r', 0, 0, 0, 0)
-        if f in self._copymap:
+        size = 0
+        if self._pl[1] != nullid and f in self._map:
+            entry = self._map[f]
+            if entry[0] == 'm':
+                size = -1
+            elif entry[0] == 'n' and entry[2] == -2:
+                size = -2
+        self._map[f] = ('r', 0, size, 0, 0)
+        if size == 0 and f in self._copymap:
             del self._copymap[f]
 
     def merge(self, f):
@@ -286,7 +312,7 @@ class dirstate(object):
             self._changepath(f, '?')
             del self._map[f]
         except KeyError:
-            self._ui.warn(_("not in dirstate: %s!\n") % f)
+            self._ui.warn(_("not in dirstate: %s\n") % f)
 
     def clear(self):
         self._map = {}
@@ -309,6 +335,16 @@ class dirstate(object):
     def write(self):
         if not self._dirty:
             return
+        st = self._opener("dirstate", "w", atomictemp=True)
+
+        try:
+            gran = int(self._ui.config('dirstate', 'granularity', 1))
+        except ValueError:
+            gran = 1
+        limit = sys.maxint
+        if gran > 0:
+            limit = util.fstat(st).st_mtime - gran
+
         cs = cStringIO.StringIO()
         copymap = self._copymap
         pack = struct.pack
@@ -317,10 +353,11 @@ class dirstate(object):
         for f, e in self._map.iteritems():
             if f in copymap:
                 f = "%s\0%s" % (f, copymap[f])
+            if e[3] > limit and e[0] == 'n':
+                e = (e[0], 0, -1, -1, 0)
             e = pack(_format, e[0], e[1], e[2], e[3], len(f))
             write(e)
             write(f)
-        st = self._opener("dirstate", "w", atomictemp=True)
         st.write(cs.getvalue())
         st.rename()
         self._dirty = self._dirtypl = False
@@ -369,13 +406,23 @@ class dirstate(object):
                           % (self.pathto(f), kind))
         return False
 
+    def _dirignore(self, f):
+        if f == '.':
+            return False
+        if self._ignore(f):
+            return True
+        for c in strutil.findall(f, '/'):
+            if self._ignore(f[:c]):
+                return True
+        return False
+
     def walk(self, files=None, match=util.always, badmatch=None):
         # filter out the stat
         for src, f, st in self.statwalk(files, match, badmatch=badmatch):
             yield src, f
 
-    def statwalk(self, files=None, match=util.always, ignored=False,
-                 badmatch=None, directories=False):
+    def statwalk(self, files=None, match=util.always, unknown=True,
+                 ignored=False, badmatch=None, directories=False):
         '''
         walk recursively through the directory tree, finding all files
         matched by the match function
@@ -403,14 +450,17 @@ class dirstate(object):
                 return False
             return match(file_)
 
+        # TODO: don't walk unknown directories if unknown and ignored are False
         ignore = self._ignore
+        dirignore = self._dirignore
         if ignored:
             imatch = match
             ignore = util.never
+            dirignore = util.never
 
         # self._root may end with a path separator when self._root == '/'
         common_prefix_len = len(self._root)
-        if not self._root.endswith(os.sep):
+        if not util.endswithsep(self._root):
             common_prefix_len += 1
 
         normpath = util.normpath
@@ -492,8 +542,9 @@ class dirstate(object):
                         yield 'b', ff, None
                 continue
             if s_isdir(st.st_mode):
-                for f, src, st in findfiles(f):
-                    yield src, f, st
+                if not dirignore(nf):
+                    for f, src, st in findfiles(f):
+                        yield src, f, st
             else:
                 if nf in known:
                     continue
@@ -515,10 +566,11 @@ class dirstate(object):
             if imatch(k):
                 yield 'm', k, None
 
-    def status(self, files, match, list_ignored, list_clean):
+    def status(self, files, match, list_ignored, list_clean, list_unknown=True):
         lookup, modified, added, unknown, ignored = [], [], [], [], []
         removed, deleted, clean = [], [], []
 
+        files = files or []
         _join = self._join
         lstat = os.lstat
         cmap = self._copymap
@@ -532,13 +584,15 @@ class dirstate(object):
         dadd = deleted.append
         cadd = clean.append
 
-        for src, fn, st in self.statwalk(files, match, ignored=list_ignored):
+        for src, fn, st in self.statwalk(files, match, unknown=list_unknown,
+                                         ignored=list_ignored):
             if fn in dmap:
                 type_, mode, size, time, foo = dmap[fn]
             else:
-                if list_ignored and self._ignore(fn):
-                    iadd(fn)
-                else:
+                if (list_ignored or fn in files) and self._dirignore(fn):
+                    if list_ignored:
+                        iadd(fn)
+                elif list_unknown:
                     uadd(fn)
                 continue
             if src == 'm':
@@ -555,15 +609,16 @@ class dirstate(object):
                         nonexistent = False
                 # XXX: what to do with file no longer present in the fs
                 # who are not removed in the dirstate ?
-                if nonexistent and type_ in "nm":
+                if nonexistent and type_ in "nma":
                     dadd(fn)
                     continue
             # check the common case first
             if type_ == 'n':
                 if not st:
                     st = lstat(_join(fn))
-                if (size >= 0 and (size != st.st_size
-                                   or (mode ^ st.st_mode) & 0100)
+                if (size >= 0 and
+                    (size != st.st_size
+                     or ((mode ^ st.st_mode) & 0100 and self._checkexec))
                     or size == -2
                     or fn in self._copymap):
                     madd(fn)

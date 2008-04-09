@@ -18,10 +18,6 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
-from cStringIO import StringIO
-import os
-from tempfile import mktemp
-
 from svn.core import SubversionException, Pool
 import svn.ra
 import svn.client
@@ -120,10 +116,3 @@ class SvnRaTransport(object):
 
     def do_update(self, revnum, path, *args, **kwargs):
         return self.Reporter(svn.ra.do_update(self.ra, revnum, path, *args, **kwargs))
-
-    def clone(self, offset=None):
-        """See Transport.clone()."""
-        if offset is None:
-            return self.__class__(self.base)
-
-        return SvnRaTransport(urlutils.join(self.base, offset), ra=self.ra)

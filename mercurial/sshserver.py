@@ -7,8 +7,8 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from i18n import _
-from node import *
-import os, streamclone, sys, tempfile, util
+from node import bin, hex
+import os, streamclone, sys, tempfile, util, hook
 
 class sshserver(object):
     def __init__(self, ui, repo):
@@ -18,6 +18,7 @@ class sshserver(object):
         self.fin = sys.stdin
         self.fout = sys.stdout
 
+        hook.redirect(True)
         sys.stdout = sys.stderr
 
         # Prevent insertion/deletion of CRs

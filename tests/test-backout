@@ -59,9 +59,10 @@ hg init merge
 cd merge
 
 echo line 1 > a
-hg commit -d '0 0' -A -m a
-
 echo line 2 >> a
+hg commit -d '0 0' -A -m a
+# remove line 1
+echo line 2 > a
 hg commit -d '1 0' -m b
 
 echo line 3 >> a
@@ -69,6 +70,7 @@ hg commit -d '2 0' -m c
 
 hg backout --merge -d '3 0' 1
 hg commit -d '4 0' -m d
+# check line 1 is back
 cat a
 
 echo '# backout should not back out subsequent changesets'
@@ -81,6 +83,8 @@ hg commit -d '1 0' -m b
 echo 1 > b
 hg commit -d '2 0' -A -m c
 hg backout -d '3 0' 1
+hg locate b
+hg update -C tip
 hg locate b
 
 cd ..
@@ -118,5 +122,38 @@ hg rollback
 hg update -C
 
 hg backout -d '6 0' --parent 3 4
+
+cd ..
+
+echo '# named branches'
+
+hg init named_branches
+cd named_branches
+
+echo default > default
+hg ci -d '0 0' -Am default
+hg branch branch1
+echo branch1 > file1
+hg ci -d '1 0' -Am file1
+hg branch branch2
+echo branch2 > file2
+hg ci -d '2 0' -Am file2
+hg backout -d '3 0' -r 1 -m 'backout on branch1'
+# XXX maybe backout shouldn't suggest a merge here as it is a different branch?
+
+echo '% on branch2 with branch1 not merged, so file1 should still exist:'
+hg id
+hg st -A
+
+echo '% on branch2 with branch1 merged, so file1 should be gone:'
+hg merge
+hg ci -d '4 0' -m 'merge backout of branch1'
+hg id
+hg st -A
+
+echo '% on branch1, so no file1 and file2:'
+hg co -C branch1
+hg id
+hg st -A
 
 exit 0

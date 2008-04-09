@@ -6,11 +6,10 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from node import *
-from remoterepo import *
+from node import bin, hex
 from i18n import _
 import repo, os, urllib, urllib2, urlparse, zlib, util, httplib
-import errno, keepalive, tempfile, socket, changegroup
+import errno, keepalive, socket, changegroup
 
 class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def __init__(self, ui):
@@ -103,9 +102,12 @@ class httpconnection(keepalive.HTTPConnection):
     # must be able to send big bundle as stream.
     send = _gen_sendfile(keepalive.HTTPConnection)
 
-class basehttphandler(keepalive.HTTPHandler):
+class httphandler(keepalive.HTTPHandler):
     def http_open(self, req):
         return self.do_open(httpconnection, req)
+
+    def __del__(self):
+        self.close_all()
 
 has_https = hasattr(urllib2, 'HTTPSHandler')
 if has_https:
@@ -114,12 +116,9 @@ if has_https:
         # must be able to send big bundle as stream.
         send = _gen_sendfile(httplib.HTTPSConnection)
 
-    class httphandler(basehttphandler, urllib2.HTTPSHandler):
+    class httpshandler(keepalive.KeepAliveHandler, urllib2.HTTPSHandler):
         def https_open(self, req):
             return self.do_open(httpsconnection, req)
-else:
-    class httphandler(basehttphandler):
-        pass
 
 # In python < 2.5 AbstractDigestAuthHandler raises a ValueError if
 # it doesn't know about the auth type requested.  This can happen if
@@ -181,7 +180,7 @@ def quotepath(path):
             l[i] = '%%%02X' % ord(c)
     return ''.join(l)
 
-class httprepository(remoterepository):
+class httprepository(repo.repository):
     def __init__(self, ui, path):
         self.path = path
         self.caps = None
@@ -203,8 +202,9 @@ class httprepository(remoterepository):
 
         proxyurl = ui.config("http_proxy", "host") or os.getenv('http_proxy')
         # XXX proxyauthinfo = None
-        self.handler = httphandler()
-        handlers = [self.handler]
+        handlers = [httphandler()]
+        if has_https:
+            handlers.append(httpshandler())
 
         if proxyurl:
             # proxy can be proper url or host[:port]
@@ -247,7 +247,7 @@ class httprepository(remoterepository):
         # will take precedence if found, so drop them
         for env in ["HTTP_PROXY", "http_proxy", "no_proxy"]:
             try:
-                if os.environ.has_key(env):
+                if env in os.environ:
                     del os.environ[env]
             except OSError:
                 pass
@@ -269,11 +269,6 @@ class httprepository(remoterepository):
         # 1.0 here is the _protocol_ version
         opener.addheaders = [('User-agent', 'mercurial/proto-1.0')]
         urllib2.install_opener(opener)
-
-    def __del__(self):
-        if self.handler:
-            self.handler.close_all()
-            self.handler = None
 
     def url(self):
         return self.path
@@ -343,7 +338,7 @@ class httprepository(remoterepository):
                 version = proto.split('-', 1)[1]
                 version_info = tuple([int(n) for n in version.split('.')])
             except ValueError:
-                raise repo.RepoError(_("'%s' sent a broken Content-type "
+                raise repo.RepoError(_("'%s' sent a broken Content-Type "
                                      "header (%s)") % (self._url, proto))
             if version_info > (0, 1):
                 raise repo.RepoError(_("'%s' uses newer protocol %s") %
@@ -428,7 +423,7 @@ class httprepository(remoterepository):
             try:
                 rfp = self.do_cmd(
                     'unbundle', data=fp,
-                    headers={'content-type': 'application/octet-stream'},
+                    headers={'Content-Type': 'application/octet-stream'},
                     heads=' '.join(map(hex, heads)))
                 try:
                     ret = int(rfp.readline())

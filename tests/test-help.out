@@ -45,6 +45,7 @@ list of commands:
  annotate     show changeset information per file line
  archive      create unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
+ bisect       subdivision search of changesets
  branch       set or show the current branch name
  branches     list repository named branches
  bundle       create a changegroup file
@@ -79,7 +80,7 @@ list of commands:
  serve        export the repository via HTTP
  showconfig   show combined config settings from all hgrc files
  status       show changed files in the working directory
- tag          add a tag for the current or given revision
+ tag          add one or more tags for the current or given revision
  tags         list repository tags
  tip          show the tip revision
  unbundle     apply one or more changegroup files
@@ -93,6 +94,7 @@ use "hg -v help" to show aliases and global options
  annotate     show changeset information per file line
  archive      create unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
+ bisect       subdivision search of changesets
  branch       set or show the current branch name
  branches     list repository named branches
  bundle       create a changegroup file
@@ -127,7 +129,7 @@ use "hg -v help" to show aliases and global options
  serve        export the repository via HTTP
  showconfig   show combined config settings from all hgrc files
  status       show changed files in the working directory
- tag          add a tag for the current or given revision
+ tag          add one or more tags for the current or given revision
  tags         list repository tags
  tip          show the tip revision
  unbundle     apply one or more changegroup files
@@ -203,17 +205,25 @@ options:
  -w --ignore-all-space     ignore white space when comparing lines
  -b --ignore-space-change  ignore changes in the amount of white space
  -B --ignore-blank-lines   ignore changes whose lines are all blank
+ -U --unified              number of lines of context to show
  -I --include              include names matching the given patterns
  -X --exclude              exclude names matching the given patterns
 
 use "hg -v help diff" to show global options
 hg status [OPTION]... [FILE]...
 
+aliases: st
+
 show changed files in the working directory
 
-    Show status of files in the repository.  If names are given, only
-    files that match are shown.  Files that are clean or ignored, are
-    not listed unless -c (clean), -i (ignored) or -A is given.
+    Show status of files in the repository. If names are given, only
+    files that match are shown. Files that are clean or ignored or
+    source of a copy/move operation, are not listed unless -c (clean),
+    -i (ignored), -C (copies) or -A is given. Unless options described
+    with "show only ..." are given, the options -mardu are used.
+
+    Option -q/--quiet hides untracked (unknown and ignored) files
+    unless explicitly requested with -u/--unknown or -i/-ignored.
 
     NOTE: status may appear to disagree with diff if permissions have
     changed or a merge has occurred. The standard diff format does not
@@ -230,10 +240,8 @@ show changed files in the working directory
     C = clean
     ! = deleted, but still tracked
     ? = not tracked
-    I = ignored (not shown by default)
+    I = ignored
       = the previous added file was copied from here
-
-aliases: st
 
 options:
 

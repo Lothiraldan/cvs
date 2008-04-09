@@ -1,12 +1,9 @@
 creating base
+updating working directory
 4 files updated, 0 files merged, 0 files removed, 0 files unresolved
 creating branch a
 creating branch b
 we shouldn't have anything but n state here
-n 644          2 bar
-n 644          3 baz
-n 644          3 foo
-n 644          2 quux
 merging
 pulling from ../a
 searching for changes

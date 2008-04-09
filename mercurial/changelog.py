@@ -5,9 +5,9 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from revlog import *
-from i18n import _
-import os, time, util
+from node import bin, hex, nullid
+from revlog import revlog
+import util
 
 def _string_escape(text):
     """
@@ -16,15 +16,12 @@ def _string_escape(text):
     >>> s
     'ab\\ncd\\\\\\\\n\\x00ab\\rcd\\\\\\n'
     >>> res = _string_escape(s)
-    >>> s == _string_unescape(res)
+    >>> s == res.decode('string_escape')
     True
     """
     # subset of the string_escape codec
     text = text.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r')
     return text.replace('\0', '\\0')
-
-def _string_unescape(text):
-    return text.decode('string_escape')
 
 class appender:
     '''the changelog index must be update last on disk, so we use this class
@@ -111,6 +108,9 @@ class changelog(revlog):
         # if we're doing an initial clone, divert to another file
         if self._delaycount == 0:
             self._delayname = fp.name
+            if not self.count():
+                # make sure to truncate the file
+                mode = mode.replace('a', 'w')
             return self._realopener(name + ".a", mode)
         # otherwise, divert to memory
         return appender(fp, self._delaybuf)
@@ -123,10 +123,9 @@ class changelog(revlog):
     def decode_extra(self, text):
         extra = {}
         for l in text.split('\0'):
-            if not l:
-                continue
-            k, v = _string_unescape(l).split(':', 1)
-            extra[k] = v
+            if l:
+                k, v = l.decode('string_escape').split(':', 1)
+                extra[k] = v
         return extra
 
     def encode_extra(self, d):
@@ -136,7 +135,7 @@ class changelog(revlog):
         items = [_string_escape('%s:%s' % (k, d[k])) for k in keys]
         return "\0".join(items)
 
-    def extract(self, text):
+    def read(self, node):
         """
         format used:
         nodeid\n        : manifest node in ascii
@@ -149,6 +148,7 @@ class changelog(revlog):
 
         changelog v0 doesn't use extra
         """
+        text = self.revision(node)
         if not text:
             return (nullid, "", (0, 0), [], "", {'branch': 'default'})
         last = text.index("\n\n")
@@ -174,9 +174,6 @@ class changelog(revlog):
             extra['branch'] = 'default'
         files = l[3:]
         return (manifest, user, (time, timezone), files, desc, extra)
-
-    def read(self, node):
-        return self.extract(self.revision(node))
 
     def add(self, manifest, list, desc, transaction, p1=None, p2=None,
                   user=None, date=None, extra={}):

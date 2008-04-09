@@ -6,7 +6,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 import imp, os
-import util, sys
+import util
 from i18n import _
 
 _extensions = {}
@@ -78,8 +78,12 @@ def loadall(ui):
         except (util.SignalInterrupt, KeyboardInterrupt):
             raise
         except Exception, inst:
-            ui.warn(_("*** failed to import extension %s: %s\n") %
-                    (name, inst))
+            if path:
+                ui.warn(_("*** failed to import extension %s from %s: %s\n")
+                        % (name, path, inst))
+            else:
+                ui.warn(_("*** failed to import extension %s: %s\n")
+                        % (name, inst))
             if ui.print_exc():
                 return 1
 

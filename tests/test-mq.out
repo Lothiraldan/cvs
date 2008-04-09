@@ -52,6 +52,7 @@ list of commands:
 
 use "hg -v help mq" to show aliases and global options
 adding a
+updating working directory
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 adding b/z
 % qinit
@@ -59,12 +60,19 @@ adding b/z
 % qinit -c
 A .hgignore
 A series
+% qnew should refuse bad patch names
+abort: "series" cannot be used as the name of a patch
+abort: "status" cannot be used as the name of a patch
+abort: "guards" cannot be used as the name of a patch
+abort: ".hgignore" cannot be used as the name of a patch
 % qnew implies add
 A .hgignore
 A series
 A test.patch
 % qinit; qinit -c
   .hgignore:
+^\.hg
+^\.mq
 syntax: glob
 status
 guards
@@ -99,7 +107,7 @@ foo bar
 diff -r  xa
 --- a/a
 +++ b/a
-@@ -1,1 +1,2 @@ a
+@@ -1,1 +1,2 @@
  a
 +a
 % empty qrefresh
@@ -110,7 +118,7 @@ foo bar
 working dir diff:
 --- a/a
 +++ b/a
-@@ -1,1 +1,2 @@ a
+@@ -1,1 +1,2 @@
  a
 +a
 % qpop
@@ -242,6 +250,12 @@ adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
 (run 'hg update' to get a working copy)
+% strip with local changes, should complain
+1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+abort: local changes found
+% --force strip with local changes
+0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+saving bundle to 
 % cd b; hg qrefresh
 adding a
 foo
@@ -249,7 +263,7 @@ foo
 diff -r cb9a9f314b8b a
 --- a/a
 +++ b/a
-@@ -1,1 +1,2 @@ a
+@@ -1,1 +1,2 @@
  a
 +a
 diff -r cb9a9f314b8b b/f
@@ -281,6 +295,18 @@ Errors during apply, please fix and refresh bar
 0 qparent
 1 qbase foo
 2 qtip bar tip
+% bad node in status
+Now at: foo
+changeset:   0:cb9a9f314b8b
+mq status file refers to unknown node
+tag:         tip
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     a
+
+mq status file refers to unknown node
+default                        0:cb9a9f314b8b
+abort: working directory revision is not qtip
 new file
 
 diff --git a/new b/new
@@ -304,14 +330,15 @@ diff --git a/new b/copy
 copy from new
 copy to copy
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
+created new head
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
 adding branch
 adding changesets
 adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
-(run 'hg update' to get a working copy)
 Patch queue now empty
+(working directory not at tip)
 applying bar
 Now at: bar
 diff --git a/bar b/bar
@@ -344,8 +371,8 @@ adding changesets
 adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
-(run 'hg update' to get a working copy)
 Patch queue now empty
+(working directory not at tip)
 applying bar
 Now at: bar
 diff --git a/foo b/bleh
@@ -384,6 +411,7 @@ Now at: addbucephalus
 8ba2a2f3e77b55d03051ff9c24ad65e7  bucephalus
 % strip again
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+created new head
 merging foo
 0 files updated, 1 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
@@ -419,7 +447,6 @@ adding changesets
 adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
-(run 'hg update' to get a working copy)
 changeset:   1:20cbbe65cff7
 tag:         tip
 user:        test
@@ -439,6 +466,7 @@ main repo:
     rev 0: add foo
 patch repo:
     rev 0: checkpoint
+updating working directory
 3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 main repo:
@@ -450,9 +478,15 @@ main repo:
     rev 0: add foo
 patch repo:
     rev 0: checkpoint
+updating working directory
 3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 main repo:
     rev 0: add foo
 patch repo:
     rev 0: checkpoint
+% test applying on an empty file (issue 1033)
+adding a
+Patch queue now empty
+applying changea
+Now at: changea

@@ -13,15 +13,41 @@ platform-specific details from the core.
 """
 
 from i18n import _
-import cStringIO, errno, getpass, popen2, re, shutil, sys, tempfile, strutil
+import cStringIO, errno, getpass, re, shutil, sys, tempfile
 import os, stat, threading, time, calendar, ConfigParser, locale, glob, osutil
-import re, urlparse, imp
+import imp, urlparse
+
+# Python compatibility
 
 try:
     set = set
     frozenset = frozenset
 except NameError:
     from sets import Set as set, ImmutableSet as frozenset
+
+_md5 = None
+def md5(s):
+    global _md5
+    if _md5 is None:
+        try:
+            import hashlib
+            _md5 = hashlib.md5
+        except ImportError:
+            import md5
+            _md5 = md5.md5
+    return _md5(s)
+
+_sha1 = None
+def sha1(s):
+    global _sha1
+    if _sha1 is None:
+        try:
+            import hashlib
+            _sha1 = hashlib.sha1
+        except ImportError:
+            import sha
+            _sha1 = sha.sha
+    return _sha1(s)
 
 try:
     _encoding = os.environ.get("HGENCODING")
@@ -80,18 +106,6 @@ def fromlocal(s):
 def locallen(s):
     """Find the length in characters of a local string"""
     return len(s.decode(_encoding, "replace"))
-
-def localsub(s, a, b=None):
-    try:
-        u = s.decode(_encoding, _encodingmode)
-        if b is not None:
-            u = u[a:b]
-        else:
-            u = u[:a]
-        return u.encode(_encoding, _encodingmode)
-    except UnicodeDecodeError, inst:
-        sub = s[max(0, inst.start-10), inst.start+10]
-        raise Abort(_("decoding near '%s': %s!") % (sub, inst))
 
 # used by parsedate
 defaultdateformats = (
@@ -236,13 +250,7 @@ def binary(s):
 
 def unique(g):
     """return the uniq elements of iterable g"""
-    seen = {}
-    l = []
-    for f in g:
-        if f not in seen:
-            seen[f] = 1
-            l.append(f)
-    return l
+    return dict.fromkeys(g).keys()
 
 class Abort(Exception):
     """Raised if a command needs to print an error and exit."""
@@ -280,7 +288,7 @@ def globre(pat, head='^', tail='$'):
     "convert a glob pattern into a regexp"
     i, n = 0, len(pat)
     res = ''
-    group = False
+    group = 0
     def peek(): return i < n and pat[i]
     while i < n:
         c = pat[i]
@@ -310,11 +318,11 @@ def globre(pat, head='^', tail='$'):
                     stuff = '\\' + stuff
                 res = '%s[%s]' % (res, stuff)
         elif c == '{':
-            group = True
+            group += 1
             res += '(?:'
         elif c == '}' and group:
             res += ')'
-            group = False
+            group -= 1
         elif c == ',' and group:
             res += '|'
         elif c == '\\':
@@ -346,20 +354,20 @@ def pathto(root, n1, n2):
         if os.path.splitdrive(root)[0] != os.path.splitdrive(n1)[0]:
             return os.path.join(root, localpath(n2))
         n2 = '/'.join((pconvert(root), n2))
-    a, b = n1.split(os.sep), n2.split('/')
+    a, b = splitpath(n1), n2.split('/')
     a.reverse()
     b.reverse()
     while a and b and a[-1] == b[-1]:
         a.pop()
         b.pop()
     b.reverse()
-    return os.sep.join((['..'] * len(a)) + b)
+    return os.sep.join((['..'] * len(a)) + b) or '.'
 
 def canonpath(root, cwd, myname):
     """return the canonical path of myname, given cwd and root"""
     if root == os.sep:
         rootsep = os.sep
-    elif root.endswith(os.sep):
+    elif endswithsep(root):
         rootsep = root
     else:
         rootsep = root + os.sep
@@ -477,6 +485,8 @@ def _matcher(canonroot, cwd, names, inc, exc, dflt_pat, src):
             return
         try:
             pat = '(?:%s)' % '|'.join([regex(k, p, tail) for (k, p) in pats])
+            if len(pat) > 20000:
+                raise OverflowError()
             return re.compile(pat).match
         except OverflowError:
             # We're using a Python with a tiny regex engine and we
@@ -726,7 +736,7 @@ class path_auditor(object):
         if path in self.audited:
             return
         normpath = os.path.normcase(path)
-        parts = normpath.split(os.sep)
+        parts = splitpath(normpath)
         if (os.path.splitdrive(path)[0] or parts[0] in ('.hg', '')
             or os.pardir in parts):
             raise Abort(_("path contains illegal component: %s") % path)
@@ -747,14 +757,15 @@ class path_auditor(object):
                       os.path.isdir(os.path.join(curpath, '.hg'))):
                     raise Abort(_('path %r is inside repo %r') %
                                 (path, prefix))
-
+        parts.pop()
         prefixes = []
-        for c in strutil.rfindall(normpath, os.sep):
-            prefix = normpath[:c]
+        for n in range(len(parts)):
+            prefix = os.sep.join(parts)
             if prefix in self.auditeddir:
                 break
             check(prefix)
             prefixes.append(prefix)
+            parts.pop()
 
         self.audited.add(path)
         # only add prefixes to the cache after checking everything: we don't
@@ -864,18 +875,23 @@ def checkexec(path):
 
     Requires a directory (like /foo/.hg)
     """
+
+    # VFAT on some Linux versions can flip mode but it doesn't persist
+    # a FS remount. Frequently we can detect it if files are created
+    # with exec bit on.
+
     try:
         EXECFLAGS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
         fh, fn = tempfile.mkstemp("", "", path)
-        os.close(fh)
-        m = os.stat(fn).st_mode
-        # VFAT on Linux can flip mode but it doesn't persist a FS remount.
-        # frequently we can detect it if files are created with exec bit on.
-        new_file_has_exec = m & EXECFLAGS
-        os.chmod(fn, m ^ EXECFLAGS)
-        exec_flags_cannot_flip = (os.stat(fn).st_mode == m)
-        os.unlink(fn)
-    except (IOError,OSError):
+        try:
+            os.close(fh)
+            m = os.stat(fn).st_mode & 0777
+            new_file_has_exec = m & EXECFLAGS
+            os.chmod(fn, m ^ EXECFLAGS)
+            exec_flags_cannot_flip = ((os.stat(fn).st_mode & 0777) == m)
+        finally:
+            os.unlink(fn)
+    except (IOError, OSError):
         # we don't care, the user probably won't be able to commit anyway
         return False
     return not (new_file_has_exec or exec_flags_cannot_flip)
@@ -910,6 +926,25 @@ os.umask(_umask)
 def needbinarypatch():
     """return True if patches should be applied in binary mode by default."""
     return os.name == 'nt'
+
+def endswithsep(path):
+    '''Check path ends with os.sep or os.altsep.'''
+    return path.endswith(os.sep) or os.altsep and path.endswith(os.altsep)
+
+def splitpath(path):
+    '''Split path by os.sep.
+    Note that this function does not use os.altsep because this is
+    an alternative of simple "xxx.split(os.sep)".
+    It is recommended to use os.path.normpath() before using this
+    function if need.'''
+    return path.split(os.sep)
+
+def gui():
+    '''Are we running in a GUI?'''
+    return os.name == "nt" or os.name == "mac" or os.environ.get("DISPLAY")
+
+def lookup_reg(key, name=None, scope=None):
+    return None
 
 # Platform specific variants
 if os.name == 'nt':
@@ -975,13 +1010,15 @@ if os.name == 'nt':
     def user_rcpath():
         '''return os-specific hgrc search path to the user dir'''
         try:
-            userrc = user_rcpath_win32()
+            path = user_rcpath_win32()
         except:
-            userrc = os.path.join(os.path.expanduser('~'), 'mercurial.ini')
-        path = [userrc]
+            home = os.path.expanduser('~')
+            path = [os.path.join(home, 'mercurial.ini'),
+                    os.path.join(home, '.hgrc')]
         userprofile = os.environ.get('USERPROFILE')
         if userprofile:
             path.append(os.path.join(userprofile, 'mercurial.ini'))
+            path.append(os.path.join(userprofile, '.hgrc'))
         return path
 
     def parse_patch_output(output_line):
@@ -1001,17 +1038,17 @@ if os.name == 'nt':
         '''return False if pid dead, True if running or not known'''
         return True
 
-    def set_exec(f, mode):
-        pass
-
-    def set_link(f, mode):
+    def set_flags(f, flags):
         pass
 
     def set_binary(fd):
-        msvcrt.setmode(fd.fileno(), os.O_BINARY)
+        # When run without console, pipes may expose invalid
+        # fileno(), usually set to -1.
+        if hasattr(fd, 'fileno') and fd.fileno() >= 0:
+            msvcrt.setmode(fd.fileno(), os.O_BINARY)
 
     def pconvert(path):
-        return path.replace("\\", "/")
+        return '/'.join(splitpath(path))
 
     def localpath(path):
         return path.replace('/', '\\')
@@ -1148,36 +1185,33 @@ else:
         """check whether a file is executable"""
         return (os.lstat(f).st_mode & 0100 != 0)
 
-    def set_exec(f, mode):
+    def set_flags(f, flags):
         s = os.lstat(f).st_mode
-        if stat.S_ISLNK(s) or (s & 0100 != 0) == mode:
+        x = "x" in flags
+        l = "l" in flags
+        if l:
+            if not stat.S_ISLNK(s):
+                # switch file to link
+                data = file(f).read()
+                os.unlink(f)
+                os.symlink(data, f)
+            # no chmod needed at this point
             return
-        if mode:
-            # Turn on +x for every +r bit when making a file executable
-            # and obey umask.
-            os.chmod(f, s | (s & 0444) >> 2 & ~_umask)
-        else:
-            os.chmod(f, s & 0666)
-
-    def set_link(f, mode):
-        """make a file a symbolic link/regular file
-
-        if a file is changed to a link, its contents become the link data
-        if a link is changed to a file, its link data become its contents
-        """
-
-        m = os.path.islink(f)
-        if m == bool(mode):
-            return
-
-        if mode: # switch file to link
-            data = file(f).read()
-            os.unlink(f)
-            os.symlink(data, f)
-        else:
+        if stat.S_ISLNK(s):
+            # switch link to file
             data = os.readlink(f)
             os.unlink(f)
             file(f, "w").write(data)
+            s = 0666 & ~_umask # avoid restatting for chmod
+
+        sx = s & 0100
+        if x and not sx:
+            # Turn on +x for every +r bit when making a file executable
+            # and obey umask.
+            os.chmod(f, s | (s & 0444) >> 2 & ~_umask)
+        elif not x and sx:
+            # Turn off all +x bits
+            os.chmod(f, s & 0666)
 
     def set_binary(fd):
         pass
@@ -1313,7 +1347,7 @@ def encodedopener(openerfn, fn):
         return openerfn(fn(path), *args, **kw)
     return o
 
-def mktempcopy(name, emptyok=False):
+def mktempcopy(name, emptyok=False, createmode=None):
     """Create a temporary file with the same contents from name
 
     The permission bits are copied from the original file.
@@ -1330,11 +1364,14 @@ def mktempcopy(name, emptyok=False):
     # what we want.  If the original file already exists, just copy
     # its mode.  Otherwise, manually obey umask.
     try:
-        st_mode = os.lstat(name).st_mode
+        st_mode = os.lstat(name).st_mode & 0777
     except OSError, inst:
         if inst.errno != errno.ENOENT:
             raise
-        st_mode = 0666 & ~_umask
+        st_mode = createmode
+        if st_mode is None:
+            st_mode = ~_umask
+        st_mode &= 0666
     os.chmod(temp, st_mode)
     if emptyok:
         return temp
@@ -1365,9 +1402,10 @@ class atomictempfile(posixfile):
     file.  When rename is called, the copy is renamed to the original
     name, making the changes visible.
     """
-    def __init__(self, name, mode):
+    def __init__(self, name, mode, createmode):
         self.__name = name
-        self.temp = mktempcopy(name, emptyok=('w' in mode))
+        self.temp = mktempcopy(name, emptyok=('w' in mode),
+                               createmode=createmode)
         posixfile.__init__(self, self.temp, mode)
 
     def rename(self):
@@ -1382,6 +1420,22 @@ class atomictempfile(posixfile):
             except: pass
             posixfile.close(self)
 
+def makedirs(name, mode=None):
+    """recursive directory creation with parent mode inheritance"""
+    try:
+        os.mkdir(name)
+        if mode is not None:
+            os.chmod(name, mode)
+        return
+    except OSError, err:
+        if err.errno == errno.EEXIST:
+            return
+        if err.errno != errno.ENOENT:
+            raise
+    parent = os.path.abspath(os.path.dirname(name))
+    makedirs(parent, mode)
+    makedirs(name, mode)
+
 class opener(object):
     """Open files relative to a base directory
 
@@ -1394,12 +1448,18 @@ class opener(object):
             self.audit_path = path_auditor(base)
         else:
             self.audit_path = always
+        self.createmode = None
 
     def __getattr__(self, name):
         if name == '_can_symlink':
             self._can_symlink = checklink(self.base)
             return self._can_symlink
         raise AttributeError(name)
+
+    def _fixfilemode(self, name):
+        if self.createmode is None:
+            return
+        os.chmod(name, self.createmode & 0666)
 
     def __call__(self, path, mode="r", text=False, atomictemp=False):
         self.audit_path(path)
@@ -1408,6 +1468,7 @@ class opener(object):
         if not text and "b" not in mode:
             mode += "b" # for that other OS
 
+        nlink = -1
         if mode[0] != "r":
             try:
                 nlink = nlinks(f)
@@ -1415,12 +1476,15 @@ class opener(object):
                 nlink = 0
                 d = os.path.dirname(f)
                 if not os.path.isdir(d):
-                    os.makedirs(d)
+                    makedirs(d, self.createmode)
             if atomictemp:
-                return atomictempfile(f, mode)
+                return atomictempfile(f, mode, self.createmode)
             if nlink > 1:
                 rename(mktempcopy(f), f)
-        return posixfile(f, mode)
+        fp = posixfile(f, mode)
+        if nlink == 0:
+            self._fixfilemode(f)
+        return fp
 
     def symlink(self, src, dst):
         self.audit_path(dst)
@@ -1432,7 +1496,7 @@ class opener(object):
 
         dirname = os.path.dirname(linkname)
         if not os.path.exists(dirname):
-            os.makedirs(dirname)
+            makedirs(dirname, self.createmode)
 
         if self._can_symlink:
             try:
@@ -1444,6 +1508,7 @@ class opener(object):
             f = self(dst, "w")
             f.write(src)
             f.close()
+            self._fixfilemode(dst)
 
 class chunkbuffer(object):
     """Allow arbitrary sized chunks of data to be efficiently read from an
@@ -1504,16 +1569,23 @@ def makedate():
         tz = time.timezone
     return time.mktime(lt), tz
 
-def datestr(date=None, format='%a %b %d %H:%M:%S %Y', timezone=True, timezone_format=" %+03d%02d"):
+def datestr(date=None, format='%a %b %d %H:%M:%S %Y %1%2'):
     """represent a (unixtime, offset) tuple as a localized time.
     unixtime is seconds since the epoch, and offset is the time zone's
     number of seconds away from UTC. if timezone is false, do not
     append time zone to string."""
     t, tz = date or makedate()
+    if "%1" in format or "%2" in format:
+        sign = (tz > 0) and "-" or "+"
+        minutes = abs(tz) / 60
+        format = format.replace("%1", "%c%02d" % (sign, minutes / 60))
+        format = format.replace("%2", "%02d" % (minutes % 60))
     s = time.strftime(format, time.gmtime(float(t) - tz))
-    if timezone:
-        s += timezone_format % (-tz / 3600, ((-tz % 3600) / 60))
     return s
+
+def shortdate(date=None):
+    """turn (timestamp, tzoff) tuple into iso 8631 date."""
+    return datestr(date, format='%Y-%m-%d')
 
 def strdate(string, format, defaults=[]):
     """parse a localized time string and return a (unixtime, offset) tuple.
@@ -1521,9 +1593,10 @@ def strdate(string, format, defaults=[]):
     def timezone(string):
         tz = string.split()[-1]
         if tz[0] in "+-" and len(tz) == 5 and tz[1:].isdigit():
-            tz = int(tz)
-            offset = - 3600 * (tz / 100) - 60 * (tz % 100)
-            return offset
+            sign = (tz[0] == "+") and 1 or -1
+            hours = int(tz[1:3])
+            minutes = int(tz[3:5])
+            return -sign * (hours * 60 + minutes) * 60
         if tz == "GMT" or tz == "UTC":
             return 0
         return None
@@ -1550,17 +1623,21 @@ def strdate(string, format, defaults=[]):
         unixtime = localunixtime + offset
     return unixtime, offset
 
-def parsedate(string, formats=None, defaults=None):
-    """parse a localized time string and return a (unixtime, offset) tuple.
+def parsedate(date, formats=None, defaults=None):
+    """parse a localized date/time string and return a (unixtime, offset) tuple.
+
     The date may be a "unixtime offset" string or in one of the specified
-    formats."""
-    if not string:
+    formats. If the date already is a (unixtime, offset) tuple, it is returned.
+    """
+    if not date:
         return 0, 0
+    if isinstance(date, tuple) and len(date) == 2:
+        return date
     if not formats:
         formats = defaultdateformats
-    string = string.strip()
+    date = date.strip()
     try:
-        when, offset = map(int, string.split(' '))
+        when, offset = map(int, date.split(' '))
     except ValueError:
         # fill out defaults
         if not defaults:
@@ -1570,20 +1647,18 @@ def parsedate(string, formats=None, defaults=None):
             if part not in defaults:
                 if part[0] in "HMS":
                     defaults[part] = "00"
-                elif part[0] in "dm":
-                    defaults[part] = "1"
                 else:
-                    defaults[part] = datestr(now, "%" + part[0], False)
+                    defaults[part] = datestr(now, "%" + part[0])
 
         for format in formats:
             try:
-                when, offset = strdate(string, format, defaults)
-            except ValueError:
+                when, offset = strdate(date, format, defaults)
+            except (ValueError, OverflowError):
                 pass
             else:
                 break
         else:
-            raise Abort(_('invalid date: %r ') % string)
+            raise Abort(_('invalid date: %r ') % date)
     # validate explicit (probably user-specified) date and
     # time zone offset. values must fit in signed 32 bits for
     # current 32-bit linux runtimes. timezones go from UTC-12
@@ -1608,7 +1683,8 @@ def matchdate(date):
     """
 
     def lower(date):
-        return parsedate(date, extendeddateformats)[0]
+        d = dict(mb="1", d="1")
+        return parsedate(date, extendeddateformats, d)[0]
 
     def upper(date):
         d = dict(mb="12", HI="23", M="59", S="59")
@@ -1658,6 +1734,12 @@ def shortuser(user):
         user = user[:f]
     return user
 
+def email(author):
+    '''get email of author.'''
+    r = author.find('>')
+    if r == -1: r = None
+    return author[author.find('<')+1:r]
+
 def ellipsis(text, maxlength=400):
     """Trim string to at most maxlength (default: 400) characters."""
     if len(text) <= maxlength:
@@ -1665,18 +1747,47 @@ def ellipsis(text, maxlength=400):
     else:
         return "%s..." % (text[:maxlength-3])
 
-def walkrepos(path):
+def walkrepos(path, followsym=False, seen_dirs=None):
     '''yield every hg repository under path, recursively.'''
     def errhandler(err):
         if err.filename == path:
             raise err
+    if followsym and hasattr(os.path, 'samestat'):
+        def _add_dir_if_not_there(dirlst, dirname):
+            match = False
+            samestat = os.path.samestat
+            dirstat = os.stat(dirname)
+            for lstdirstat in dirlst:
+                if samestat(dirstat, lstdirstat):
+                    match = True
+                    break
+            if not match:
+                dirlst.append(dirstat)
+            return not match
+    else:
+        followsym = False
 
-    for root, dirs, files in os.walk(path, onerror=errhandler):
-        for d in dirs:
-            if d == '.hg':
-                yield root
-                dirs[:] = []
-                break
+    if (seen_dirs is None) and followsym:
+        seen_dirs = []
+        _add_dir_if_not_there(seen_dirs, path)
+    for root, dirs, files in os.walk(path, topdown=True, onerror=errhandler):
+        if '.hg' in dirs:
+            dirs[:] = [] # don't descend further
+            yield root # found a repository
+            qroot = os.path.join(root, '.hg', 'patches')
+            if os.path.isdir(os.path.join(qroot, '.hg')):
+                yield qroot # we have a patch queue repo here
+        elif followsym:
+            newdirs = []
+            for d in dirs:
+                fname = os.path.join(root, d)
+                if _add_dir_if_not_there(seen_dirs, fname):
+                    if os.path.islink(fname):
+                        for hgname in walkrepos(fname, True, seen_dirs):
+                            yield hgname
+                    else:
+                        newdirs.append(d)
+            dirs[:] = newdirs
 
 _rcpath = None
 
@@ -1743,31 +1854,13 @@ def uirepr(s):
     return repr(s).replace('\\\\', '\\')
 
 def hidepassword(url):
-    '''replaces the password in the url string by three asterisks (***)
-    
-    >>> hidepassword('http://www.example.com/some/path#fragment')
-    'http://www.example.com/some/path#fragment'
-    >>> hidepassword('http://me@www.example.com/some/path#fragment')
-    'http://me@www.example.com/some/path#fragment'
-    >>> hidepassword('http://me:simplepw@www.example.com/path#frag')
-    'http://me:***@www.example.com/path#frag'
-    >>> hidepassword('http://me:complex:pw@www.example.com/path#frag')
-    'http://me:***@www.example.com/path#frag'
-    >>> hidepassword('/path/to/repo')
-    '/path/to/repo'
-    >>> hidepassword('relative/path/to/repo')
-    'relative/path/to/repo'
-    >>> hidepassword('c:\\\\path\\\\to\\\\repo')
-    'c:\\\\path\\\\to\\\\repo'
-    >>> hidepassword('c:/path/to/repo')
-    'c:/path/to/repo'
-    >>> hidepassword('bundle://path/to/bundle')
-    'bundle://path/to/bundle'
-    '''
-    url_parts = list(urlparse.urlparse(url))
-    host_with_pw_pattern = re.compile('^([^:]*):([^@]*)@(.*)$')
-    if host_with_pw_pattern.match(url_parts[1]):
-        url_parts[1] = re.sub(host_with_pw_pattern, r'\1:***@\3',
-            url_parts[1])
-    return urlparse.urlunparse(url_parts)
+    '''hide user credential in a url string'''
+    scheme, netloc, path, params, query, fragment = urlparse.urlparse(url)
+    netloc = re.sub('([^:]*):([^@]*)@(.*)', r'\1:***@\3', netloc)
+    return urlparse.urlunparse((scheme, netloc, path, params, query, fragment))
 
+def removeauth(url):
+    '''remove all authentication information from a url string'''
+    scheme, netloc, path, params, query, fragment = urlparse.urlparse(url)
+    netloc = netloc[netloc.find('@')+1:]
+    return urlparse.urlunparse((scheme, netloc, path, params, query, fragment))

@@ -7,7 +7,8 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 import os, sys, errno, urllib, BaseHTTPServer, socket, SocketServer, traceback
-from mercurial import ui, hg, util, templater
+from mercurial import hg, util
+from mercurial.repo import RepoError
 from hgweb_mod import hgweb
 from hgwebdir_mod import hgwebdir
 from mercurial.i18n import gettext as _
@@ -76,7 +77,7 @@ class _hgwebhandler(object, BaseHTTPServer.BaseHTTPRequestHandler):
         self.do_POST()
 
     def do_hgweb(self):
-        path_info, query = _splitURI(self.path)
+        path, query = _splitURI(self.path)
 
         env = {}
         env['GATEWAY_INTERFACE'] = 'CGI/1.1'
@@ -84,8 +85,8 @@ class _hgwebhandler(object, BaseHTTPServer.BaseHTTPRequestHandler):
         env['SERVER_NAME'] = self.server.server_name
         env['SERVER_PORT'] = str(self.server.server_port)
         env['REQUEST_URI'] = self.path
-        env['SCRIPT_NAME'] = ''
-        env['PATH_INFO'] = path_info
+        env['SCRIPT_NAME'] = self.server.prefix
+        env['PATH_INFO'] = path[len(self.server.prefix):]
         env['REMOTE_HOST'] = self.client_address[0]
         env['REMOTE_ADDR'] = self.client_address[0]
         if query:
@@ -197,7 +198,7 @@ def create_server(ui, repo):
 
     def openlog(opt, default):
         if opt and opt != '-':
-            return open(opt, 'w')
+            return open(opt, 'a')
         return default
 
     if repo is None:
@@ -206,6 +207,9 @@ def create_server(ui, repo):
         myui = repo.ui
     address = myui.config("web", "address", "")
     port = int(myui.config("web", "port", 8000))
+    prefix = myui.config("web", "prefix", "")
+    if prefix:
+        prefix = "/" + prefix.strip("/")
     use_ipv6 = myui.configbool("web", "ipv6")
     webdir_conf = myui.config("web", "webdir_conf")
     ssl_cert = myui.config("web", "certificate")
@@ -244,16 +248,10 @@ def create_server(ui, repo):
                 elif repo is not None:
                     hgwebobj = hgweb(hg.repository(repo.ui, repo.root))
                 else:
-                    raise hg.RepoError(_("There is no Mercurial repository here"
-                                         " (.hg not found)"))
+                    raise RepoError(_("There is no Mercurial repository here"
+                                      " (.hg not found)"))
                 return hgwebobj
             self.application = make_handler()
-
-            addr = address
-            if addr in ('', '::'):
-                addr = socket.gethostname()
-
-            self.addr, self.port = addr, port
 
             if ssl_cert:
                 try:
@@ -268,12 +266,16 @@ def create_server(ui, repo):
                 self.server_bind()
                 self.server_activate()
 
+            self.addr, self.port = self.socket.getsockname()[0:2]
+            self.prefix = prefix
+            self.fqaddr = socket.getfqdn(address)
+
     class IPv6HTTPServer(MercurialHTTPServer):
         address_family = getattr(socket, 'AF_INET6', None)
 
         def __init__(self, *args, **kwargs):
             if self.address_family is None:
-                raise hg.RepoError(_('IPv6 not available on this system'))
+                raise RepoError(_('IPv6 not available on this system'))
             super(IPv6HTTPServer, self).__init__(*args, **kwargs)
 
     if ssl_cert:
@@ -287,4 +289,5 @@ def create_server(ui, repo):
         else:
             return MercurialHTTPServer((address, port), handler)
     except socket.error, inst:
-        raise util.Abort(_('cannot start server: %s') % inst.args[1])
+        raise util.Abort(_("cannot start server at '%s:%d': %s")
+                         % (address, port, inst.args[1]))

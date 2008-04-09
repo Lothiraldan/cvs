@@ -274,6 +274,7 @@ proc parsecommit {id contents listed olds} {
     set comname {}
     set comdate {}
     set rev {}
+    set branch {}
     if {![info exists nchildren($id)]} {
 	set children($id) {}
 	set nchildren($id) 0
@@ -310,6 +311,8 @@ proc parsecommit {id contents listed olds} {
 		    set comname [join [lrange $line 1 [expr {$x - 1}]]]
 		} elseif {$tag == "revision"} {
 		    set rev [lindex $line 1]
+        } elseif {$tag == "branch"} {
+		    set branch [join [lrange $line 1 end]]
 		}
 	    }
 	} else {
@@ -334,17 +337,30 @@ proc parsecommit {id contents listed olds} {
 	set comdate [clock format $comdate -format "%Y-%m-%d %H:%M:%S"]
     }
     set commitinfo($id) [list $headline $auname $audate \
-			     $comname $comdate $comment $rev]
+			     $comname $comdate $comment $rev $branch]
 }
 
 proc readrefs {} {
     global tagids idtags headids idheads tagcontents env curid
-    
-    set curid [exec $env(HG) --config ui.report_untrusted=false id]
+
+    set status [catch {exec $env(HG) --config ui.report_untrusted=false id} curid]
+    if { $status != 0 } {
+        puts $::errorInfo
+        if { ![string equal $::errorCode NONE] } {
+            exit 2
+        }
+    }
     regexp -- {[[:xdigit:]]+} $curid curid
 
-    set tags [exec $env(HG) --config ui.report_untrusted=false tags]
+    set status [catch {exec $env(HG) --config ui.report_untrusted=false tags} tags]
+    if { $status != 0 } {
+        puts $::errorInfo
+        if { ![string equal $::errorCode NONE] } {
+            exit 2
+        }
+    }
     regsub -all "\r\n" $tags "\n" tags
+
     set lines [split $tags "\n"]
     foreach f $lines {
 	regexp {(\S+)$} $f full
@@ -2286,6 +2302,9 @@ proc selectline {l isnew} {
     $ctext mark gravity fmark.0 left
     set info $commitinfo($id)
     $ctext insert end "Revision: [lindex $info 6]\n"
+    if {[llength [lindex $info 7]] > 0} {
+        $ctext insert end "Branch: [lindex $info 7]\n"
+    }
     $ctext insert end "Author: [lindex $info 1]  [lindex $info 2]\n"
     $ctext insert end "Committer: [lindex $info 3]  [lindex $info 4]\n"
     if {[info exists idtags($id)]} {
@@ -2320,8 +2339,12 @@ proc selectline {l isnew} {
 
     $cflist delete 0 end
     $cflist insert end "Comments"
+    if {$nparents($id) <= 1} {
+    set parent "null"
     if {$nparents($id) == 1} {
-	startdiff [concat $id $parents($id)]
+        set parent $parents($id)
+    }
+	startdiff [concat $id $parent]
     } elseif {$nparents($id) > 1} {
 	mergediff $id
     }

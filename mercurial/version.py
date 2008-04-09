@@ -1,4 +1,4 @@
-# Copyright (C) 2005, 2006 by Intevation GmbH
+# Copyright (C) 2005, 2006, 2008 by Intevation GmbH
 # Author(s):
 # Thomas Arendsen Hein <thomas@intevation.de>
 #
@@ -10,10 +10,8 @@ Mercurial version
 """
 
 import os
-import os.path
 import re
 import time
-import util
 
 unknown_version = 'unknown'
 remembered_version = False
@@ -50,7 +48,7 @@ def remember_version(version=None):
     """Store version information."""
     global remembered_version
     if not version and os.path.isdir(".hg"):
-        f = util.popen("hg identify")  # use real hg installation
+        f = os.popen("hg identify")  # use real hg installation
         ident = f.read()[:-1]
         if not f.close() and ident:
             ids = ident.split(' ', 1)

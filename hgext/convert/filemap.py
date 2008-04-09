@@ -10,6 +10,7 @@ from mercurial import util
 from common import SKIPREV, converter_source
 
 def rpairs(name):
+    yield '.', name
     e = len(name)
     while e != -1:
         yield name[:e], name[e+1:]
@@ -127,6 +128,12 @@ class filemap_source(converter_source):
         self.origparents = {}
         self.children = {}
         self.seenchildren = {}
+
+    def before(self):
+        self.base.before()
+
+    def after(self):
+        self.base.after()
 
     def setrevmap(self, revmap):
         # rebuild our state to make things restartable

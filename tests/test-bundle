@@ -32,6 +32,8 @@ hg verify
 cd ..
 hg init empty
 
+echo "====== Bundle --all"
+hg -R test bundle --all all.hg
 echo "====== Bundle test to full.hg"
 hg -R test bundle full.hg empty
 echo "====== Unbundle full.hg in test"
@@ -70,7 +72,14 @@ echo 'changegroup = python ../printenv.py changegroup' >> .hg/hgrc
 #doesn't work (yet ?)
 #hg -R bundle://../full.hg verify
 hg pull bundle://../full.hg
+echo "====== Rollback empty"
+hg rollback
 cd ..
+echo "====== Log -R bundle:empty+full.hg"
+hg -R bundle:empty+full.hg log --template="{rev} "
+echo ""
+echo "====== Pull full.hg into empty again (using -R; with hook)"
+hg -R empty pull full.hg
 
 echo "====== Create partial clones"
 rm -r empty
@@ -87,6 +96,11 @@ hg -R bundle://../full.hg outgoing ../partial2
 echo "====== Outgoing -R does-not-exist.hg vs partial2 in partial"
 hg -R bundle://../does-not-exist.hg outgoing ../partial2
 cd ..
+
+echo "====== Direct clone from bundle (all-history)"
+hg clone full.hg full-clone
+hg -R full-clone heads
+rm -r full-clone
 
 # test for http://www.selenic.com/mercurial/bts/issue216
 echo "====== Unbundle incremental bundles into fresh empty in one go"

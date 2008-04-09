@@ -5,10 +5,21 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import cStringIO, zlib, bz2, tempfile, errno, os, sys
+import cStringIO, zlib, tempfile, errno, os, sys
 from mercurial import util, streamclone
-from mercurial.i18n import gettext as _
-from mercurial.node import *
+from mercurial.node import bin, hex
+from mercurial import changegroup as changegroupmod
+from common import HTTP_OK, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
+
+# __all__ is populated with the allowed commands. Be sure to add to it if
+# you're adding a new command, or the new command won't work.
+
+__all__ = [
+   'lookup', 'heads', 'branches', 'between', 'changegroup',
+   'changegroupsubset', 'capabilities', 'unbundle', 'stream_out',
+]
+
+HGTYPE = 'application/mercurial-0.1'
 
 def lookup(web, req):
     try:
@@ -18,43 +29,43 @@ def lookup(web, req):
         r = str(inst)
         success = 0
     resp = "%s %s\n" % (success, r)
-    req.httphdr("application/mercurial-0.1", length=len(resp))
+    req.respond(HTTP_OK, HGTYPE, length=len(resp))
     req.write(resp)
 
 def heads(web, req):
     resp = " ".join(map(hex, web.repo.heads())) + "\n"
-    req.httphdr("application/mercurial-0.1", length=len(resp))
+    req.respond(HTTP_OK, HGTYPE, length=len(resp))
     req.write(resp)
 
 def branches(web, req):
     nodes = []
-    if req.form.has_key('nodes'):
+    if 'nodes' in req.form:
         nodes = map(bin, req.form['nodes'][0].split(" "))
     resp = cStringIO.StringIO()
     for b in web.repo.branches(nodes):
         resp.write(" ".join(map(hex, b)) + "\n")
     resp = resp.getvalue()
-    req.httphdr("application/mercurial-0.1", length=len(resp))
+    req.respond(HTTP_OK, HGTYPE, length=len(resp))
     req.write(resp)
 
 def between(web, req):
-    if req.form.has_key('pairs'):
+    if 'pairs' in req.form:
         pairs = [map(bin, p.split("-"))
                  for p in req.form['pairs'][0].split(" ")]
     resp = cStringIO.StringIO()
     for b in web.repo.between(pairs):
         resp.write(" ".join(map(hex, b)) + "\n")
     resp = resp.getvalue()
-    req.httphdr("application/mercurial-0.1", length=len(resp))
+    req.respond(HTTP_OK, HGTYPE, length=len(resp))
     req.write(resp)
 
 def changegroup(web, req):
-    req.httphdr("application/mercurial-0.1")
+    req.respond(HTTP_OK, HGTYPE)
     nodes = []
     if not web.allowpull:
         return
 
-    if req.form.has_key('roots'):
+    if 'roots' in req.form:
         nodes = map(bin, req.form['roots'][0].split(" "))
 
     z = zlib.compressobj()
@@ -68,15 +79,15 @@ def changegroup(web, req):
     req.write(z.flush())
 
 def changegroupsubset(web, req):
-    req.httphdr("application/mercurial-0.1")
+    req.respond(HTTP_OK, HGTYPE)
     bases = []
     heads = []
     if not web.allowpull:
         return
 
-    if req.form.has_key('bases'):
+    if 'bases' in req.form:
         bases = [bin(x) for x in req.form['bases'][0].split(' ')]
-    if req.form.has_key('heads'):
+    if 'heads' in req.form:
         heads = [bin(x) for x in req.form['heads'][0].split(' ')]
 
     z = zlib.compressobj()
@@ -90,34 +101,37 @@ def changegroupsubset(web, req):
     req.write(z.flush())
 
 def capabilities(web, req):
-    caps = ['lookup', 'changegroupsubset']
-    if web.configbool('server', 'uncompressed'):
-        caps.append('stream=%d' % web.repo.changelog.version)
-    # XXX: make configurable and/or share code with do_unbundle:
-    unbundleversions = ['HG10GZ', 'HG10BZ', 'HG10UN']
-    if unbundleversions:
-        caps.append('unbundle=%s' % ','.join(unbundleversions))
-    resp = ' '.join(caps)
-    req.httphdr("application/mercurial-0.1", length=len(resp))
+    resp = ' '.join(web.capabilities())
+    req.respond(HTTP_OK, HGTYPE, length=len(resp))
     req.write(resp)
 
 def unbundle(web, req):
+
     def bail(response, headers={}):
-        length = int(req.env['CONTENT_LENGTH'])
+        length = int(req.env.get('CONTENT_LENGTH', 0))
         for s in util.filechunkiter(req, limit=length):
             # drain incoming bundle, else client will not see
             # response when run outside cgi script
             pass
-        req.httphdr("application/mercurial-0.1", headers=headers)
+
+        status = headers.pop('status', HTTP_OK)
+        req.header(headers.items())
+        req.respond(status, HGTYPE)
         req.write('0\n')
         req.write(response)
+
+    # enforce that you can only unbundle with POST requests
+    if req.env['REQUEST_METHOD'] != 'POST':
+        headers = {'status': '405 Method Not Allowed'}
+        bail('unbundle requires POST request\n', headers)
+        return
 
     # require ssl by default, auth info cannot be sniffed and
     # replayed
     ssl_req = web.configbool('web', 'push_ssl', True)
     if ssl_req:
         if req.env.get('wsgi.url_scheme') != 'https':
-            bail(_('ssl required\n'))
+            bail('ssl required\n')
             return
         proto = 'https'
     else:
@@ -125,8 +139,7 @@ def unbundle(web, req):
 
     # do not allow push unless explicitly allowed
     if not web.check_perm(req, 'push', False):
-        bail(_('push not authorized\n'),
-             headers={'status': '401 Unauthorized'})
+        bail('push not authorized\n', headers={'status': '401 Unauthorized'})
         return
 
     their_heads = req.form['heads'][0].split(' ')
@@ -137,10 +150,10 @@ def unbundle(web, req):
 
     # fail early if possible
     if not check_heads():
-        bail(_('unsynced changes\n'))
+        bail('unsynced changes\n')
         return
 
-    req.httphdr("application/mercurial-0.1")
+    req.respond(HTTP_OK, HGTYPE)
 
     # do not lock repo until all changegroup data is
     # streamed. save to temporary file.
@@ -157,63 +170,40 @@ def unbundle(web, req):
             try:
                 if not check_heads():
                     req.write('0\n')
-                    req.write(_('unsynced changes\n'))
+                    req.write('unsynced changes\n')
                     return
 
                 fp.seek(0)
                 header = fp.read(6)
-                if not header.startswith("HG"):
-                    # old client with uncompressed bundle
-                    def generator(f):
-                        yield header
-                        for chunk in f:
-                            yield chunk
-                elif not header.startswith("HG10"):
-                    req.write("0\n")
-                    req.write(_("unknown bundle version\n"))
-                    return
-                elif header == "HG10GZ":
-                    def generator(f):
-                        zd = zlib.decompressobj()
-                        for chunk in f:
-                            yield zd.decompress(chunk)
-                elif header == "HG10BZ":
-                    def generator(f):
-                        zd = bz2.BZ2Decompressor()
-                        zd.decompress("BZ")
-                        for chunk in f:
-                            yield zd.decompress(chunk)
-                elif header == "HG10UN":
-                    def generator(f):
-                        for chunk in f:
-                            yield chunk
-                else:
-                    req.write("0\n")
-                    req.write(_("unknown bundle compression type\n"))
-                    return
-                gen = generator(util.filechunkiter(fp, 4096))
+                if header.startswith('HG') and not header.startswith('HG10'):
+                    raise ValueError('unknown bundle version')
+                elif header not in changegroupmod.bundletypes:
+                    raise ValueError('unknown bundle compression type')
+                gen = changegroupmod.unbundle(header, fp)
 
                 # send addchangegroup output to client
 
-                old_stdout = sys.stdout
-                sys.stdout = cStringIO.StringIO()
+                oldio = sys.stdout, sys.stderr
+                sys.stderr = sys.stdout = cStringIO.StringIO()
 
                 try:
                     url = 'remote:%s:%s' % (proto,
                                             req.env.get('REMOTE_HOST', ''))
                     try:
-                        ret = web.repo.addchangegroup(
-                                    util.chunkbuffer(gen), 'serve', url)
+                        ret = web.repo.addchangegroup(gen, 'serve', url)
                     except util.Abort, inst:
                         sys.stdout.write("abort: %s\n" % inst)
                         ret = 0
                 finally:
                     val = sys.stdout.getvalue()
-                    sys.stdout = old_stdout
+                    sys.stdout, sys.stderr = oldio
                 req.write('%d\n' % ret)
                 req.write(val)
             finally:
                 del lock
+        except ValueError, inst:
+            req.write('0\n')
+            req.write(str(inst) + '\n')
         except (OSError, IOError), inst:
             req.write('0\n')
             filename = getattr(inst, 'filename', '')
@@ -224,14 +214,15 @@ def unbundle(web, req):
                 filename = ''
             error = getattr(inst, 'strerror', 'Unknown error')
             if inst.errno == errno.ENOENT:
-                code = 404
+                code = HTTP_NOT_FOUND
             else:
-                code = 500
-            req.respond(code, '%s: %s\n' % (error, filename))
+                code = HTTP_SERVER_ERROR
+            req.respond(code)
+            req.write('%s: %s\n' % (error, filename))
     finally:
         fp.close()
         os.unlink(tempname)
 
 def stream_out(web, req):
-    req.httphdr("application/mercurial-0.1")
+    req.respond(HTTP_OK, HGTYPE)
     streamclone.stream_out(web.repo, req, untrusted=True)

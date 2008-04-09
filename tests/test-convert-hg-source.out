@@ -1,3 +1,4 @@
+created new head
 merging baz and foo
 1 files updated, 1 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
@@ -5,15 +6,17 @@ merging baz and foo
 merging foo and baz
 1 files updated, 1 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
+created new head
 initializing destination new repository
 scanning source...
 sorting...
 converting...
-4 add foo bar
-3 change foo
-2 make bar and baz copies of foo
-1 merge local copy
-0 merge remote copy
+5 add foo bar
+4 change foo
+3 make bar and baz copies of foo
+2 merge local copy
+1 merge remote copy
+0 mark baz executable
 comparing with ../orig
 searching for changes
 no changes found
