@@ -10,25 +10,17 @@ import os, mimetypes
 from mercurial.node import hex, nullid
 from mercurial.repo import RepoError
 from mercurial import mdiff, ui, hg, util, patch, hook
-from mercurial import revlog, templater, templatefilters, changegroup
+from mercurial import revlog, templater, templatefilters
 from common import get_mtime, style_map, paritygen, countgen, ErrorResponse
 from common import HTTP_OK, HTTP_BAD_REQUEST, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
 from request import wsgirequest
 import webcommands, protocol, webutil
 
-shortcuts = {
-    'cl': [('cmd', ['changelog']), ('rev', None)],
-    'sl': [('cmd', ['shortlog']), ('rev', None)],
-    'cs': [('cmd', ['changeset']), ('node', None)],
-    'f': [('cmd', ['file']), ('filenode', None)],
-    'fl': [('cmd', ['filelog']), ('filenode', None)],
-    'fd': [('cmd', ['filediff']), ('node', None)],
-    'fa': [('cmd', ['annotate']), ('filenode', None)],
-    'mf': [('cmd', ['manifest']), ('manifest', None)],
-    'ca': [('cmd', ['archive']), ('node', None)],
-    'tags': [('cmd', ['tags'])],
-    'tip': [('cmd', ['changeset']), ('node', ['tip'])],
-    'static': [('cmd', ['static']), ('file', None)]
+perms = {
+    'changegroup': 'pull',
+    'changegroupsubset': 'pull',
+    'unbundle': 'push',
+    'stream_out': 'pull',
 }
 
 class hgweb(object):
@@ -44,7 +36,6 @@ class hgweb(object):
         self.reponame = name
         self.archives = 'zip', 'gz', 'bz2'
         self.stripecount = 1
-        self._capabilities = None
         # a repo owner may set web.templates in .hg/hgrc to get any file
         # readable by the user running the CGI script
         self.templatepath = self.config("web", "templates",
@@ -76,18 +67,6 @@ class hgweb(object):
             self.maxfiles = int(self.config("web", "maxfiles", 10))
             self.allowpull = self.configbool("web", "allowpull", True)
             self.encoding = self.config("web", "encoding", util._encoding)
-            self._capabilities = None
-
-    def capabilities(self):
-        if self._capabilities is not None:
-            return self._capabilities
-        caps = ['lookup', 'changegroupsubset']
-        if self.configbool('server', 'uncompressed'):
-            caps.append('stream=%d' % self.repo.changelog.version)
-        if changegroup.bundlepriority:
-            caps.append('unbundle=%s' % ','.join(changegroup.bundlepriority))
-        self._capabilities = caps
-        return caps
 
     def run(self):
         if not os.environ.get('GATEWAY_INTERFACE', '').startswith("CGI/1."):
@@ -97,22 +76,22 @@ class hgweb(object):
 
     def __call__(self, env, respond):
         req = wsgirequest(env, respond)
-        self.run_wsgi(req)
-        return req
+        return self.run_wsgi(req)
 
     def run_wsgi(self, req):
 
         self.refresh()
 
-        # expand form shortcuts
+        # process this if it's a protocol request
+        # protocol bits don't need to create any URLs
+        # and the clients always use the old URL structure
 
-        for k in shortcuts.iterkeys():
-            if k in req.form:
-                for name, value in shortcuts[k]:
-                    if value is None:
-                        value = req.form[k]
-                    req.form[name] = value
-                del req.form[k]
+        cmd = req.form.get('cmd', [''])[0]
+        if cmd and cmd in protocol.__all__:
+            if cmd in perms and not self.check_perm(req, perms[cmd]):
+                return []
+            method = getattr(protocol, cmd)
+            return method(self.repo, req)
 
         # work with CGI variables to create coherent structure
         # use SCRIPT_NAME, PATH_INFO and QUERY_STRING as well as our REPO_NAME
@@ -145,8 +124,10 @@ class hgweb(object):
                 cmd = cmd[style+1:]
 
             # avoid accepting e.g. style parameter as command
-            if hasattr(webcommands, cmd) or hasattr(protocol, cmd):
+            if hasattr(webcommands, cmd):
                 req.form['cmd'] = [cmd]
+            else:
+                cmd = ''
 
             if args and args[0]:
                 node = args.pop(0)
@@ -163,14 +144,6 @@ class hgweb(object):
                     if fn.endswith(ext):
                         req.form['node'] = [fn[:-len(ext)]]
                         req.form['type'] = [type_]
-
-        # process this if it's a protocol request
-
-        cmd = req.form.get('cmd', [''])[0]
-        if cmd in protocol.__all__:
-            method = getattr(protocol, cmd)
-            method(self, req)
-            return
 
         # process the web interface request
 
@@ -196,19 +169,20 @@ class hgweb(object):
 
             req.write(content)
             del tmpl
+            return ''.join(content),
 
         except revlog.LookupError, err:
             req.respond(HTTP_NOT_FOUND, ctype)
             msg = str(err)
             if 'manifest' not in msg:
                 msg = 'revision not found: %s' % err.name
-            req.write(tmpl('error', error=msg))
+            return ''.join(tmpl('error', error=msg)),
         except (RepoError, revlog.RevlogError), inst:
             req.respond(HTTP_SERVER_ERROR, ctype)
-            req.write(tmpl('error', error=str(inst)))
+            return ''.join(tmpl('error', error=str(inst))),
         except ErrorResponse, inst:
             req.respond(inst.code, ctype)
-            req.write(tmpl('error', error=inst.message))
+            return ''.join(tmpl('error', error=inst.message)),
 
     def templater(self, req):
 
@@ -364,16 +338,39 @@ class hgweb(object):
         'zip': ('application/zip', 'zip', '.zip', None),
         }
 
-    def check_perm(self, req, op, default):
-        '''check permission for operation based on user auth.
-        return true if op allowed, else false.
-        default is policy to use if no config given.'''
+    def check_perm(self, req, op):
+        '''Check permission for operation based on request data (including
+        authentication info. Return true if op allowed, else false.'''
+
+        def error(status, message):
+            req.respond(status, protocol.HGTYPE)
+            req.write('0\n%s\n' % message)
+
+        if op == 'pull':
+            return self.allowpull
+
+        # enforce that you can only push using POST requests
+        if req.env['REQUEST_METHOD'] != 'POST':
+            error('405 Method Not Allowed', 'push requires POST request')
+            return False
+
+        # require ssl by default for pushing, auth info cannot be sniffed
+        # and replayed
+        scheme = req.env.get('wsgi.url_scheme')
+        if self.configbool('web', 'push_ssl', True) and scheme != 'https':
+            error(HTTP_OK, 'ssl required')
+            return False
 
         user = req.env.get('REMOTE_USER')
 
-        deny = self.configlist('web', 'deny_' + op)
+        deny = self.configlist('web', 'deny_push')
         if deny and (not user or deny == ['*'] or user in deny):
+            error('401 Unauthorized', 'push not authorized')
             return False
 
-        allow = self.configlist('web', 'allow_' + op)
-        return (allow and (allow == ['*'] or user in allow)) or default
+        allow = self.configlist('web', 'allow_push')
+        result = allow and (allow == ['*'] or user in allow)
+        if not result:
+            error('401 Unauthorized', 'push not authorized')
+
+        return result
