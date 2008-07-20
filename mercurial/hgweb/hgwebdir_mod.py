@@ -70,8 +70,7 @@ class hgwebdir(object):
 
     def __call__(self, env, respond):
         req = wsgirequest(env, respond)
-        self.run_wsgi(req)
-        return req
+        return self.run_wsgi(req)
 
     def run_wsgi(self, req):
 
@@ -91,13 +90,13 @@ class hgwebdir(object):
                     else:
                         fname = req.form['static'][0]
                     req.write(staticfile(static, fname, req))
-                    return
+                    return []
 
                 # top-level index
                 elif not virtual:
                     req.respond(HTTP_OK, ctype)
                     req.write(self.makeindex(req, tmpl))
-                    return
+                    return []
 
                 # nested indexes and hgwebs
 
@@ -108,8 +107,7 @@ class hgwebdir(object):
                         req.env['REPO_NAME'] = virtual
                         try:
                             repo = hg.repository(self.parentui, real)
-                            hgweb(repo).run_wsgi(req)
-                            return
+                            return hgweb(repo).run_wsgi(req)
                         except IOError, inst:
                             msg = inst.strerror
                             raise ErrorResponse(HTTP_SERVER_ERROR, msg)
@@ -121,7 +119,7 @@ class hgwebdir(object):
                     if [r for r in repos if r.startswith(subdir)]:
                         req.respond(HTTP_OK, ctype)
                         req.write(self.makeindex(req, tmpl, subdir))
-                        return
+                        return []
 
                     up = virtual.rfind('/')
                     if up < 0:
@@ -131,10 +129,12 @@ class hgwebdir(object):
                 # prefixes not found
                 req.respond(HTTP_NOT_FOUND, ctype)
                 req.write(tmpl("notfound", repo=virtual))
+                return []
 
             except ErrorResponse, err:
                 req.respond(err.code, ctype)
                 req.write(tmpl('error', error=err.message or ''))
+                return []
         finally:
             tmpl = None
 
