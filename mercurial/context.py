@@ -100,6 +100,14 @@ class changectx(object):
         c = self._repo.changelog.children(self._node)
         return [changectx(self._repo, x) for x in c]
 
+    def ancestors(self):
+        for a in self._repo.changelog.ancestors(self._rev):
+            yield changectx(self._repo, a)
+
+    def descendants(self):
+        for d in self._repo.changelog.descendants(self._rev):
+            yield changectx(self._repo, d)
+
     def _fileinfo(self, path):
         if '_manifest' in self.__dict__:
             try:

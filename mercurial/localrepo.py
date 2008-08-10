@@ -672,7 +672,6 @@ class localrepository(repo.repository):
         meta = {}
         cp = fctx.renamed()
         if cp and cp[0] != fn:
-            cp = cp[0]
             # Mark the new revision of this file as a copy of another
             # file.  This copy data will effectively act as a parent
             # of this new revision.  If this is a merge, the first
@@ -691,22 +690,30 @@ class localrepository(repo.repository):
             #   \       /     merging rev3 and rev4 should use bar@rev2
             #    \- 2 --- 4        as the merge base
             #
-            meta["copy"] = cp
-            if not manifest2: # not a branch merge
-                meta["copyrev"] = hex(manifest1[cp])
-                fp2 = nullid
-            elif fp2 != nullid: # copied on remote side
-                meta["copyrev"] = hex(manifest1[cp])
-            elif fp1 != nullid: # copied on local side, reversed
-                meta["copyrev"] = hex(manifest2[cp])
-                fp2 = fp1
-            elif cp in manifest2: # directory rename on local side
-                meta["copyrev"] = hex(manifest2[cp])
-            else: # directory rename on remote side
-                meta["copyrev"] = hex(manifest1[cp])
-            self.ui.debug(_(" %s: copy %s:%s\n") %
-                          (fn, cp, meta["copyrev"]))
-            fp1 = nullid
+
+            cf = cp[0]
+            cr = manifest1.get(cf)
+            nfp = fp2
+
+            if manifest2: # branch merge
+                if fp2 == nullid: # copied on remote side
+                    if fp1 != nullid or cf in manifest2:
+                        cr = manifest2[cf]
+                        nfp = fp1
+
+            # find source in nearest ancestor if we've lost track
+            if not cr:
+                self.ui.debug(_(" %s: searching for copy revision for %s\n") %
+                              (fn, cf))
+		for a in self['.'].ancestors():
+                    if cf in a:
+                        cr = a[cf].filenode()
+                        break
+
+            self.ui.debug(_(" %s: copy %s:%s\n") % (fn, cf, hex(cr)))
+            meta["copy"] = cf
+            meta["copyrev"] = hex(cr)
+            fp1, fp2 = nullid, nfp
         elif fp2 != nullid:
             # is one parent an ancestor of the other?
             fpa = fl.ancestor(fp1, fp2)
