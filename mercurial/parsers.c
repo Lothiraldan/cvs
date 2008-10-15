@@ -1,0 +1,248 @@
+/*
+ parsers.c - efficient content parsing
+
+ Copyright 2008 Matt Mackall <mpm@selenic.com> and others
+
+ This software may be used and distributed according to the terms of
+ the GNU General Public License, incorporated herein by reference.
+*/
+
+#include <Python.h>
+#include <ctype.h>
+#include <string.h>
+
+static int hexdigit(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+
+	PyErr_SetString(PyExc_ValueError, "input contains non-hex character");
+	return 0;
+}
+
+/*
+ * Turn a hex-encoded string into binary.
+ */
+static PyObject *unhexlify(const char *str, int len)
+{
+	PyObject *ret;
+	const char *c;
+	char *d;
+
+	ret = PyString_FromStringAndSize(NULL, len / 2);
+	if (!ret)
+		return NULL;
+
+	d = PyString_AS_STRING(ret);
+	for (c = str; c < str + len;) {
+		int hi = hexdigit(*c++);
+		int lo = hexdigit(*c++);
+		*d++ = (hi << 4) | lo;
+	}
+
+	return ret;
+}
+
+/*
+ * This code assumes that a manifest is stitched together with newline
+ * ('\n') characters.
+ */
+static PyObject *parse_manifest(PyObject *self, PyObject *args)
+{
+	PyObject *mfdict, *fdict;
+	char *str, *cur, *start, *zero;
+	int len;
+
+	if (!PyArg_ParseTuple(args, "O!O!s#:parse_manifest",
+			      &PyDict_Type, &mfdict,
+			      &PyDict_Type, &fdict,
+			      &str, &len))
+		goto quit;
+
+	for (start = cur = str, zero = NULL; cur < str + len; cur++) {
+		PyObject *file = NULL, *node = NULL;
+		PyObject *flags = NULL;
+		int nlen;
+
+		if (!*cur) {
+			zero = cur;
+			continue;
+		}
+		else if (*cur != '\n')
+			continue;
+
+		if (!zero) {
+			PyErr_SetString(PyExc_ValueError,
+					"manifest entry has no separator");
+			goto quit;
+		}
+
+		file = PyString_FromStringAndSize(start, zero - start);
+		if (!file)
+			goto bail;
+
+		nlen = cur - zero - 1;
+
+		node = unhexlify(zero + 1, nlen > 40 ? 40 : nlen);
+		if (!node)
+			goto bail;
+
+		if (nlen > 40) {
+			PyObject *flags;
+
+			flags = PyString_FromStringAndSize(zero + 41,
+							   nlen - 40);
+			if (!flags)
+				goto bail;
+
+			if (PyDict_SetItem(fdict, file, flags) == -1)
+				goto bail;
+		}
+
+		if (PyDict_SetItem(mfdict, file, node) == -1)
+			goto bail;
+
+		start = cur + 1;
+		zero = NULL;
+
+		Py_XDECREF(flags);
+		Py_XDECREF(node);
+		Py_XDECREF(file);
+		continue;
+	bail:
+		Py_XDECREF(flags);
+		Py_XDECREF(node);
+		Py_XDECREF(file);
+		goto quit;
+	}
+
+	if (len > 0 && *(cur - 1) != '\n') {
+		PyErr_SetString(PyExc_ValueError,
+				"manifest contains trailing garbage");
+		goto quit;
+	}
+
+	Py_INCREF(Py_None);
+	return Py_None;
+quit:
+	return NULL;
+}
+
+#ifdef _WIN32
+# ifdef _MSC_VER
+/* msvc 6.0 has problems */
+#  define inline __inline
+typedef unsigned long uint32_t;
+# else
+#  include <stdint.h>
+# endif
+static uint32_t ntohl(uint32_t x)
+{
+	return ((x & 0x000000ffUL) << 24) |
+		((x & 0x0000ff00UL) <<  8) |
+		((x & 0x00ff0000UL) >>  8) |
+		((x & 0xff000000UL) >> 24);
+}
+#else
+/* not windows */
+# include <sys/types.h>
+# if defined __BEOS__ && !defined __HAIKU__
+#  include <ByteOrder.h>
+# else
+#  include <arpa/inet.h>
+# endif
+# include <inttypes.h>
+#endif
+
+static PyObject *parse_dirstate(PyObject *self, PyObject *args)
+{
+	PyObject *dmap, *cmap, *parents = NULL, *ret = NULL;
+	PyObject *fname = NULL, *cname = NULL, *entry = NULL;
+	char *str, *cur, *end, *cpos;
+	int state, mode, size, mtime, flen;
+	int len;
+	char decode[16]; /* for alignment */
+
+	if (!PyArg_ParseTuple(args, "O!O!s#:parse_dirstate",
+			      &PyDict_Type, &dmap,
+			      &PyDict_Type, &cmap,
+			      &str, &len))
+		goto quit;
+
+	/* read parents */
+	if (len < 40)
+		goto quit;
+
+	parents = Py_BuildValue("s#s#", str, 20, str + 20, 20);
+	if (!parents)
+		goto quit;
+
+	/* read filenames */
+	cur = str + 40;
+	end = str + len;
+
+	while (cur < end - 17) {
+		/* unpack header */
+		state = *cur;
+		memcpy(decode, cur + 1, 16);
+		mode = ntohl(*(uint32_t *)(decode));
+		size = ntohl(*(uint32_t *)(decode + 4));
+		mtime = ntohl(*(uint32_t *)(decode + 8));
+		flen = ntohl(*(uint32_t *)(decode + 12));
+		cur += 17;
+		if (cur + flen > end)
+			goto quit;
+
+		entry = Py_BuildValue("ciii", state, mode, size, mtime);
+		PyObject_GC_UnTrack(entry); /* don't waste time with this */
+		if (!entry)
+			goto quit;
+
+		cpos = memchr(cur, 0, flen);
+		if (cpos) {
+			fname = PyString_FromStringAndSize(cur, cpos - cur);
+			cname = PyString_FromStringAndSize(cpos + 1,
+							   flen - (cpos - cur) - 1);
+			if (!fname || !cname ||
+			    PyDict_SetItem(cmap, fname, cname) == -1 ||
+			    PyDict_SetItem(dmap, fname, entry) == -1)
+				goto quit;
+			Py_DECREF(cname);
+		} else {
+			fname = PyString_FromStringAndSize(cur, flen);
+			if (!fname ||
+			    PyDict_SetItem(dmap, fname, entry) == -1)
+				goto quit;
+		}
+		cur += flen;
+		Py_DECREF(fname);
+		Py_DECREF(entry);
+		fname = cname = entry = NULL;
+	}
+
+	ret = parents;
+	Py_INCREF(ret);
+quit:
+	Py_XDECREF(fname);
+	Py_XDECREF(cname);
+	Py_XDECREF(entry);
+	Py_XDECREF(parents);
+	return ret;
+}
+
+static char parsers_doc[] = "Efficient content parsing.";
+
+static PyMethodDef methods[] = {
+	{"parse_manifest", parse_manifest, METH_VARARGS, "parse a manifest\n"},
+	{"parse_dirstate", parse_dirstate, METH_VARARGS, "parse a dirstate\n"},
+	{NULL, NULL}
+};
+
+PyMODINIT_FUNC initparsers(void)
+{
+	Py_InitModule3("parsers", methods, parsers_doc);
+}
