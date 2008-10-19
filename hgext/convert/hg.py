@@ -17,7 +17,7 @@ import os, time
 from mercurial.i18n import _
 from mercurial.repo import RepoError
 from mercurial.node import bin, hex, nullid
-from mercurial import hg, revlog, util
+from mercurial import hg, revlog, util, context
 
 from common import NoRepo, commit, converter_source, converter_sink
 
@@ -54,11 +54,9 @@ class mercurial_sink(converter_sink):
         self.ui.debug(_('run hg sink pre-conversion action\n'))
         self.wlock = self.repo.wlock()
         self.lock = self.repo.lock()
-        self.repo.dirstate.clear()
 
     def after(self):
         self.ui.debug(_('run hg sink post-conversion action\n'))
-        self.repo.dirstate.invalidate()
         self.lock = None
         self.wlock = None
 
@@ -71,21 +69,6 @@ class mercurial_sink(converter_sink):
     def getheads(self):
         h = self.repo.changelog.heads()
         return [ hex(x) for x in h ]
-
-    def putfile(self, f, e, data):
-        self.repo.wwrite(f, data, e)
-        if f not in self.repo.dirstate:
-            self.repo.dirstate.normallookup(f)
-
-    def copyfile(self, source, dest):
-        self.repo.copy(source, dest)
-
-    def delfile(self, f):
-        try:
-            util.unlink(self.repo.wjoin(f))
-            #self.repo.remove([f])
-        except OSError:
-            pass
 
     def setbranch(self, branch, pbranches):
         if not self.clonebranches:
@@ -125,13 +108,19 @@ class mercurial_sink(converter_sink):
                 self.repo.pull(prepo, [prepo.lookup(h) for h in heads])
             self.before()
 
-    def putcommit(self, files, parents, commit):
-        seen = {}
+    def putcommit(self, files, copies, parents, commit, source):
+
+        files = dict(files)
+        def getfilectx(repo, memctx, f):
+            v = files[f]
+            data = source.getfile(f, v)
+            e = source.getmode(f, v)
+            return context.memfilectx(f, data, 'l' in e, 'x' in e, copies.get(f))
+
         pl = []
         for p in parents:
-            if p not in seen:
+            if p not in pl:
                 pl.append(p)
-                seen[p] = 1
         parents = pl
         nparents = len(parents)
         if self.filemapmode and nparents == 1:
@@ -152,9 +141,9 @@ class mercurial_sink(converter_sink):
         while parents:
             p1 = p2
             p2 = parents.pop(0)
-            a = self.repo.rawcommit(files, text, commit.author, commit.date,
-                                    bin(p1), bin(p2), extra=extra)
-            self.repo.dirstate.clear()
+            ctx = context.memctx(self.repo, (p1, p2), text, files.keys(), getfilectx,
+                                 commit.author, commit.date, extra)
+            a = self.repo.commitctx(ctx)
             text = "(octopus merge fixup)\n"
             p2 = hex(self.repo.changelog.tip())
 
@@ -163,43 +152,39 @@ class mercurial_sink(converter_sink):
             mnode = self.repo.changelog.read(bin(p2))[0]
             if not man.cmp(m1node, man.revision(mnode)):
                 self.repo.rollback()
-                self.repo.dirstate.clear()
                 return parent
         return p2
 
     def puttags(self, tags):
-        try:
-            old = self.repo.wfile(".hgtags").read()
-            oldlines = old.splitlines(1)
-            oldlines.sort()
-        except:
-            oldlines = []
+         try:
+             parentctx = self.repo[self.tagsbranch]
+             tagparent = parentctx.node()
+         except RepoError, inst:
+             parentctx = None
+             tagparent = nullid
 
-        k = tags.keys()
-        k.sort()
-        newlines = []
-        for tag in k:
-            newlines.append("%s %s\n" % (tags[tag], tag))
+         try:
+             oldlines = util.sort(parentctx['.hgtags'].data().splitlines(1))
+         except:
+             oldlines = []
 
-        newlines.sort()
+         newlines = util.sort([("%s %s\n" % (tags[tag], tag)) for tag in tags])
 
-        if newlines != oldlines:
-            self.ui.status("updating tags\n")
-            f = self.repo.wfile(".hgtags", "w")
-            f.write("".join(newlines))
-            f.close()
-            if not oldlines: self.repo.add([".hgtags"])
-            date = "%s 0" % int(time.mktime(time.gmtime()))
-            extra = {}
-            if self.tagsbranch != 'default':
-                extra['branch'] = self.tagsbranch
-            try:
-                tagparent = self.repo.changectx(self.tagsbranch).node()
-            except RepoError, inst:
-                tagparent = nullid
-            self.repo.rawcommit([".hgtags"], "update tags", "convert-repo",
-                                date, tagparent, nullid, extra=extra)
-            return hex(self.repo.changelog.tip())
+         if newlines == oldlines:
+             return None
+         data = "".join(newlines)
+
+         def getfilectx(repo, memctx, f):
+            return context.memfilectx(f, data, False, False, None)
+
+         self.ui.status(_("updating tags\n"))
+         date = "%s 0" % int(time.mktime(time.gmtime()))
+         extra = {'branch': self.tagsbranch}
+         ctx = context.memctx(self.repo, (tagparent, None), "update tags",
+                              [".hgtags"], getfilectx, "convert-repo", date,
+                              extra)
+         self.repo.commitctx(ctx)
+         return hex(self.repo.changelog.tip())
 
     def setfilemapmode(self, active):
         self.filemapmode = active
@@ -221,51 +206,75 @@ class mercurial_source(converter_source):
         self.lastctx = None
         self._changescache = None
         self.convertfp = None
+        # Restrict converted revisions to startrev descendants
+        startnode = ui.config('convert', 'hg.startrev')
+        if startnode is not None:
+            try:
+                startnode = self.repo.lookup(startnode)
+            except repo.RepoError:
+                raise util.Abort(_('%s is not a valid start revision')
+                                 % startnode)
+            startrev = self.repo.changelog.rev(startnode)
+            children = {startnode: 1}
+            for rev in self.repo.changelog.descendants(startrev):
+                children[self.repo.changelog.node(rev)] = 1
+            self.keep = children.__contains__
+        else:
+            self.keep = util.always
 
     def changectx(self, rev):
         if self.lastrev != rev:
-            self.lastctx = self.repo.changectx(rev)
+            self.lastctx = self.repo[rev]
             self.lastrev = rev
         return self.lastctx
 
+    def parents(self, ctx):
+        return [p.node() for p in ctx.parents()
+                if p and self.keep(p.node())]
+
     def getheads(self):
         if self.rev:
-            return [hex(self.repo.changectx(self.rev).node())]
+            heads = [self.repo[self.rev].node()]
         else:
-            return [hex(node) for node in self.repo.heads()]
+            heads = self.repo.heads()
+        return [hex(h) for h in heads if self.keep(h)]
 
     def getfile(self, name, rev):
         try:
-            return self.changectx(rev).filectx(name).data()
+            return self.changectx(rev)[name].data()
         except revlog.LookupError, err:
             raise IOError(err)
 
     def getmode(self, name, rev):
-        m = self.changectx(rev).manifest()
-        return (m.execf(name) and 'x' or '') + (m.linkf(name) and 'l' or '')
+        return self.changectx(rev).manifest().flags(name)
 
     def getchanges(self, rev):
         ctx = self.changectx(rev)
+        parents = self.parents(ctx)
+        if not parents:
+            files = util.sort(ctx.manifest().keys())
+            return [(f, rev) for f in files], {}
         if self._changescache and self._changescache[0] == rev:
             m, a, r = self._changescache[1]
         else:
-            m, a, r = self.repo.status(ctx.parents()[0].node(), ctx.node())[:3]
+            m, a, r = self.repo.status(parents[0], ctx.node())[:3]
         changes = [(name, rev) for name in m + a + r]
-        changes.sort()
-        return (changes, self.getcopies(ctx, m + a))
+        return util.sort(changes), self.getcopies(ctx, m + a)
 
     def getcopies(self, ctx, files):
         copies = {}
         for name in files:
             try:
-                copies[name] = ctx.filectx(name).renamed()[0]
+                copynode = ctx.filectx(name).renamed()[0]
+                if self.keep(copynode):
+                    copies[name] = copynode
             except TypeError:
                 pass
         return copies
 
     def getcommit(self, rev):
         ctx = self.changectx(rev)
-        parents = [hex(p.node()) for p in ctx.parents() if p.node() != nullid]
+        parents = [hex(p) for p in self.parents(ctx)]
         if self.saverev:
             crev = rev
         else:
@@ -276,12 +285,18 @@ class mercurial_source(converter_source):
 
     def gettags(self):
         tags = [t for t in self.repo.tagslist() if t[0] != 'tip']
-        return dict([(name, hex(node)) for name, node in tags])
+        return dict([(name, hex(node)) for name, node in tags
+                     if self.keep(node)])
 
     def getchangedfiles(self, rev, i):
         ctx = self.changectx(rev)
-        i = i or 0
-        changes = self.repo.status(ctx.parents()[i].node(), ctx.node())[:3]
+        parents = self.parents(ctx)
+        if not parents and i is None:
+            i = 0
+            changes = [], ctx.manifest().keys(), []
+        else:
+            i = i or 0
+            changes = self.repo.status(parents[i], ctx.node())[:3]
 
         if i == 0:
             self._changescache = (rev, changes)

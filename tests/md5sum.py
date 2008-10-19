@@ -6,8 +6,19 @@
 # of the PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2, which is
 # GPL-compatible.
 
-import sys
-import md5
+import sys, os
+
+try:
+    from hashlib import md5
+except ImportError:
+    from md5 import md5
+
+try:
+    import msvcrt
+    msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+    msvcrt.setmode(sys.stderr.fileno(), os.O_BINARY)
+except ImportError:
+    pass
 
 for filename in sys.argv[1:]:
     try:
@@ -16,7 +27,7 @@ for filename in sys.argv[1:]:
         sys.stderr.write('%s: Can\'t open: %s\n' % (filename, msg))
         sys.exit(1)
 
-    m = md5.new()
+    m = md5()
     try:
         while 1:
             data = fp.read(8192)

@@ -50,12 +50,12 @@ def reposetup(ui, repo):
         # to recurse.
         inotifyserver = False
 
-        def status(self, files, match, list_ignored, list_clean,
-                   list_unknown=True):
+        def status(self, match, ignored, clean, unknown=True):
+            files = match.files()
             try:
-                if not list_ignored and not self.inotifyserver:
+                if not ignored and not self.inotifyserver:
                     result = client.query(ui, repo, files, match, False,
-                                          list_clean, list_unknown)
+                                          clean, unknown)
                     if result is not None:
                         return result
             except (OSError, socket.error), err:
@@ -81,7 +81,7 @@ def reposetup(ui, repo):
                     if query:
                         try:
                             return query(ui, repo, files or [], match,
-                                         list_ignored, list_clean, list_unknown)
+                                         ignored, clean, unknown)
                         except socket.error, err:
                             ui.warn(_('could not talk to new inotify '
                                            'server: %s\n') % err[-1])
@@ -90,12 +90,10 @@ def reposetup(ui, repo):
                              % err[-1])
                 ui.print_exc()
                 # replace by old status function
-                ui.warn(_('deactivating inotify\n'))
                 self.status = super(inotifydirstate, self).status
 
             return super(inotifydirstate, self).status(
-                files, match or util.always, list_ignored, list_clean,
-                list_unknown)
+                match, ignored, clean, unknown)
 
     repo.dirstate.__class__ = inotifydirstate
 

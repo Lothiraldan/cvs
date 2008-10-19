@@ -1,10 +1,6 @@
 adding a
-transaction abort!
-rollback completed
 abort: username 'foo\nbar1' contains a newline
 
-transaction abort!
-rollback completed
 abort: username 'foo\nbar2' contains a newline
 
 transaction abort!
