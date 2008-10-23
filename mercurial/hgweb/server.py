@@ -122,7 +122,8 @@ class _hgwebhandler(object, BaseHTTPServer.BaseHTTPRequestHandler):
         self.saved_headers = []
         self.sent_headers = False
         self.length = None
-        self.server.application(env, self._start_response)
+        for chunk in self.server.application(env, self._start_response):
+            self._write(chunk)
 
     def send_headers(self):
         if not self.saved_status:
@@ -258,7 +259,7 @@ def create_server(ui, repo):
                     from OpenSSL import SSL
                     ctx = SSL.Context(SSL.SSLv23_METHOD)
                 except ImportError:
-                    raise util.Abort("SSL support is unavailable")
+                    raise util.Abort(_("SSL support is unavailable"))
                 ctx.use_privatekey_file(ssl_cert)
                 ctx.use_certificate_file(ssl_cert)
                 sock = socket.socket(self.address_family, self.socket_type)
@@ -268,12 +269,7 @@ def create_server(ui, repo):
 
             self.addr, self.port = self.socket.getsockname()[0:2]
             self.prefix = prefix
-
             self.fqaddr = socket.getfqdn(address)
-            try:
-                socket.getaddrbyhost(self.fqaddr)
-            except:
-                fqaddr = address
 
     class IPv6HTTPServer(MercurialHTTPServer):
         address_family = getattr(socket, 'AF_INET6', None)

@@ -16,7 +16,7 @@ def _local(path):
     return (os.path.isfile(util.drop_scheme('file', path)) and
             bundlerepo or localrepo)
 
-def parseurl(url, revs):
+def parseurl(url, revs=[]):
     '''parse url#branch, returning url, branch + revs'''
 
     if '#' not in url:
@@ -70,6 +70,15 @@ def defaultdest(source):
     '''return default destination of clone if none is given'''
     return os.path.basename(os.path.normpath(source))
 
+def localpath(path):
+    if path.startswith('file://localhost/'):
+        return path[16:]
+    if path.startswith('file://'):
+        return path[7:]
+    if path.startswith('file:'):
+        return path[5:]
+    return path
+
 def clone(ui, source, dest=None, pull=False, rev=None, update=True,
           stream=False):
     """Make a copy of an existing repository.
@@ -101,7 +110,8 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     rev: revision to clone up to (implies pull=True)
 
     update: update working directory after clone completes, if
-    destination is local repository
+    destination is local repository (True means update to default rev,
+    anything else is treated as a revision)
     """
 
     if isinstance(source, str):
@@ -116,15 +126,6 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     if dest is None:
         dest = defaultdest(source)
         ui.status(_("destination directory: %s\n") % dest)
-
-    def localpath(path):
-        if path.startswith('file://localhost/'):
-            return path[16:]
-        if path.startswith('file://'):
-            return path[7:]
-        if path.startswith('file:'):
-            return path[5:]
-        return path
 
     dest = localpath(dest)
     source = localpath(source)
@@ -164,13 +165,6 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                 copy = False
 
         if copy:
-            def force_copy(src, dst):
-                if not os.path.exists(src):
-                    # Tolerate empty source repository and optional files
-                    return
-                util.copyfiles(src, dst)
-
-            src_store = os.path.realpath(src_repo.spath)
             if not os.path.exists(dest):
                 os.mkdir(dest)
             try:
@@ -182,28 +176,18 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                     raise util.Abort(_("destination '%s' already exists")
                                      % dest)
                 raise
-            if src_repo.spath != src_repo.path:
-                # XXX racy
-                dummy_changelog = os.path.join(dest_path, "00changelog.i")
-                # copy the dummy changelog
-                force_copy(src_repo.join("00changelog.i"), dummy_changelog)
-                dest_store = os.path.join(dest_path, "store")
-                os.mkdir(dest_store)
-            else:
-                dest_store = dest_path
-            # copy the requires file
-            force_copy(src_repo.join("requires"),
-                       os.path.join(dest_path, "requires"))
-            # we lock here to avoid premature writing to the target
-            dest_lock = lock.lock(os.path.join(dest_store, "lock"))
 
-            files = ("data",
-                     "00manifest.d", "00manifest.i",
-                     "00changelog.d", "00changelog.i")
-            for f in files:
-                src = os.path.join(src_store, f)
-                dst = os.path.join(dest_store, f)
-                force_copy(src, dst)
+            for f in src_repo.store.copylist():
+                src = os.path.join(src_repo.path, f)
+                dst = os.path.join(dest_path, f)
+                dstbase = os.path.dirname(dst)
+                if dstbase and not os.path.exists(dstbase):
+                    os.mkdir(dstbase)
+                if os.path.exists(src):
+                    if dst.endswith('data'):
+                        # lock to avoid premature writing to the target
+                        dest_lock = lock.lock(os.path.join(dstbase, "lock"))
+                    util.copyfiles(src, dst)
 
             # we need to re-init the repo after manually copying the data
             # into it
@@ -246,6 +230,8 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
 
             if update:
                 dest_repo.ui.status(_("updating working directory\n"))
+                if update is not True:
+                    checkout = update
                 for test in (checkout, 'default', 'tip'):
                     try:
                         uprev = dest_repo.lookup(test)
@@ -274,15 +260,7 @@ def update(repo, node):
     stats = _merge.update(repo, node, False, False, None)
     _showstats(repo, stats)
     if stats[3]:
-        repo.ui.status(_("There are unresolved merges with"
-                         " locally modified files.\n"))
-        if stats[1]:
-            repo.ui.status(_("You can finish the partial merge using:\n"))
-        else:
-            repo.ui.status(_("You can redo the full merge using:\n"))
-        # len(pl)==1, otherwise _merge.update() would have raised util.Abort:
-        repo.ui.status(_("  hg update %s\n  hg update %s\n")
-                       % (pl[0].rev(), repo.changectx(node).rev()))
+        repo.ui.status(_("use 'hg resolve' to retry unresolved file merges\n"))
     return stats[3] > 0
 
 def clean(repo, node, show_stats=True):
@@ -297,11 +275,7 @@ def merge(repo, node, force=None, remind=True):
     _showstats(repo, stats)
     if stats[3]:
         pl = repo.parents()
-        repo.ui.status(_("There are unresolved merges,"
-                         " you can redo the full merge using:\n"
-                         "  hg update -C %s\n"
-                         "  hg merge %s\n")
-                       % (pl[0].rev(), pl[1].rev()))
+        repo.ui.status(_("use 'hg resolve' to retry unresolved file merges\n"))
     elif remind:
         repo.ui.status(_("(branch merge, don't forget to commit)\n"))
     return stats[3] > 0

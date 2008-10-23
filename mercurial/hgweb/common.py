@@ -10,14 +10,17 @@ import errno, mimetypes, os
 
 HTTP_OK = 200
 HTTP_BAD_REQUEST = 400
+HTTP_UNAUTHORIZED = 401
+HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
+HTTP_METHOD_NOT_ALLOWED = 405
 HTTP_SERVER_ERROR = 500
 
 class ErrorResponse(Exception):
     def __init__(self, code, message=None):
         Exception.__init__(self)
         self.code = code
-        if message:
+        if message is not None:
             self.message = message
         else:
             self.message = _statusmessage(code)
@@ -79,10 +82,13 @@ def style_map(templatepath, style):
     """
     locations = style and [os.path.join(style, "map"), "map-"+style] or []
     locations.append("map")
-    for location in locations:
-        mapfile = os.path.join(templatepath, location)
-        if os.path.isfile(mapfile):
-            return mapfile
+    if isinstance(templatepath, str):
+        templatepath = [templatepath]
+    for path in templatepath:
+        for location in locations:
+            mapfile = os.path.join(path, location)
+            if os.path.isfile(mapfile):
+                return mapfile
     raise RuntimeError("No hgweb templates found in %r" % templatepath)
 
 def paritygen(stripecount, offset=0):

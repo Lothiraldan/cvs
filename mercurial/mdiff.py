@@ -6,7 +6,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from i18n import _
-import bdiff, mpatch, re, struct, util, md5
+import bdiff, mpatch, re, struct, util
 
 def splitnewlines(text):
     '''like str.splitlines, but only split on newlines.'''
@@ -66,6 +66,19 @@ def wsclean(opts, text):
         text = re.sub('\n+', '', text)
     return text
 
+def diffline(revs, a, b, opts):
+    parts = ['diff']
+    if opts.git:
+        parts.append('--git')
+    if revs and not opts.git:
+        parts.append(' '.join(["-r %s" % rev for rev in revs]))
+    if opts.git:
+        parts.append('a/%s' % a)
+        parts.append('b/%s' % b)
+    else:
+        parts.append(a)
+    return ' '.join(parts) + '\n'
+
 def unidiff(a, ad, b, bd, fn1, fn2, r=None, opts=defaultopts):
     def datetag(date, addtab=True):
         if not opts.git and not opts.nodates:
@@ -78,10 +91,7 @@ def unidiff(a, ad, b, bd, fn1, fn2, r=None, opts=defaultopts):
     epoch = util.datestr((0, 0))
 
     if not opts.text and (util.binary(a) or util.binary(b)):
-        def h(v):
-            # md5 is used instead of sha1 because md5 is supposedly faster
-            return md5.new(v).digest()
-        if a and b and len(a) == len(b) and h(a) == h(b):
+        if a and b and len(a) == len(b) and a == b:
             return ""
         l = ['Binary file %s has changed\n' % fn1]
     elif not a:
@@ -116,8 +126,7 @@ def unidiff(a, ad, b, bd, fn1, fn2, r=None, opts=defaultopts):
             l[ln] += "\n\ No newline at end of file\n"
 
     if r:
-        l.insert(0, "diff %s %s\n" %
-                    (' '.join(["-r %s" % rev for rev in r]), fn1))
+        l.insert(0, diffline(r, fn1, fn2, opts))
 
     return "".join(l)
 
