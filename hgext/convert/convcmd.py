@@ -13,6 +13,7 @@ from hg import mercurial_source, mercurial_sink
 from subversion import debugsvnlog, svn_source, svn_sink
 from monotone import monotone_source
 from gnuarch import gnuarch_source
+from bzr import bzr_source
 import filemap
 
 import os, shutil
@@ -35,6 +36,7 @@ source_converters = [
     ('darcs', darcs_source),
     ('mtn', monotone_source),
     ('gnuarch', gnuarch_source),
+    ('bzr', bzr_source),
     ]
 
 sink_converters = [
@@ -52,8 +54,8 @@ def convertsource(ui, path, type, rev):
             exceptions.append(inst)
     if not ui.quiet:
         for inst in exceptions:
-            ui.write(_("%s\n") % inst)
-    raise util.Abort('%s: unknown repository type' % path)
+            ui.write("%s\n" % inst)
+    raise util.Abort(_('%s: missing or unsupported repository') % path)
 
 def convertsink(ui, path, type):
     for name, sink in sink_converters:
@@ -62,7 +64,7 @@ def convertsink(ui, path, type):
                 return sink(ui, path)
         except NoRepo, inst:
             ui.note(_("convert: %s\n") % inst)
-    raise util.Abort('%s: unknown repository type' % path)
+    raise util.Abort(_('%s: unknown repository type') % path)
 
 class converter(object):
     def __init__(self, ui, source, dest, revmapfile, opts):
@@ -184,7 +186,7 @@ class converter(object):
     def writeauthormap(self):
         authorfile = self.authorfile
         if authorfile:
-           self.ui.status('Writing author map file %s\n' % authorfile)
+           self.ui.status(_('Writing author map file %s\n') % authorfile)
            ofile = open(authorfile, 'w+')
            for author in self.authors:
                ofile.write("%s=%s\n" % (author, self.authors[author]))
@@ -201,15 +203,15 @@ class converter(object):
                 dstauthor = dstauthor.strip()
                 if srcauthor in self.authors and dstauthor != self.authors[srcauthor]:
                     self.ui.status(
-                        'Overriding mapping for author %s, was %s, will be %s\n'
+                        _('Overriding mapping for author %s, was %s, will be %s\n')
                         % (srcauthor, self.authors[srcauthor], dstauthor))
                 else:
-                    self.ui.debug('Mapping author %s to %s\n'
+                    self.ui.debug(_('Mapping author %s to %s\n')
                                   % (srcauthor, dstauthor))
                     self.authors[srcauthor] = dstauthor
             except IndexError:
                 self.ui.warn(
-                    'Ignoring bad line in author map file %s: %s\n'
+                    _('Ignoring bad line in author map file %s: %s\n')
                     % (authorfile, line.rstrip()))
         afile.close()
 
@@ -221,8 +223,6 @@ class converter(object):
 
     def copy(self, rev):
         commit = self.commitcache[rev]
-        do_copies = hasattr(self.dest, 'copyfile')
-        filenames = []
 
         changes = self.source.getchanges(rev)
         if isinstance(changes, basestring):
@@ -241,29 +241,14 @@ class converter(object):
                 pbranches.append((self.map[prev],
                                   self.commitcache[prev].branch))
         self.dest.setbranch(commit.branch, pbranches)
-        for f, v in files:
-            filenames.append(f)
-            try:
-                data = self.source.getfile(f, v)
-            except IOError, inst:
-                self.dest.delfile(f)
-            else:
-                e = self.source.getmode(f, v)
-                self.dest.putfile(f, e, data)
-                if do_copies:
-                    if f in copies:
-                        copyf = copies[f]
-                        # Merely marks that a copy happened.
-                        self.dest.copyfile(copyf, f)
-
         try:
             parents = self.splicemap[rev].replace(',', ' ').split()
-            self.ui.status('spliced in %s as parents of %s\n' %
+            self.ui.status(_('spliced in %s as parents of %s\n') %
                            (parents, rev))
             parents = [self.map.get(p, p) for p in parents]
         except KeyError:
             parents = [b[0] for b in pbranches]
-        newnode = self.dest.putcommit(filenames, parents, commit)
+        newnode = self.dest.putcommit(files, copies, parents, commit, self.source)
         self.source.converted(rev, newnode)
         self.map[rev] = newnode
 
@@ -273,15 +258,15 @@ class converter(object):
             self.source.before()
             self.dest.before()
             self.source.setrevmap(self.map)
-            self.ui.status("scanning source...\n")
+            self.ui.status(_("scanning source...\n"))
             heads = self.source.getheads()
             parents = self.walktree(heads)
-            self.ui.status("sorting...\n")
+            self.ui.status(_("sorting...\n"))
             t = self.toposort(parents)
             num = len(t)
             c = None
 
-            self.ui.status("converting...\n")
+            self.ui.status(_("converting...\n"))
             for c in t:
                 num -= 1
                 desc = self.commitcache[c].desc
@@ -291,7 +276,7 @@ class converter(object):
                 # tolocal() because util._encoding conver() use it as
                 # 'utf-8'
                 self.ui.status("%d %s\n" % (num, recode(desc)))
-                self.ui.note(_("source: %s\n" % recode(c)))
+                self.ui.note(_("source: %s\n") % recode(c))
                 self.copy(c)
 
             tags = self.source.gettags()
@@ -326,7 +311,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
 
     if not dest:
         dest = hg.defaultdest(src) + "-hg"
-        ui.status("assuming destination %s\n" % dest)
+        ui.status(_("assuming destination %s\n") % dest)
 
     destc = convertsink(ui, dest, opts.get('dest_type'))
 

@@ -104,7 +104,7 @@ diffstat = False
 EOF
 
 echo % pull from bundle
-hg pull -u ../kw.hg 2>&1 | sed -e '/^Date:/,/^diffs (/ d'
+hg pull -u ../kw.hg 2>&1 | sed -e '/^Content-Type:/,/^diffs (/ d'
 
 echo % remove notify config
 sed -e '/\[hooks\]/,$ d' $HGRCPATH > $HGRCPATH.nonotify
@@ -208,12 +208,16 @@ hg --debug commit -l log -d '2 0' -u 'User Name <user@example.com>'
 rm log
 echo % status
 hg status
+echo % verify
+hg verify
 
 echo % cat
 cat a b
 echo % hg cat
 hg cat sym a b
 echo
+echo % annotate
+hg annotate a
 
 echo % remove
 hg debugrebuildstate
@@ -281,6 +285,47 @@ cd ..
 echo % kwexpand nonexistent
 hg kwexpand nonexistent 2>&1 | sed 's/nonexistent:.*/nonexistent:/'
 
+echo % hg serve
+hg serve -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
+cat hg.pid >> $DAEMON_PIDS
+echo % expansion
+echo % hgweb file
+("$TESTDIR/get-with-headers.py" localhost:$HGPORT '/file/tip/a/?style=raw')
+echo % no expansion
+echo % hgweb annotate
+("$TESTDIR/get-with-headers.py" localhost:$HGPORT '/annotate/tip/a/?style=raw')
+echo % hgweb changeset
+("$TESTDIR/get-with-headers.py" localhost:$HGPORT '/rev/tip/?style=raw')
+echo % hgweb filediff
+("$TESTDIR/get-with-headers.py" localhost:$HGPORT '/diff/bb948857c743/a?style=raw')
+echo % errors encountered
+cat errors.log
+
+echo % merge/resolve
+echo '$Id$' > m
+hg add m
+hg commit -m 4kw 
+echo foo >> m
+hg commit -m 5foo
+echo % simplemerge
+hg update 4
+echo foo >> m
+hg commit -m 6foo
+hg merge
+hg commit -m simplemerge
+cat m
+echo % conflict
+hg update 4
+echo bar >> m
+hg commit -m 8bar
+hg merge
+echo % keyword stays outside conflict zone
+cat m
+echo % resolve to local
+HGMERGE=internal:local hg resolve
+hg commit -m localresolve
+cat m
+
 echo % switch off expansion
 echo % kwshrink with unknown file u
 cp a u
@@ -296,13 +341,3 @@ cat a b
 echo % hg cat
 hg cat sym a b
 echo
-
-echo % hg serve
-hg serve -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
-cat hg.pid >> $DAEMON_PIDS
-echo % hgweb changeset
-("$TESTDIR/get-with-headers.py" localhost:$HGPORT '/rev/tip/?style=raw')
-echo % hgweb filediff
-("$TESTDIR/get-with-headers.py" localhost:$HGPORT '/diff/bb948857c743/a?style=raw')
-echo % errors encountered
-cat errors.log

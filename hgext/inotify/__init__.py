@@ -11,7 +11,7 @@
 
 # todo: socket permissions
 
-from mercurial.i18n import gettext as _
+from mercurial.i18n import _
 from mercurial import cmdutil, util
 import client, errno, os, server, socket
 from weakref import proxy
@@ -50,12 +50,24 @@ def reposetup(ui, repo):
         # to recurse.
         inotifyserver = False
 
-        def status(self, files, match, list_ignored, list_clean,
-                   list_unknown=True):
+        def status(self, match, ignored, clean, unknown=True):
+            files = match.files()
             try:
-                if not list_ignored and not self.inotifyserver:
+                if not ignored and not self.inotifyserver:
                     result = client.query(ui, repo, files, match, False,
-                                          list_clean, list_unknown)
+                                          clean, unknown)
+                    if ui.config('inotify', 'debug'):
+                        r2 = super(inotifydirstate, self).status(
+                            match, False, clean, unknown)
+                        for c,a,b in zip('LMARDUIC', result, r2):
+                            for f in a:
+                                if f not in b:
+                                    ui.warn('*** inotify: %s +%s\n' % (c, f))
+                            for f in b:
+                                if f not in a:
+                                    ui.warn('*** inotify: %S -%s\n' % (c, f))
+                        result = r2
+
                     if result is not None:
                         return result
             except (OSError, socket.error), err:
@@ -64,7 +76,7 @@ def reposetup(ui, repo):
                                    'removing it)\n'))
                     os.unlink(repo.join('inotify.sock'))
                 if err[0] in (errno.ECONNREFUSED, errno.ENOENT) and \
-                        ui.configbool('inotify', 'autostart'):
+                        ui.configbool('inotify', 'autostart', True):
                     query = None
                     ui.debug(_('(starting inotify server)\n'))
                     try:
@@ -81,21 +93,21 @@ def reposetup(ui, repo):
                     if query:
                         try:
                             return query(ui, repo, files or [], match,
-                                         list_ignored, list_clean, list_unknown)
+                                         ignored, clean, unknown)
                         except socket.error, err:
                             ui.warn(_('could not talk to new inotify '
                                            'server: %s\n') % err[-1])
+                elif err[0] == errno.ENOENT:
+                    ui.warn(_('(inotify server not running)\n'))
                 else:
                     ui.warn(_('failed to contact inotify server: %s\n')
                              % err[-1])
                 ui.print_exc()
                 # replace by old status function
-                ui.warn(_('deactivating inotify\n'))
                 self.status = super(inotifydirstate, self).status
 
             return super(inotifydirstate, self).status(
-                files, match or util.always, list_ignored, list_clean,
-                list_unknown)
+                match, ignored, clean, unknown)
 
     repo.dirstate.__class__ = inotifydirstate
 

@@ -57,7 +57,7 @@ list of commands:
  export       dump the header and diffs for one or more changesets
  grep         search for a pattern in specified files and revisions
  heads        show current repository heads or show branch heads
- help         show help for a command, extension, or list of commands
+ help         show help for a given topic or a help overview
  identify     identify the working copy or specified revision
  import       import an ordered set of patches
  incoming     show new changesets found in source
@@ -74,6 +74,7 @@ list of commands:
  recover      roll back an interrupted transaction
  remove       remove the specified files on the next commit
  rename       rename files; equivalent of copy + remove
+ resolve      resolve file merges from a branch merge or update
  revert       restore individual files or dirs to an earlier state
  rollback     roll back the last transaction
  root         print the root (top) of the current working dir
@@ -87,6 +88,14 @@ list of commands:
  update       update working directory
  verify       verify the integrity of the repository
  version      output version and copyright information
+
+additional help topics:
+
+ dates        Date Formats
+ patterns     File Name Patterns
+ environment  Environment Variables
+ revisions    Specifying Single Revisions
+ multirevs    Specifying Multiple Revisions
 
 use "hg -v help" to show aliases and global options
  add          add the specified files on the next commit
@@ -106,7 +115,7 @@ use "hg -v help" to show aliases and global options
  export       dump the header and diffs for one or more changesets
  grep         search for a pattern in specified files and revisions
  heads        show current repository heads or show branch heads
- help         show help for a command, extension, or list of commands
+ help         show help for a given topic or a help overview
  identify     identify the working copy or specified revision
  import       import an ordered set of patches
  incoming     show new changesets found in source
@@ -123,6 +132,7 @@ use "hg -v help" to show aliases and global options
  recover      roll back an interrupted transaction
  remove       remove the specified files on the next commit
  rename       rename files; equivalent of copy + remove
+ resolve      resolve file merges from a branch merge or update
  revert       restore individual files or dirs to an earlier state
  rollback     roll back the last transaction
  root         print the root (top) of the current working dir
@@ -136,6 +146,14 @@ use "hg -v help" to show aliases and global options
  update       update working directory
  verify       verify the integrity of the repository
  version      output version and copyright information
+
+additional help topics:
+
+ dates        Date Formats
+ patterns     File Name Patterns
+ environment  Environment Variables
+ revisions    Specifying Single Revisions
+ multirevs    Specifying Multiple Revisions
 hg add [OPTION]... [FILE]...
 
 add the specified files on the next commit
@@ -199,9 +217,9 @@ options:
 
  -r --rev                  revision
  -a --text                 treat all files as text
- -p --show-function        show which function each change is in
  -g --git                  use git extended diff format
     --nodates              don't include dates in diff headers
+ -p --show-function        show which function each change is in
  -w --ignore-all-space     ignore white space when comparing lines
  -b --ignore-space-change  ignore changes in the amount of white space
  -B --ignore-blank-lines   ignore changes whose lines are all blank
@@ -216,10 +234,10 @@ aliases: st
 
 show changed files in the working directory
 
-    Show status of files in the repository.  If names are given, only
-    files that match are shown.  Files that are clean or ignored or
+    Show status of files in the repository. If names are given, only
+    files that match are shown. Files that are clean or ignored or
     source of a copy/move operation, are not listed unless -c (clean),
-    -i (ignored), -C (copies) or -A is given.  Unless options described
+    -i (ignored), -C (copies) or -A is given. Unless options described
     with "show only ..." are given, the options -mardu are used.
 
     Option -q/--quiet hides untracked (unknown and ignored) files

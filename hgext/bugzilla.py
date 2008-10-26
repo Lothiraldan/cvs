@@ -55,7 +55,7 @@
 from mercurial.i18n import _
 from mercurial.node import short
 from mercurial import cmdutil, templater, util
-import os, re, time
+import re, time
 
 MySQLdb = None
 
@@ -80,11 +80,7 @@ class bugzilla_2_16(object):
         self.conn = MySQLdb.connect(host=host, user=user, passwd=passwd,
                                     db=db, connect_timeout=timeout)
         self.cursor = self.conn.cursor()
-        self.run('select fieldid from fielddefs where name = "longdesc"')
-        ids = self.cursor.fetchall()
-        if len(ids) != 1:
-            raise util.Abort(_('unknown database schema'))
-        self.longdesc_id = ids[0][0]
+        self.longdesc_id = self.get_longdesc_id()
         self.user_ids = {}
 
     def run(self, *args, **kwargs):
@@ -96,12 +92,18 @@ class bugzilla_2_16(object):
             self.ui.note(_('failed query: %s %s\n') % (args, kwargs))
             raise
 
+    def get_longdesc_id(self):
+        '''get identity of longdesc field'''
+        self.run('select fieldid from fielddefs where name = "longdesc"')
+        ids = self.cursor.fetchall()
+        if len(ids) != 1:
+            raise util.Abort(_('unknown database schema'))
+        return ids[0][0]
+
     def filter_real_bug_ids(self, ids):
         '''filter not-existing bug ids from list.'''
         self.run('select bug_id from bugs where bug_id in %s' % buglist(ids))
-        ids = [c[0] for c in self.cursor.fetchall()]
-        ids.sort()
-        return ids
+        return util.sort([c[0] for c in self.cursor.fetchall()])
 
     def filter_unknown_bug_ids(self, node, ids):
         '''filter bug ids from list that already refer to this changeset.'''
@@ -114,9 +116,7 @@ class bugzilla_2_16(object):
             self.ui.status(_('bug %d already knows about changeset %s\n') %
                            (id, short(node)))
             unknown.pop(id, None)
-        ids = unknown.keys()
-        ids.sort()
-        return ids
+        return util.sort(unknown.keys())
 
     def notify(self, ids):
         '''tell bugzilla to send mail.'''
@@ -127,7 +127,7 @@ class bugzilla_2_16(object):
             cmd = self.ui.config('bugzilla', 'notify',
                                'cd /var/www/html/bugzilla && '
                                './processmail %s nobody@nowhere.com') % id
-            fp = os.popen('(%s) 2>&1' % cmd)
+            fp = util.popen('(%s) 2>&1' % cmd)
             out = fp.read()
             ret = fp.close()
             if ret:
@@ -186,11 +186,26 @@ class bugzilla_2_16(object):
                     values (%s, %s, %s, %s)''',
                  (bugid, userid, now, self.longdesc_id))
 
+class bugzilla_3_0(bugzilla_2_16):
+    '''support for bugzilla 3.0 series.'''
+
+    def __init__(self, ui):
+        bugzilla_2_16.__init__(self, ui)
+
+    def get_longdesc_id(self):
+        '''get identity of longdesc field'''
+        self.run('select id from fielddefs where name = "longdesc"')
+        ids = self.cursor.fetchall()
+        if len(ids) != 1:
+            raise util.Abort(_('unknown database schema'))
+        return ids[0][0]
+
 class bugzilla(object):
     # supported versions of bugzilla. different versions have
     # different schemas.
     _versions = {
         '2.16': bugzilla_2_16,
+        '3.0':  bugzilla_3_0
         }
 
     _default_bug_re = (r'bugs?\s*,?\s*(?:#|nos?\.?|num(?:ber)?s?)?\s*'
@@ -300,7 +315,7 @@ def hook(ui, repo, hooktype, node=None, **kwargs):
                          hooktype)
     try:
         bz = bugzilla(ui, repo)
-        ctx = repo.changectx(node)
+        ctx = repo[node]
         ids = bz.find_bug_ids(ctx)
         if ids:
             for id in ids:

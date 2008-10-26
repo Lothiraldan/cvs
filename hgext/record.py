@@ -7,7 +7,7 @@
 
 '''interactive change selection during commit or qrefresh'''
 
-from mercurial.i18n import _
+from mercurial.i18n import gettext, _
 from mercurial import cmdutil, commands, extensions, hg, mdiff, patch
 from mercurial import util
 import copy, cStringIO, errno, operator, os, re, tempfile
@@ -282,22 +282,24 @@ def filterpatch(ui, chunks):
         if resp_file[0] is not None:
             return resp_file[0]
         while True:
-            r = (ui.prompt(query + _(' [Ynsfdaq?] '), '(?i)[Ynsfdaq?]?$')
-                 or 'y').lower()
-            if r == '?':
-                c = record.__doc__.find('y - record this change')
-                for l in record.__doc__[c:].splitlines():
-                    if l: ui.write(_(l.strip()), '\n')
+            choices = _('[Ynsfdaq?]')
+            r = (ui.prompt("%s %s " % (query, choices), '(?i)%s?$' % choices)
+                 or _('y')).lower()
+            if r == _('?'):
+                doc = gettext(record.__doc__)
+                c = doc.find(_('y - record this change'))
+                for l in doc[c:].splitlines():
+                    if l: ui.write(l.strip(), '\n')
                 continue
-            elif r == 's':
+            elif r == _('s'):
                 r = resp_file[0] = 'n'
-            elif r == 'f':
+            elif r == _('f'):
                 r = resp_file[0] = 'y'
-            elif r == 'd':
+            elif r == _('d'):
                 r = resp_all[0] = 'n'
-            elif r == 'a':
+            elif r == _('a'):
                 r = resp_all[0] = 'y'
-            elif r == 'q':
+            elif r == _('q'):
                 raise util.Abort(_('user quit'))
             return r
     while chunks:
@@ -315,7 +317,7 @@ def filterpatch(ui, chunks):
                 chunk.pretty(ui)
             r = prompt(_('examine changes to %s?') %
                        _(' and ').join(map(repr, chunk.files())))
-            if r == 'y':
+            if r == _('y'):
                 applied[chunk.filename()] = [chunk]
                 if chunk.allhunks():
                     applied[chunk.filename()] += consumefile()
@@ -327,7 +329,7 @@ def filterpatch(ui, chunks):
                 chunk.pretty(ui)
             r = prompt(_('record this change to %r?') %
                        chunk.filename())
-            if r == 'y':
+            if r == _('y'):
                 if fixoffset:
                     chunk = copy.copy(chunk)
                     chunk.toline += fixoffset
@@ -391,7 +393,7 @@ def dorecord(ui, repo, committer, *pats, **opts):
     if not ui.interactive:
         raise util.Abort(_('running non-interactively, use commit instead'))
 
-    def recordfunc(ui, repo, files, message, match, opts):
+    def recordfunc(ui, repo, message, match, opts):
         """This is generic record driver.
 
         It's job is to interactively filter local changes, and accordingly
@@ -404,16 +406,16 @@ def dorecord(ui, repo, committer, *pats, **opts):
         In the end we'll record intresting changes, and everything else will be
         left in place, so the user can continue his work.
         """
-        if files:
+        if match.files():
             changes = None
         else:
-            changes = repo.status(files=files, match=match)[:5]
-            modified, added, removed = changes[:3]
-            files = modified + added + removed
+            changes = repo.status(match=match)[:3]
+            modified, added, removed = changes
+            match = cmdutil.matchfiles(repo, modified + added + removed)
         diffopts = mdiff.diffopts(git=True, nodates=True)
         fp = cStringIO.StringIO()
-        patch.diff(repo, repo.dirstate.parents()[0], files=files,
-                   match=match, changes=changes, opts=diffopts, fp=fp)
+        patch.diff(repo, repo.dirstate.parents()[0], match=match,
+                   changes=changes, opts=diffopts, fp=fp)
         fp.seek(0)
 
         # 1. filter patch, so we have intending-to apply subset of it
@@ -425,14 +427,15 @@ def dorecord(ui, repo, committer, *pats, **opts):
             try: contenders.update(dict.fromkeys(h.files()))
             except AttributeError: pass
 
-        newfiles = [f for f in files if f in contenders]
+        newfiles = [f for f in match.files() if f in contenders]
 
         if not newfiles:
             ui.status(_('no changes to record\n'))
             return 0
 
         if changes is None:
-            changes = repo.status(files=newfiles, match=match)[:5]
+            match = cmdutil.matchfiles(repo, newfiles)
+            changes = repo.status(match=match)
         modified = dict.fromkeys(changes[0])
 
         # 2. backup changed files, so we can restore them in the end
@@ -451,7 +454,7 @@ def dorecord(ui, repo, committer, *pats, **opts):
                 fd, tmpname = tempfile.mkstemp(prefix=f.replace('/', '_')+'.',
                                                dir=backupdir)
                 os.close(fd)
-                ui.debug('backup %r as %r\n' % (f, tmpname))
+                ui.debug(_('backup %r as %r\n') % (f, tmpname))
                 util.copyfile(repo.wjoin(f), tmpname)
                 backups[f] = tmpname
 
@@ -469,7 +472,7 @@ def dorecord(ui, repo, committer, *pats, **opts):
             # 3b. (apply)
             if dopatch:
                 try:
-                    ui.debug('applying patch\n')
+                    ui.debug(_('applying patch\n'))
                     ui.debug(fp.getvalue())
                     patch.internalpatch(fp, ui, 1, repo.root)
                 except patch.PatchError, err:
@@ -497,7 +500,7 @@ def dorecord(ui, repo, committer, *pats, **opts):
             # 5. finally restore backed-up files
             try:
                 for realname, tmpname in backups.iteritems():
-                    ui.debug('restoring %r to %r\n' % (tmpname, realname))
+                    ui.debug(_('restoring %r to %r\n') % (tmpname, realname))
                     util.copyfile(tmpname, repo.wjoin(realname))
                     os.unlink(tmpname)
                 os.rmdir(backupdir)

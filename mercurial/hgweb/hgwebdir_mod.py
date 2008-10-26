@@ -6,8 +6,8 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os, mimetools, cStringIO
-from mercurial.i18n import gettext as _
+import os
+from mercurial.i18n import _
 from mercurial.repo import RepoError
 from mercurial import ui, hg, util, templater, templatefilters
 from common import ErrorResponse, get_mtime, staticfile, style_map, paritygen,\
@@ -33,8 +33,7 @@ class hgwebdir(object):
             self.repos = cleannames(config)
             self.repos_sorted = ('', False)
         elif isinstance(config, dict):
-            self.repos = cleannames(config.items())
-            self.repos.sort()
+            self.repos = util.sort(cleannames(config.items()))
         else:
             if isinstance(config, util.configparser):
                 cp = config
@@ -71,8 +70,7 @@ class hgwebdir(object):
 
     def __call__(self, env, respond):
         req = wsgirequest(env, respond)
-        self.run_wsgi(req)
-        return req
+        return self.run_wsgi(req)
 
     def run_wsgi(self, req):
 
@@ -81,33 +79,22 @@ class hgwebdir(object):
 
                 virtual = req.env.get("PATH_INFO", "").strip('/')
                 tmpl = self.templater(req)
-                try:
-                    ctype = tmpl('mimetype', encoding=util._encoding)
-                    ctype = templater.stringify(ctype)
-                except KeyError:
-                    # old templates with inline HTTP headers?
-                    if 'mimetype' in tmpl:
-                        raise
-                    header = tmpl('header', encoding=util._encoding)
-                    header_file = cStringIO.StringIO(templater.stringify(header))
-                    msg = mimetools.Message(header_file, 0)
-                    ctype = msg['content-type']
+                ctype = tmpl('mimetype', encoding=util._encoding)
+                ctype = templater.stringify(ctype)
 
                 # a static file
                 if virtual.startswith('static/') or 'static' in req.form:
-                    static = os.path.join(templater.templatepath(), 'static')
                     if virtual.startswith('static/'):
                         fname = virtual[7:]
                     else:
                         fname = req.form['static'][0]
-                    req.write(staticfile(static, fname, req))
-                    return
+                    static = templater.templatepath('static')
+                    return staticfile(static, fname, req)
 
                 # top-level index
                 elif not virtual:
                     req.respond(HTTP_OK, ctype)
-                    req.write(self.makeindex(req, tmpl))
-                    return
+                    return ''.join(self.makeindex(req, tmpl)),
 
                 # nested indexes and hgwebs
 
@@ -118,8 +105,7 @@ class hgwebdir(object):
                         req.env['REPO_NAME'] = virtual
                         try:
                             repo = hg.repository(self.parentui, real)
-                            hgweb(repo).run_wsgi(req)
-                            return
+                            return hgweb(repo).run_wsgi(req)
                         except IOError, inst:
                             msg = inst.strerror
                             raise ErrorResponse(HTTP_SERVER_ERROR, msg)
@@ -130,8 +116,7 @@ class hgwebdir(object):
                     subdir = virtual + '/'
                     if [r for r in repos if r.startswith(subdir)]:
                         req.respond(HTTP_OK, ctype)
-                        req.write(self.makeindex(req, tmpl, subdir))
-                        return
+                        return ''.join(self.makeindex(req, tmpl, subdir)),
 
                     up = virtual.rfind('/')
                     if up < 0:
@@ -140,11 +125,11 @@ class hgwebdir(object):
 
                 # prefixes not found
                 req.respond(HTTP_NOT_FOUND, ctype)
-                req.write(tmpl("notfound", repo=virtual))
+                return ''.join(tmpl("notfound", repo=virtual)),
 
             except ErrorResponse, err:
                 req.respond(err.code, ctype)
-                req.write(tmpl('error', error=err.message or ''))
+                return ''.join(tmpl('error', error=err.message or '')),
         finally:
             tmpl = None
 
@@ -182,7 +167,7 @@ class hgwebdir(object):
                 try:
                     u.readconfig(os.path.join(path, '.hg', 'hgrc'))
                 except Exception, e:
-                    u.warn(_('error reading %s/.hg/hgrc: %s\n' % (path, e)))
+                    u.warn(_('error reading %s/.hg/hgrc: %s\n') % (path, e))
                     continue
                 def get(section, name, default=None):
                     return u.config(section, name, default, untrusted=True)
@@ -257,13 +242,7 @@ class hgwebdir(object):
     def templater(self, req):
 
         def header(**map):
-            header = tmpl('header', encoding=util._encoding, **map)
-            if 'mimetype' not in tmpl:
-                # old template with inline HTTP headers
-                header_file = cStringIO.StringIO(templater.stringify(header))
-                msg = mimetools.Message(header_file, 0)
-                header = header_file.read()
-            yield header
+            yield tmpl('header', encoding=util._encoding, **map)
 
         def footer(**map):
             yield tmpl("footer", **map)

@@ -6,10 +6,10 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from node import bin, hex
+from node import bin, hex, nullid
 from i18n import _
 import repo, os, urllib, urllib2, urlparse, zlib, util, httplib
-import errno, keepalive, socket, changegroup
+import errno, keepalive, socket, changegroup, statichttprepo
 
 class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def __init__(self, ui):
@@ -268,6 +268,7 @@ class httprepository(repo.repository):
 
         # 1.0 here is the _protocol_ version
         opener.addheaders = [('User-agent', 'mercurial/proto-1.0')]
+        opener.addheaders.append(('Accept', 'application/mercurial-0.1'))
         urllib2.install_opener(opener)
 
     def url(self):
@@ -379,7 +380,7 @@ class httprepository(repo.repository):
             raise util.UnexpectedOutput(_("unexpected response:"), d)
 
     def between(self, pairs):
-        n = "\n".join(["-".join(map(hex, p)) for p in pairs])
+        n = " ".join(["-".join(map(hex, p)) for p in pairs])
         d = self.do_read("between", pairs=n)
         try:
             p = [ l and map(bin, l.split(" ")) or [] for l in d.splitlines() ]
@@ -421,16 +422,18 @@ class httprepository(repo.repository):
         fp = httpsendfile(tempname, "rb")
         try:
             try:
-                rfp = self.do_cmd(
-                    'unbundle', data=fp,
-                    headers={'Content-Type': 'application/octet-stream'},
-                    heads=' '.join(map(hex, heads)))
+                resp = self.do_read(
+                     'unbundle', data=fp,
+                     headers={'Content-Type': 'application/octet-stream'},
+                     heads=' '.join(map(hex, heads)))
+                resp_code, output = resp.split('\n', 1)
                 try:
-                    ret = int(rfp.readline())
-                    self.ui.write(rfp.read())
-                    return ret
-                finally:
-                    rfp.close()
+                    ret = int(resp_code)
+                except ValueError, err:
+                    raise util.UnexpectedOutput(
+                            _('push failed (unexpected response):'), resp)
+                self.ui.write(output)
+                return ret
             except socket.error, err:
                 if err[0] in (errno.ECONNRESET, errno.EPIPE):
                     raise util.Abort(_('push failed: %s') % err[1])
@@ -452,6 +455,13 @@ class httpsrepository(httprepository):
 def instance(ui, path, create):
     if create:
         raise util.Abort(_('cannot create new http repository'))
-    if path.startswith('https:'):
-        return httpsrepository(ui, path)
-    return httprepository(ui, path)
+    try:
+        if path.startswith('https:'):
+            inst = httpsrepository(ui, path)
+        else:
+            inst = httprepository(ui, path)
+        inst.between([(nullid, nullid)])
+        return inst
+    except repo.RepoError:
+        ui.note('(falling back to static-http)\n')
+        return statichttprepo.instance(ui, "static-" + path, create)

@@ -24,6 +24,13 @@ def matchoutput(cmd, regexp, ignorestatus=False):
 def has_baz():
     return matchoutput('baz --version 2>&1', r'baz Bazaar version')
 
+def has_bzr():
+    try:
+        import bzrlib
+        return True
+    except ImportError:
+        return False
+
 def has_cvs():
     re = r'Concurrent Versions System.*?server'
     return matchoutput('cvs --version 2>&1', re)
@@ -54,6 +61,24 @@ def has_executablebit():
         s = os.lstat(path).st_mode
         os.chmod(path, s | 0100)
         return (os.lstat(path).st_mode & 0100 != 0)
+    finally:
+        os.remove(path)
+
+def has_icasefs():
+    # Stolen from mercurial.util
+    fd, path = tempfile.mkstemp(prefix=tempprefix)
+    os.close(fd)
+    try:
+        s1 = os.stat(path)
+        d, b = os.path.split(path)
+        p2 = os.path.join(d, b.upper())
+        if path == p2:
+            p2 = os.path.join(d, b.lower())
+        try:
+            s2 = os.stat(p2)
+            return s2 == s1
+        except:
+            return False
     finally:
         os.remove(path)
 
@@ -128,6 +153,7 @@ def has_pygments():
 
 checks = {
     "baz": (has_baz, "GNU Arch baz client"),
+    "bzr": (has_bzr, "Canonical's Bazaar client"),
     "cvs": (has_cvs, "cvs client/server"),
     "cvsps": (has_cvsps, "cvsps utility"),
     "darcs": (has_darcs, "darcs client"),
@@ -136,6 +162,7 @@ checks = {
     "fifo": (has_fifo, "named pipes"),
     "git": (has_git, "git command line client"),
     "hotshot": (has_hotshot, "python hotshot module"),
+    "icasefs": (has_icasefs, "case insensitive file system"),
     "inotify": (has_inotify, "inotify extension support"),
     "lsprof": (has_lsprof, "python lsprof module"),
     "mtn": (has_mtn, "monotone client (> 0.31)"),

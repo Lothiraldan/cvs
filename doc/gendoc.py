@@ -3,7 +3,7 @@ import sys, textwrap
 sys.path.insert(0, "..")
 from mercurial import demandimport; demandimport.enable()
 from mercurial.commands import table, globalopts
-from mercurial.i18n import gettext as _
+from mercurial.i18n import gettext, _
 from mercurial.help import helptable
 
 def get_desc(docstr):
@@ -69,6 +69,7 @@ def show_doc(ui):
         if f.startswith("debug"): continue
         d = get_cmd(h[f])
         # synopsis
+        ui.write("[[%s]]\n" % d['cmd'])
         ui.write("%s::\n" % d['synopsis'].replace("hg ","", 1))
         # description
         ui.write("%s\n\n" % d['desc'][1])
@@ -91,14 +92,11 @@ def show_doc(ui):
             ui.write(_("    aliases: %s\n\n") % " ".join(d['aliases']))
 
     # print topics
-    for t in helptable:
-        l = t.split("|")
-        section = l[-1]
-        underlined(_(section).upper())
-        doc = helptable[t]
+    for names, section, doc in helptable:
+        underlined(gettext(section).upper())
         if callable(doc):
             doc = doc()
-        ui.write(_(doc))
+        ui.write(gettext(doc))
         ui.write("\n")
 
 if __name__ == "__main__":

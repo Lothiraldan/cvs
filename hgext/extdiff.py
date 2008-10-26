@@ -52,7 +52,6 @@ import os, shlex, shutil, tempfile
 
 def snapshot_node(ui, repo, files, node, tmproot):
     '''snapshot files as of some revision'''
-    mf = repo.changectx(node).manifest()
     dirname = os.path.basename(repo.root)
     if dirname == "":
         dirname = "root"
@@ -61,17 +60,18 @@ def snapshot_node(ui, repo, files, node, tmproot):
     os.mkdir(base)
     ui.note(_('making snapshot of %d files from rev %s\n') %
             (len(files), short(node)))
+    ctx = repo[node]
     for fn in files:
-        if not fn in mf:
+        wfn = util.pconvert(fn)
+        if not wfn in ctx:
             # skipping new file after a merge ?
             continue
-        wfn = util.pconvert(fn)
         ui.note('  %s\n' % wfn)
         dest = os.path.join(base, wfn)
         destdir = os.path.dirname(dest)
         if not os.path.isdir(destdir):
             os.makedirs(destdir)
-        data = repo.wwritedata(wfn, repo.file(wfn).read(mf[wfn]))
+        data = repo.wwritedata(wfn, ctx[wfn].data())
         open(dest, 'wb').write(data)
     return dirname
 
@@ -121,9 +121,8 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
     - just invoke the diff for a single file in the working dir
     '''
     node1, node2 = cmdutil.revpair(repo, opts['rev'])
-    files, matchfn, anypats = cmdutil.matchpats(repo, pats, opts)
-    modified, added, removed, deleted, unknown = repo.status(
-        node1, node2, files, match=matchfn)[:5]
+    matcher = cmdutil.match(repo, pats, opts)
+    modified, added, removed = repo.status(node1, node2, matcher)[:3]
     if not (modified or added or removed):
         return 0
 
@@ -165,13 +164,13 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
         cmdline = ('%s %s %s %s' %
                    (util.shellquote(diffcmd), ' '.join(diffopts),
                     util.shellquote(dir1), util.shellquote(dir2)))
-        ui.debug('running %r in %s\n' % (cmdline, tmproot))
+        ui.debug(_('running %r in %s\n') % (cmdline, tmproot))
         util.system(cmdline, cwd=tmproot)
 
         for copy_fn, working_fn, mtime in fns_and_mtime:
             if os.path.getmtime(copy_fn) != mtime:
-                ui.debug('File changed while diffing. '
-                         'Overwriting: %s (src: %s)\n' % (working_fn, copy_fn))
+                ui.debug(_('File changed while diffing. '
+                         'Overwriting: %s (src: %s)\n') % (working_fn, copy_fn))
                 util.copyfile(copy_fn, working_fn)
 
         return 1

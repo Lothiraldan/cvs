@@ -4,60 +4,59 @@
 #
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
-#
-# The hgk extension allows browsing the history of a repository in a
-# graphical way. It requires Tcl/Tk version 8.4 or later. (Tcl/Tk is
-# not distributed with Mercurial.)
-#
-# hgk consists of two parts: a Tcl script that does the displaying and
-# querying of information, and an extension to mercurial named hgk.py,
-# which provides hooks for hgk to get information. hgk can be found in
-# the contrib directory, and hgk.py can be found in the hgext
-# directory.
-#
-# To load the hgext.py extension, add it to your .hgrc file (you have
-# to use your global $HOME/.hgrc file, not one in a repository). You
-# can specify an absolute path:
-#
-#   [extensions]
-#   hgk=/usr/local/lib/hgk.py
-#
-# Mercurial can also scan the default python library path for a file
-# named 'hgk.py' if you set hgk empty:
-#
-#   [extensions]
-#   hgk=
-#
-# The hg view command will launch the hgk Tcl script. For this command
-# to work, hgk must be in your search path. Alternately, you can
-# specify the path to hgk in your .hgrc file:
-#
-#   [hgk]
-#   path=/location/of/hgk
-#
-# hgk can make use of the extdiff extension to visualize
-# revisions. Assuming you had already configured extdiff vdiff
-# command, just add:
-#
-#   [hgk]
-#   vdiff=vdiff
-#
-# Revisions context menu will now display additional entries to fire
-# vdiff on hovered and selected revisions.
+'''browsing the repository in a graphical way
+
+The hgk extension allows browsing the history of a repository in a
+graphical way. It requires Tcl/Tk version 8.4 or later. (Tcl/Tk is
+not distributed with Mercurial.)
+
+hgk consists of two parts: a Tcl script that does the displaying and
+querying of information, and an extension to mercurial named hgk.py,
+which provides hooks for hgk to get information. hgk can be found in
+the contrib directory, and hgk.py can be found in the hgext directory.
+
+To load the hgext.py extension, add it to your .hgrc file (you have
+to use your global $HOME/.hgrc file, not one in a repository). You
+can specify an absolute path:
+
+  [extensions]
+  hgk=/usr/local/lib/hgk.py
+
+Mercurial can also scan the default python library path for a file
+named 'hgk.py' if you set hgk empty:
+
+  [extensions]
+  hgk=
+
+The hg view command will launch the hgk Tcl script. For this command
+to work, hgk must be in your search path. Alternately, you can
+specify the path to hgk in your .hgrc file:
+
+  [hgk]
+  path=/location/of/hgk
+
+hgk can make use of the extdiff extension to visualize revisions.
+Assuming you had already configured extdiff vdiff command, just add:
+
+  [hgk]
+  vdiff=vdiff
+
+Revisions context menu will now display additional entries to fire
+vdiff on hovered and selected revisions.'''
 
 import os
-from mercurial import commands, util, patch, revlog
+from mercurial import commands, util, patch, revlog, cmdutil
 from mercurial.node import nullid, nullrev, short
+from mercurial.i18n import _
 
 def difftree(ui, repo, node1=None, node2=None, *files, **opts):
     """diff trees from two commits"""
     def __difftree(repo, node1, node2, files=[]):
         assert node2 is not None
-        mmap = repo.changectx(node1).manifest()
-        mmap2 = repo.changectx(node2).manifest()
-        status = repo.status(node1, node2, files=files)[:5]
-        modified, added, removed, deleted, unknown = status
-
+        mmap = repo[node1].manifest()
+        mmap2 = repo[node2].manifest()
+        m = cmdutil.match(repo, files)
+        modified, added, removed  = repo.status(node1, node2, m)[:3]
         empty = short(nullid)
 
         for f in modified:
@@ -92,8 +91,8 @@ def difftree(ui, repo, node1=None, node2=None, *files, **opts):
         if opts['patch']:
             if opts['pretty']:
                 catcommit(ui, repo, node2, "")
-            patch.diff(repo, node1, node2,
-                       files=files,
+            m = cmdutil.match(repo, files)
+            patch.diff(repo, node1, node2, match=m,
                        opts=patch.diffopts(ui, {'git': True}))
         else:
             __difftree(repo, node1, node2, files=files)
@@ -103,11 +102,11 @@ def difftree(ui, repo, node1=None, node2=None, *files, **opts):
 def catcommit(ui, repo, n, prefix, ctx=None):
     nlprefix = '\n' + prefix;
     if ctx is None:
-        ctx = repo.changectx(n)
-    (p1, p2) = ctx.parents()
+        ctx = repo[n]
     ui.write("tree %s\n" % short(ctx.changeset()[0])) # use ctx.node() instead ??
-    if p1: ui.write("parent %s\n" % short(p1.node()))
-    if p2: ui.write("parent %s\n" % short(p2.node()))
+    for p in ctx.parents():
+        ui.write("parent %s\n" % p)
+
     date = ctx.date()
     description = ctx.description().replace("\0", "")
     lines = description.splitlines()
@@ -151,12 +150,12 @@ def catfile(ui, repo, type=None, r=None, **opts):
 
     else:
         if not type or not r:
-            ui.warn("cat-file: type or revision not supplied\n")
+            ui.warn(_("cat-file: type or revision not supplied\n"))
             commands.help_(ui, 'cat-file')
 
     while r:
         if type != "commit":
-            ui.warn("aborting hg cat-file only understands commits\n")
+            ui.warn(_("aborting hg cat-file only understands commits\n"))
             return 1;
         n = repo.lookup(r)
         catcommit(ui, repo, n, prefix)
@@ -175,7 +174,7 @@ def catfile(ui, repo, type=None, r=None, **opts):
 # you can specify a commit to stop at by starting the sha1 with ^
 def revtree(ui, args, repo, full="tree", maxnr=0, parents=False):
     def chlogwalk():
-        count = repo.changelog.count()
+        count = len(repo)
         i = count
         l = [0] * 100
         chunk = 100
@@ -191,7 +190,7 @@ def revtree(ui, args, repo, full="tree", maxnr=0, parents=False):
                     l[chunk - x:] = [0] * (chunk - x)
                     break
                 if full != None:
-                    l[x] = repo.changectx(i + x)
+                    l[x] = repo[i + x]
                     l[x].changeset() # force reading
                 else:
                     l[x] = 1
@@ -318,40 +317,40 @@ def view(ui, repo, *etc, **opts):
     os.chdir(repo.root)
     optstr = ' '.join(['--%s %s' % (k, v) for k, v in opts.iteritems() if v])
     cmd = ui.config("hgk", "path", "hgk") + " %s %s" % (optstr, " ".join(etc))
-    ui.debug("running %s\n" % cmd)
+    ui.debug(_("running %s\n") % cmd)
     util.system(cmd)
 
 cmdtable = {
     "^view":
         (view,
-         [('l', 'limit', '', 'limit number of changes displayed')],
-         'hg view [-l LIMIT] [REVRANGE]'),
+         [('l', 'limit', '', _('limit number of changes displayed'))],
+         _('hg view [-l LIMIT] [REVRANGE]')),
     "debug-diff-tree":
         (difftree,
-         [('p', 'patch', None, 'generate patch'),
-          ('r', 'recursive', None, 'recursive'),
-          ('P', 'pretty', None, 'pretty'),
-          ('s', 'stdin', None, 'stdin'),
-          ('C', 'copy', None, 'detect copies'),
-          ('S', 'search', "", 'search')],
-         'hg git-diff-tree [OPTION]... NODE1 NODE2 [FILE]...'),
+         [('p', 'patch', None, _('generate patch')),
+          ('r', 'recursive', None, _('recursive')),
+          ('P', 'pretty', None, _('pretty')),
+          ('s', 'stdin', None, _('stdin')),
+          ('C', 'copy', None, _('detect copies')),
+          ('S', 'search', "", _('search'))],
+         _('hg git-diff-tree [OPTION]... NODE1 NODE2 [FILE]...')),
     "debug-cat-file":
         (catfile,
-         [('s', 'stdin', None, 'stdin')],
-         'hg debug-cat-file [OPTION]... TYPE FILE'),
+         [('s', 'stdin', None, _('stdin'))],
+         _('hg debug-cat-file [OPTION]... TYPE FILE')),
     "debug-config":
-        (config, [], 'hg debug-config'),
+        (config, [], _('hg debug-config')),
     "debug-merge-base":
-        (base, [], 'hg debug-merge-base node node'),
+        (base, [], _('hg debug-merge-base node node')),
     "debug-rev-parse":
         (revparse,
-         [('', 'default', '', 'ignored')],
-         'hg debug-rev-parse REV'),
+         [('', 'default', '', _('ignored'))],
+         _('hg debug-rev-parse REV')),
     "debug-rev-list":
         (revlist,
-         [('H', 'header', None, 'header'),
-          ('t', 'topo-order', None, 'topo-order'),
-          ('p', 'parents', None, 'parents'),
-          ('n', 'max-count', 0, 'max-count')],
-         'hg debug-rev-list [options] revs'),
+         [('H', 'header', None, _('header')),
+          ('t', 'topo-order', None, _('topo-order')),
+          ('p', 'parents', None, _('parents')),
+          ('n', 'max-count', 0, _('max-count'))],
+         _('hg debug-rev-list [options] revs')),
 }
