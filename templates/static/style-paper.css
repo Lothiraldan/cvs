@@ -29,15 +29,10 @@ body {
   margin: 0;
   font-size: 80%;
   text-align: left;
-  position: fixed;
+  position: absolute;
   top: 20px;
   left: 20px;
   right: auto;
-}
-
-#.menu {
-  position: absolute !important;
-  top:expression(eval(document.body.scrollTop + 27));
 }
 
 .menu ul {
@@ -111,6 +106,7 @@ a { text-decoration:none; }
 pre { margin: 0; }
 
 h2 { font-size: 120%; border-bottom: 1px solid #999; }
+h2 a { color: #000; }
 h3 {
   margin-top: -.7em;
   font-size: 100%;
