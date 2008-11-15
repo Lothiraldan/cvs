@@ -88,9 +88,7 @@ class transplanter:
 
     def apply(self, repo, source, revmap, merges, opts={}):
         '''apply the revisions in revmap one by one in revision order'''
-        revs = revmap.keys()
-        revs.sort()
-
+        revs = util.sort(revmap)
         p1, p2 = repo.dirstate.parents()
         pulls = []
         diffopts = patch.diffopts(self.ui, opts)
@@ -140,7 +138,9 @@ class transplanter:
                 else:
                     fd, patchfile = tempfile.mkstemp(prefix='hg-transplant-')
                     fp = os.fdopen(fd, 'w')
-                    patch.diff(source, parents[0], node, fp=fp, opts=diffopts)
+                    gen = patch.diff(source, parents[0], node, opts=diffopts)
+                    for chunk in gen:
+                        fp.write(chunk)
                     fp.close()
 
                 del revmap[rev]
@@ -171,7 +171,7 @@ class transplanter:
     def filter(self, filter, changelog, patchfile):
         '''arbitrarily rewrite changeset before applying it'''
 
-        self.ui.status('filtering %s\n' % patchfile)
+        self.ui.status(_('filtering %s\n') % patchfile)
         user, date, msg = (changelog[1], changelog[2], changelog[4])
 
         fd, headerfile = tempfile.mkstemp(prefix='hg-transplant-')
@@ -310,9 +310,7 @@ class transplanter:
         if not os.path.isdir(self.path):
             os.mkdir(self.path)
         series = self.opener('series', 'w')
-        revs = revmap.keys()
-        revs.sort()
-        for rev in revs:
+        for rev in util.sort(revmap):
             series.write(revlog.hex(revmap[rev]) + '\n')
         if merges:
             series.write('# Merges\n')
@@ -400,7 +398,7 @@ def browserevs(ui, repo, nodes, opts):
     transplants = []
     merges = []
     for node in nodes:
-        displayer.show(changenode=node)
+        displayer.show(repo[node])
         action = None
         while not action:
             action = ui.prompt(_('apply changeset? [ynmpcq?]:'))
@@ -409,7 +407,8 @@ def browserevs(ui, repo, nodes, opts):
                 action = None
             elif action == 'p':
                 parent = repo.changelog.parents(node)[0]
-                patch.diff(repo, parent, node)
+                for chunk in patch.diff(repo, parent, node):
+                    repo.ui.write(chunk)
                 action = None
             elif action not in ('y', 'n', 'm', 'c', 'q'):
                 ui.write('no such option\n')
@@ -459,14 +458,6 @@ def transplant(ui, repo, *revs, **opts):
     If a changeset application fails, you can fix the merge by hand and
     then resume where you left off by calling hg transplant --continue.
     '''
-    def getoneitem(opts, item, errmsg):
-        val = opts.get(item)
-        if val:
-            if len(val) > 1:
-                raise util.Abort(errmsg)
-            else:
-                return val[0]
-
     def getremotechanges(repo, url):
         sourcerepo = ui.expandpath(url)
         source = hg.repository(ui, sourcerepo)
@@ -571,10 +562,6 @@ def transplant(ui, repo, *revs, **opts):
                 revmap[source.changelog.rev(r)] = r
         for r in merges:
             revmap[source.changelog.rev(r)] = r
-
-        revs = revmap.keys()
-        revs.sort()
-        pulls = []
 
         tp.apply(repo, source, revmap, merges, opts)
     finally:

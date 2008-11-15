@@ -63,6 +63,8 @@ parser.add_option("--tmpdir", type="string",
     help="run tests in the given temporary directory")
 parser.add_option("-v", "--verbose", action="store_true",
     help="output verbose messages")
+parser.add_option("-n", "--nodiff", action="store_true",
+    help="skip showing test changes")
 parser.add_option("--with-hg", type="string",
     help="test existing install at given location")
 
@@ -71,6 +73,7 @@ for option, default in defaults.items():
 parser.set_defaults(**defaults)
 (options, args) = parser.parse_args()
 verbose = options.verbose
+nodiff = options.nodiff
 coverage = options.cover or options.cover_stdlib or options.annotate
 python = sys.executable
 
@@ -78,8 +81,8 @@ if options.jobs < 1:
     print >> sys.stderr, 'ERROR: -j/--jobs must be positive'
     sys.exit(1)
 if options.interactive and options.jobs > 1:
-    print >> sys.stderr, 'ERROR: cannot mix -interactive and --jobs > 1'
-    sys.exit(1)
+    print '(--interactive overrides --jobs)'
+    options.jobs = 1
 
 def rename(src, dst):
     """Like os.rename(), trade atomicity and opened files friendliness
@@ -176,7 +179,7 @@ def install_hg():
     # Run installer in hg root
     os.chdir(os.path.join(os.path.dirname(sys.argv[0]), '..'))
     cmd = ('%s setup.py clean --all'
-           ' install --force --home="%s" --install-lib="%s"'
+           ' install --force --prefix="%s" --install-lib="%s"'
            ' --install-scripts="%s" >%s 2>&1'
            % (sys.executable, INST, PYTHONDIR, BINDIR, installerrs))
     vlog("# Running", cmd)
@@ -204,6 +207,18 @@ def install_hg():
     use_correct_python()
     global hgpkg
     hgpkg = _hgpath()
+
+    vlog("# Installing dummy diffstat")
+    f = open(os.path.join(BINDIR, 'diffstat'), 'w')
+    f.write('#!' + sys.executable + '\n'
+            'import sys\n'
+            'files = 0\n'
+            'for line in sys.stdin:\n'
+            '    if line.startswith("diff "):\n'
+            '        files += 1\n'
+            'sys.stdout.write("files patched: %d\\n" % files)\n')
+    f.close()
+    os.chmod(os.path.join(BINDIR, 'diffstat'), 0700)
 
     if coverage:
         vlog("# Installing coverage wrapper")
@@ -296,7 +311,8 @@ def run_one(test, skips, fails):
 
     def fail(msg):
         fails.append((test, msg))
-        print "\nERROR: %s %s" % (test, msg)
+        if not nodiff:
+            print "\nERROR: %s %s" % (test, msg)
         return None
 
     vlog("# Test", test)
@@ -346,7 +362,9 @@ def run_one(test, skips, fails):
         if os.name == 'nt':
             return skip("shell script")
         # do not try to run non-executable programs
-        if not os.access(testpath, os.X_OK):
+        if not os.path.exists(testpath):
+            return fail("does not exist")
+        elif not os.access(testpath, os.X_OK):
             return skip("not executable")
         cmd = '"%s"' % testpath
 
@@ -360,6 +378,8 @@ def run_one(test, skips, fails):
     if options.timeout > 0:
         signal.alarm(0)
 
+    mark = '.'
+
     skipped = (ret == SKIPPED_STATUS)
     # If reference output file exists, check test output against it
     if os.path.exists(ref):
@@ -369,22 +389,26 @@ def run_one(test, skips, fails):
     else:
         ref_out = []
     if skipped:
+        mark = 's'
         missing = extract_missing_features(out)
         if not missing:
             missing = ['irrelevant']
         skip(missing[-1])
     elif out != ref_out:
+        mark = '!'
         if ret:
             fail("output changed and returned error code %d" % ret)
         else:
             fail("output changed")
-        show_diff(ref_out, out)
+            if not nodiff:
+                show_diff(ref_out, out)
         ret = 1
     elif ret:
+        mark = '!'
         fail("returned error code %d" % ret)
 
     if not verbose:
-        sys.stdout.write(skipped and 's' or '.')
+        sys.stdout.write(mark)
         sys.stdout.flush()
 
     if ret != 0 and not skipped:

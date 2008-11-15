@@ -53,7 +53,7 @@ def launch(application):
             try:
                 if headers_sent:
                     # Re-raise original exception if headers sent
-                    raise exc_info[0], exc_info[1], exc_info[2]
+                    raise exc_info[0](exc_info[1], exc_info[2])
             finally:
                 exc_info = None     # avoid dangling circular ref
         elif headers_set:
@@ -62,4 +62,6 @@ def launch(application):
         headers_set[:] = [status, response_headers]
         return write
 
-    application(environ, start_response)
+    content = application(environ, start_response)
+    for chunk in content:
+        write(chunk)

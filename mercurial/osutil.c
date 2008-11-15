@@ -9,28 +9,60 @@
 
 #define _ATFILE_SOURCE
 #include <Python.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dirent.h>
 #include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
+#ifdef _WIN32
+/*
+stat struct compatible with hg expectations
+Mercurial only uses st_mode, st_size and st_mtime
+the rest is kept to minimize changes between implementations
+*/
+struct hg_stat {
+	int st_dev;
+	int st_mode;
+	int st_nlink;
+	__int64 st_size;
+	int st_mtime;
+	int st_ctime;
+};
+struct listdir_stat {
+	PyObject_HEAD
+	struct hg_stat st;
+};
+#else
 struct listdir_stat {
 	PyObject_HEAD
 	struct stat st;
 };
+#endif
 
 #define listdir_slot(name) \
-    static PyObject *listdir_stat_##name(PyObject *self, void *x) \
-    { \
-        return PyInt_FromLong(((struct listdir_stat *)self)->st.name); \
-    }
+	static PyObject *listdir_stat_##name(PyObject *self, void *x) \
+	{ \
+		return PyInt_FromLong(((struct listdir_stat *)self)->st.name); \
+	}
 
 listdir_slot(st_dev)
 listdir_slot(st_mode)
 listdir_slot(st_nlink)
+#ifdef _WIN32
+static PyObject *listdir_stat_st_size(PyObject *self, void *x)
+{
+	return PyLong_FromLongLong(
+		(PY_LONG_LONG)((struct listdir_stat *)self)->st.st_size);
+}
+#else
 listdir_slot(st_size)
+#endif
 listdir_slot(st_mtime)
 listdir_slot(st_ctime)
 
@@ -96,207 +128,269 @@ static PyTypeObject listdir_stat_type = {
 	listdir_stat_new,          /* tp_new */
 };
 
-static PyObject *listfiles(PyObject *list, DIR *dir,
-			   int keep_stat, int *need_stat)
+#ifdef _WIN32
+
+static int to_python_time(const FILETIME *tm)
 {
-	struct dirent *ent;
-	PyObject *name, *py_kind, *val;
-
-#ifdef DT_REG
-	*need_stat = 0;
-#else
-	*need_stat = 1;
-#endif
-
-	for (ent = readdir(dir); ent; ent = readdir(dir)) {
-		int kind = -1;
-
-		if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, ".."))
-			continue;
-
-#ifdef DT_REG
-		if (!keep_stat)
-			switch (ent->d_type) {
-			case DT_REG: kind = S_IFREG; break;
-			case DT_DIR: kind = S_IFDIR; break;
-			case DT_LNK: kind = S_IFLNK; break;
-			case DT_BLK: kind = S_IFBLK; break;
-			case DT_CHR: kind = S_IFCHR; break;
-			case DT_FIFO: kind = S_IFIFO; break;
-			case DT_SOCK: kind = S_IFSOCK; break;
-			default:
-				*need_stat = 0;
-				break;
-			}
-#endif
-
-		if (kind != -1)
-			py_kind = PyInt_FromLong(kind);
-		else {
-			py_kind = Py_None;
-			Py_INCREF(Py_None);
-		}
-
-		val = PyTuple_New(keep_stat ? 3 : 2);
-		name = PyString_FromString(ent->d_name);
-
-		if (!name || !py_kind || !val) {
-			Py_XDECREF(name);
-			Py_XDECREF(py_kind);
-			Py_XDECREF(val);
-			return PyErr_NoMemory();
-		}
-
-		PyTuple_SET_ITEM(val, 0, name);
-		PyTuple_SET_ITEM(val, 1, py_kind);
-		if (keep_stat) {
-			PyTuple_SET_ITEM(val, 2, Py_None);
-			Py_INCREF(Py_None);
-		}
-
-		PyList_Append(list, val);
-		Py_DECREF(val);
-	}
-
-	return 0;
+	/* number of seconds between epoch and January 1 1601 */
+	const __int64 a0 = (__int64)134774L * (__int64)24L * (__int64)3600L;
+	/* conversion factor from 100ns to 1s */
+	const __int64 a1 = 10000000;
+	/* explicit (int) cast to suspend compiler warnings */
+	return (int)((((__int64)tm->dwHighDateTime << 32)
+			+ tm->dwLowDateTime) / a1 - a0);
 }
 
-static PyObject *statfiles(PyObject *list, PyObject *ctor_args, int keep,
-			   char *path, int len, int dfd)
+static PyObject *make_item(const WIN32_FIND_DATAA *fd, int wantstat)
 {
-	struct stat buf;
-	struct stat *stp = &buf;
-	int kind;
-	int ret;
-	ssize_t i;
-	ssize_t size = PyList_Size(list);
+	PyObject *py_st;
+	struct hg_stat *stp;
 
-	for (i = 0; i < size; i++) {
-		PyObject *elt = PyList_GetItem(list, i);
-		char *name = PyString_AsString(PyTuple_GET_ITEM(elt, 0));
-		PyObject *py_st = NULL;
-		PyObject *py_kind = PyTuple_GET_ITEM(elt, 1);
+	int kind = (fd->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		? _S_IFDIR : _S_IFREG;
 
-		kind = py_kind == Py_None ? -1 : PyInt_AsLong(py_kind);
-		if (kind != -1 && !keep)
-			continue;
+	if (!wantstat)
+		return Py_BuildValue("si", fd->cFileName, kind);
 
-		strncpy(path + len + 1, name, PATH_MAX - len);
-		path[PATH_MAX] = 0;
+	py_st = PyObject_CallObject((PyObject *)&listdir_stat_type, NULL);
+	if (!py_st)
+		return NULL;
 
-		if (keep) {
-			py_st = PyObject_CallObject(
-				(PyObject *)&listdir_stat_type, ctor_args);
-			if (!py_st)
-				return PyErr_NoMemory();
-			stp = &((struct listdir_stat *)py_st)->st;
-			PyTuple_SET_ITEM(elt, 2, py_st);
-		}
-
-#ifdef AT_SYMLINK_NOFOLLOW
-		ret = fstatat(dfd, name, stp, AT_SYMLINK_NOFOLLOW);
-#else
-		ret = lstat(path, stp);
-#endif
-		if (ret == -1)
-			return PyErr_SetFromErrnoWithFilename(PyExc_OSError,
-							      path);
-
-		if (kind == -1) {
-			if (S_ISREG(stp->st_mode))
-				kind = S_IFREG;
-			else if (S_ISDIR(stp->st_mode))
-				kind = S_IFDIR;
-			else if (S_ISLNK(stp->st_mode))
-				kind = S_IFLNK;
-			else if (S_ISBLK(stp->st_mode))
-				kind = S_IFBLK;
-			else if (S_ISCHR(stp->st_mode))
-				kind = S_IFCHR;
-			else if (S_ISFIFO(stp->st_mode))
-				kind = S_IFIFO;
-			else if (S_ISSOCK(stp->st_mode))
-				kind = S_IFSOCK;
-			else
-				kind = stp->st_mode;
-		}
-
-		if (py_kind == Py_None && kind != -1) {
-			py_kind = PyInt_FromLong(kind);
-			if (!py_kind)
-				return PyErr_NoMemory();
-			Py_XDECREF(Py_None);
-			PyTuple_SET_ITEM(elt, 1, py_kind);
-		}
-	}
-
-	return 0;
+	stp = &((struct listdir_stat *)py_st)->st;
+	/*
+	use kind as st_mode
+	rwx bits on Win32 are meaningless
+	and Hg does not use them anyway
+	*/
+	stp->st_mode  = kind;
+	stp->st_mtime = to_python_time(&fd->ftLastWriteTime);
+	stp->st_ctime = to_python_time(&fd->ftCreationTime);
+	if (kind == _S_IFREG)
+		stp->st_size =	((__int64)fd->nFileSizeHigh << 32)
+				+ fd->nFileSizeLow;
+	return Py_BuildValue("siN", fd->cFileName,
+		kind, py_st);
 }
 
-static PyObject *listdir(PyObject *self, PyObject *args, PyObject *kwargs)
+static PyObject *_listdir(char *path, int plen, int wantstat, char *skip)
 {
-	static char *kwlist[] = { "path", "stat", NULL };
-	DIR *dir = NULL;
-	PyObject *statobj = NULL;
-	PyObject *list = NULL;
-	PyObject *err = NULL;
-	PyObject *ctor_args = NULL;
-	char *path;
-	char full_path[PATH_MAX + 10];
-	int path_len;
-	int need_stat, keep_stat;
-	int dfd;
+	PyObject *rval = NULL; /* initialize - return value */
+	PyObject *list;
+	HANDLE fh;
+	WIN32_FIND_DATAA fd;
+	char *pattern;
 
-	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#|O:listdir", kwlist,
-					 &path, &path_len, &statobj))
-		goto bail;
+	/* build the path + \* pattern string */
+	pattern = malloc(plen+3); /* path + \* + \0 */
+	if (!pattern) {
+		PyErr_NoMemory();
+		goto error_nomem;
+	}
+	strcpy(pattern, path);
 
-	keep_stat = statobj && PyObject_IsTrue(statobj);
+	if (plen > 0) {
+		char c = path[plen-1];
+		if (c != ':' && c != '/' && c != '\\')
+			pattern[plen++] = '\\';
+	}
+	strcpy(pattern + plen, "*");
 
-#ifdef AT_SYMLINK_NOFOLLOW
-	dfd = open(path, O_RDONLY);
-	if (dfd != -1)
-		dir = fdopendir(dfd);
-#else
-	dir = opendir(path);
-	dfd = -1;
-#endif
-	if (!dir) {
-		err = PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
-		goto bail;
+	fh = FindFirstFileA(pattern, &fd);
+	if (fh == INVALID_HANDLE_VALUE) {
+		PyErr_SetFromWindowsErrWithFilename(GetLastError(), path);
+		goto error_file;
 	}
 
 	list = PyList_New(0);
-	ctor_args = PyTuple_New(0);
-	if (!list || !ctor_args)
-		goto bail;
+	if (!list)
+		goto error_list;
 
-	strncpy(full_path, path, PATH_MAX);
-	full_path[path_len] = '/';
+	do {
+		PyObject *item;
 
-	err = listfiles(list, dir, keep_stat, &need_stat);
-	if (err)
-		goto bail;
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			if (!strcmp(fd.cFileName, ".")
+			|| !strcmp(fd.cFileName, ".."))
+				continue;
 
-	PyList_Sort(list);
+			if (skip && !strcmp(fd.cFileName, skip)) {
+				rval = PyList_New(0);
+				goto error;
+			}
+		}
 
-	if (!keep_stat && !need_stat)
-		goto done;
+		item = make_item(&fd, wantstat);
+		if (!item)
+			goto error;
 
-	err = statfiles(list, ctor_args, keep_stat, full_path, path_len, dfd);
-	if (!err)
-		goto done;
+		if (PyList_Append(list, item)) {
+			Py_XDECREF(item);
+			goto error;
+		}
 
- bail:
+		Py_XDECREF(item);
+	} while (FindNextFileA(fh, &fd));
+
+	if (GetLastError() != ERROR_NO_MORE_FILES) {
+		PyErr_SetFromWindowsErrWithFilename(GetLastError(), path);
+		goto error;
+	}
+
+	rval = list;
+	Py_XINCREF(rval);
+error:
 	Py_XDECREF(list);
-
- done:
-	Py_XDECREF(ctor_args);
-	if (dir)
-		closedir(dir);
-	return err ? err : list;
+error_list:
+	FindClose(fh);
+error_file:
+	free(pattern);
+error_nomem:
+	return rval;
 }
 
+#else
+
+int entkind(struct dirent *ent)
+{
+#ifdef DT_REG
+	switch (ent->d_type) {
+	case DT_REG: return S_IFREG;
+	case DT_DIR: return S_IFDIR;
+	case DT_LNK: return S_IFLNK;
+	case DT_BLK: return S_IFBLK;
+	case DT_CHR: return S_IFCHR;
+	case DT_FIFO: return S_IFIFO;
+	case DT_SOCK: return S_IFSOCK;
+	}
+#endif
+	return -1;
+}
+
+static PyObject *_listdir(char *path, int pathlen, int keepstat, char *skip)
+{
+	PyObject *list, *elem, *stat, *ret = NULL;
+	char fullpath[PATH_MAX + 10];
+	int kind, err;
+	struct stat st;
+	struct dirent *ent;
+	DIR *dir;
+#ifdef AT_SYMLINK_NOFOLLOW
+	int dfd = -1;
+#endif
+
+	if (pathlen >= PATH_MAX) {
+		PyErr_SetString(PyExc_ValueError, "path too long");
+		goto error_value;
+	}
+	strncpy(fullpath, path, PATH_MAX);
+	fullpath[pathlen] = '/';
+
+#ifdef AT_SYMLINK_NOFOLLOW
+	dfd = open(path, O_RDONLY);
+	if (dfd == -1) {
+		PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
+		goto error_value;
+	}
+	dir = fdopendir(dfd);
+#else
+	dir = opendir(path);
+#endif
+	if (!dir) {
+		PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
+		goto error_dir;
+ 	}
+
+	list = PyList_New(0);
+	if (!list)
+		goto error_list;
+
+	while ((ent = readdir(dir))) {
+		if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, ".."))
+			continue;
+
+		kind = entkind(ent);
+		if (kind == -1 || keepstat) {
+#ifdef AT_SYMLINK_NOFOLLOW
+			err = fstatat(dfd, ent->d_name, &st,
+				      AT_SYMLINK_NOFOLLOW);
+#else
+			strncpy(fullpath + pathlen + 1, ent->d_name,
+				PATH_MAX - pathlen);
+			fullpath[PATH_MAX] = 0;
+			err = lstat(fullpath, &st);
+#endif
+			if (err == -1) {
+				strncpy(fullpath + pathlen + 1, ent->d_name,
+					PATH_MAX - pathlen);
+				fullpath[PATH_MAX] = 0;
+				PyErr_SetFromErrnoWithFilename(PyExc_OSError,
+							       fullpath);
+				goto error;
+			}
+			kind = st.st_mode & S_IFMT;
+		}
+
+		/* quit early? */
+		if (skip && kind == S_IFDIR && !strcmp(ent->d_name, skip)) {
+			ret = PyList_New(0);
+			goto error;
+		}
+
+		if (keepstat) {
+			stat = PyObject_CallObject((PyObject *)&listdir_stat_type, NULL);
+			if (!stat)
+				goto error;
+			memcpy(&((struct listdir_stat *)stat)->st, &st, sizeof(st));
+			elem = Py_BuildValue("siN", ent->d_name, kind, stat);
+		} else
+			elem = Py_BuildValue("si", ent->d_name, kind);
+		if (!elem)
+			goto error;
+
+		PyList_Append(list, elem);
+		Py_DECREF(elem);
+	}
+
+	ret = list;
+	Py_INCREF(ret);
+
+error:
+	Py_DECREF(list);
+error_list:
+	closedir(dir);
+error_dir:
+#ifdef AT_SYMLINK_NOFOLLOW
+	close(dfd);
+#endif
+error_value:
+	return ret;
+}
+
+#endif /* ndef _WIN32 */
+
+static PyObject *listdir(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+	PyObject *statobj = NULL; /* initialize - optional arg */
+	PyObject *skipobj = NULL; /* initialize - optional arg */
+	char *path, *skip = NULL;
+	int wantstat, plen;
+
+	static char *kwlist[] = {"path", "stat", "skip", NULL};
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#|OO:listdir",
+			kwlist, &path, &plen, &statobj, &skipobj))
+		return NULL;
+
+	wantstat = statobj && PyObject_IsTrue(statobj);
+
+	if (skipobj && skipobj != Py_None) {
+		skip = PyString_AsString(skipobj);
+		if (!skip)
+			return NULL;
+	}
+
+	return _listdir(path, plen, wantstat, skip);
+}
 
 static char osutil_doc[] = "Native operating system services.";
 

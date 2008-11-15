@@ -11,6 +11,7 @@ mycmd = cmd --args
 
 from mercurial.cmdutil import findcmd, UnknownCommand, AmbiguousCommand
 from mercurial import commands
+from mercurial.i18n import _
 
 cmdtable = {}
 
@@ -42,20 +43,20 @@ class lazycommand(object):
             return
 
         try:
-            self._cmd = findcmd(self._ui, self._target, commands.table)[1]
+            self._cmd = findcmd(self._target, commands.table, False)[1]
             if self._cmd == self:
                 raise RecursiveCommand()
             if self._target in commands.norepo.split(' '):
                 commands.norepo += ' %s' % self._name
             return
         except UnknownCommand:
-            msg = '*** [alias] %s: command %s is unknown' % \
+            msg = _('*** [alias] %s: command %s is unknown') % \
                   (self._name, self._target)
         except AmbiguousCommand:
-            msg = '*** [alias] %s: command %s is ambiguous' % \
+            msg = _('*** [alias] %s: command %s is ambiguous') % \
                   (self._name, self._target)
         except RecursiveCommand:
-            msg = '*** [alias] %s: circular dependency on %s' % \
+            msg = _('*** [alias] %s: circular dependency on %s') % \
                   (self._name, self._target)
         def nocmd(*args, **opts):
             self._ui.warn(msg + '\n')
@@ -67,7 +68,7 @@ class lazycommand(object):
 def uisetup(ui):
     for cmd, target in ui.configitems('alias'):
         if not target:
-            ui.warn('*** [alias] %s: no definition\n' % cmd)
+            ui.warn(_('*** [alias] %s: no definition\n') % cmd)
             continue
         args = target.split(' ')
         tcmd = args.pop(0)

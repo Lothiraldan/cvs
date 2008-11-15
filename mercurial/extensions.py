@@ -6,7 +6,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 import imp, os
-import util
+import util, cmdutil
 from i18n import _
 
 _extensions = {}
@@ -29,7 +29,7 @@ def find(name):
         raise KeyError(name)
 
 def load(ui, name, path):
-    if name.startswith('hgext.'):
+    if name.startswith('hgext.') or name.startswith('hgext/'):
         shortname = name[6:]
     else:
         shortname = name
@@ -87,3 +87,29 @@ def loadall(ui):
             if ui.print_exc():
                 return 1
 
+def wrapcommand(table, command, wrapper):
+    aliases, entry = cmdutil.findcmd(command, table)
+    for alias, e in table.iteritems():
+        if e is entry:
+            key = alias
+            break
+
+    origfn = entry[0]
+    def wrap(*args, **kwargs):
+        return wrapper(origfn, *args, **kwargs)
+
+    wrap.__doc__ = getattr(origfn, '__doc__')
+    wrap.__module__ = getattr(origfn, '__module__')
+
+    newentry = list(entry)
+    newentry[0] = wrap
+    table[key] = tuple(newentry)
+    return entry
+
+def wrapfunction(container, funcname, wrapper):
+    def wrap(*args, **kwargs):
+        return wrapper(origfn, *args, **kwargs)
+
+    origfn = getattr(container, funcname)
+    setattr(container, funcname, wrap)
+    return origfn

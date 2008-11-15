@@ -3,7 +3,7 @@ import sys, textwrap
 sys.path.insert(0, "..")
 from mercurial import demandimport; demandimport.enable()
 from mercurial.commands import table, globalopts
-from mercurial.i18n import gettext as _
+from mercurial.i18n import gettext, _
 from mercurial.help import helptable
 
 def get_desc(docstr):
@@ -36,13 +36,20 @@ def get_cmd(cmd):
     attr = table[cmd]
     cmds = cmd.lstrip("^").split("|")
 
-    d['synopsis'] = attr[2]
     d['cmd'] = cmds[0]
     d['aliases'] = cmd.split("|")[1:]
     d['desc'] = get_desc(attr[0].__doc__)
     d['opts'] = list(get_opts(attr[1]))
-    return d
 
+    s = 'hg ' + cmds[0]
+    if len(attr) > 2:
+        if not attr[2].startswith('hg'):
+            s += attr[2]
+        else:
+            s = attr[2]
+    d['synopsis'] = s
+
+    return d
 
 def show_doc(ui):
     def bold(s, text=""):
@@ -69,6 +76,7 @@ def show_doc(ui):
         if f.startswith("debug"): continue
         d = get_cmd(h[f])
         # synopsis
+        ui.write("[[%s]]\n" % d['cmd'])
         ui.write("%s::\n" % d['synopsis'].replace("hg ","", 1))
         # description
         ui.write("%s\n\n" % d['desc'][1])
@@ -91,14 +99,11 @@ def show_doc(ui):
             ui.write(_("    aliases: %s\n\n") % " ".join(d['aliases']))
 
     # print topics
-    for t in helptable:
-        l = t.split("|")
-        section = l[-1]
-        underlined(_(section).upper())
-        doc = helptable[t]
+    for names, section, doc in helptable:
+        underlined(gettext(section).upper())
         if callable(doc):
             doc = doc()
-        ui.write(_(doc))
+        ui.write(gettext(doc))
         ui.write("\n")
 
 if __name__ == "__main__":

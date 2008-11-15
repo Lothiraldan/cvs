@@ -25,11 +25,11 @@ def children(ui, repo, file_=None, **opts):
     if file_:
         ctx = repo.filectx(file_, changeid=rev)
     else:
-        ctx = repo.changectx(rev)
+        ctx = repo[rev]
 
     displayer = cmdutil.show_changeset(ui, repo, opts)
-    for node in [cp.node() for cp in ctx.children()]:
-        displayer.show(changenode=node)
+    for cctx in ctx.children():
+        displayer.show(cctx)
 
 
 cmdtable = {

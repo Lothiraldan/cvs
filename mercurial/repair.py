@@ -8,6 +8,7 @@
 
 import changegroup, os
 from node import nullrev, short
+from i18n import _
 
 def _bundle(repo, bases, heads, node, suffix, extranodes=None):
     """create a bundle with the specified revisions as a backup"""
@@ -16,15 +17,15 @@ def _bundle(repo, bases, heads, node, suffix, extranodes=None):
     if not os.path.isdir(backupdir):
         os.mkdir(backupdir)
     name = os.path.join(backupdir, "%s-%s" % (short(node), suffix))
-    repo.ui.warn("saving bundle to %s\n" % name)
+    repo.ui.warn(_("saving bundle to %s\n") % name)
     return changegroup.writebundle(cg, name, "HG10BZ")
 
 def _collectfiles(repo, striprev):
     """find out the filelogs affected by the strip"""
     files = {}
 
-    for x in xrange(striprev, repo.changelog.count()):
-        for name in repo.changectx(x).files():
+    for x in xrange(striprev, len(repo)):
+        for name in repo[x].files():
             if name in files:
                 continue
             files[name] = 1
@@ -37,11 +38,10 @@ def _collectextranodes(repo, files, link):
     """return the nodes that have to be saved before the strip"""
     def collectone(revlog):
         extra = []
-        startrev = count = revlog.count()
+        startrev = count = len(revlog)
         # find the truncation point of the revlog
         for i in xrange(0, count):
-            node = revlog.node(i)
-            lrev = revlog.linkrev(node)
+            lrev = revlog.linkrev(i)
             if lrev >= link:
                 startrev = i + 1
                 break
@@ -50,7 +50,7 @@ def _collectextranodes(repo, files, link):
         # (we have to manually save these guys)
         for i in xrange(startrev, count):
             node = revlog.node(i)
-            lrev = revlog.linkrev(node)
+            lrev = revlog.linkrev(i)
             if lrev < link:
                 extra.append((node, cl.node(lrev)))
 
@@ -72,7 +72,6 @@ def _collectextranodes(repo, files, link):
 def strip(ui, repo, node, backup="all"):
     cl = repo.changelog
     # TODO delete the undo files, and handle undo of merge sets
-    pp = cl.parents(node)
     striprev = cl.rev(node)
 
     # Some revisions with rev > striprev may not be descendants of striprev.
@@ -85,7 +84,7 @@ def strip(ui, repo, node, backup="all"):
     tostrip = {striprev: 1}
     saveheads = {}
     savebases = []
-    for r in xrange(striprev + 1, cl.count()):
+    for r in xrange(striprev + 1, len(cl)):
         parents = cl.parentrevs(r)
         if parents[0] in tostrip or parents[1] in tostrip:
             # r is a descendant of striprev
@@ -126,7 +125,7 @@ def strip(ui, repo, node, backup="all"):
         f.strip(striprev)
 
     if saveheads or extranodes:
-        ui.status("adding branch\n")
+        ui.status(_("adding branch\n"))
         f = open(chgrpfile, "rb")
         gen = changegroup.readbundle(f, chgrpfile)
         repo.addchangegroup(gen, 'strip', 'bundle:' + chgrpfile, True)

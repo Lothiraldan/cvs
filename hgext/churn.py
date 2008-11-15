@@ -1,19 +1,16 @@
-# churn.py - create a graph showing who changed the most lines
+# churn.py - create a graph of revisions count grouped by template
 #
 # Copyright 2006 Josef "Jeff" Sipek <jeffpc@josefsipek.net>
+# Copyright 2008 Alexander Solovyov <piranha@piranha.org.ua>
 #
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
-#
-#
-# Aliases map file format is simple one alias per line in the following
-# format:
-#
-# <alias email> <actual email>
+'''command to show certain statistics about revision history'''
 
-from mercurial.i18n import gettext as _
-from mercurial import mdiff, cmdutil, util, node
+from mercurial.i18n import _
+from mercurial import patch, cmdutil, util, templater
 import os, sys
+import time, datetime
 
 def get_tty_width():
     if 'COLUMNS' in os.environ:
@@ -36,171 +33,150 @@ def get_tty_width():
         pass
     return 80
 
-def __gather(ui, repo, node1, node2):
-    def dirtywork(f, mmap1, mmap2):
-        lines = 0
+def maketemplater(ui, repo, tmpl):
+    tmpl = templater.parsestring(tmpl, quoted=False)
+    try:
+        t = cmdutil.changeset_templater(ui, repo, False, None, False)
+    except SyntaxError, inst:
+        raise util.Abort(inst.args[0])
+    t.use_template(tmpl)
+    return t
 
-        to = mmap1 and repo.file(f).read(mmap1[f]) or None
-        tn = mmap2 and repo.file(f).read(mmap2[f]) or None
-
-        diff = mdiff.unidiff(to, "", tn, "", f, f).split("\n")
-
-        for line in diff:
-            if not line:
-                continue # skip EOF
-            if line.startswith(" "):
-                continue # context line
-            if line.startswith("--- ") or line.startswith("+++ "):
-                continue # begining of diff
-            if line.startswith("@@ "):
-                continue # info line
-
-            # changed lines
-            lines += 1
-
-        return lines
-
-    ##
-
+def changedlines(ui, repo, ctx1, ctx2):
     lines = 0
+    diff = ''.join(patch.diff(repo, ctx1.node(), ctx2.node()))
+    for l in diff.split('\n'):
+        if (l.startswith("+") and not l.startswith("+++ ") or
+            l.startswith("-") and not l.startswith("--- ")):
+            lines += 1
+    return lines
 
-    changes = repo.status(node1, node2, None, util.always)[:5]
+def countrate(ui, repo, amap, *pats, **opts):
+    """Calculate stats"""
+    if opts.get('dateformat'):
+        def getkey(ctx):
+            t, tz = ctx.date()
+            date = datetime.datetime(*time.gmtime(float(t) - tz)[:6])
+            return date.strftime(opts['dateformat'])
+    else:
+        tmpl = opts.get('template', '{author|email}')
+        tmpl = maketemplater(ui, repo, tmpl)
+        def getkey(ctx):
+            ui.pushbuffer()
+            tmpl.show(ctx)
+            return ui.popbuffer()
 
-    modified, added, removed, deleted, unknown = changes
+    count = pct = 0
+    rate = {}
+    df = False
+    if opts.get('date'):
+        df = util.matchdate(opts['date'])
 
-    who = repo.changelog.read(node2)[1]
-    who = util.email(who) # get the email of the person
-
-    mmap1 = repo.manifest.read(repo.changelog.read(node1)[0])
-    mmap2 = repo.manifest.read(repo.changelog.read(node2)[0])
-    for f in modified:
-        lines += dirtywork(f, mmap1, mmap2)
-
-    for f in added:
-        lines += dirtywork(f, None, mmap2)
-
-    for f in removed:
-        lines += dirtywork(f, mmap1, None)
-
-    for f in deleted:
-        lines += dirtywork(f, mmap1, mmap2)
-
-    for f in unknown:
-        lines += dirtywork(f, mmap1, mmap2)
-
-    return (who, lines)
-
-def gather_stats(ui, repo, amap, revs=None, progress=False):
-    stats = {}
-
-    cl    = repo.changelog
-
-    if not revs:
-        revs = range(0, cl.count())
-
-    nr_revs = len(revs)
-    cur_rev = 0
-
-    for rev in revs:
-        cur_rev += 1 # next revision
-
-        node2    = cl.node(rev)
-        node1    = cl.parents(node2)[0]
-
-        if cl.parents(node2)[1] != node.nullid:
-            ui.note(_('Revision %d is a merge, ignoring...\n') % (rev,))
+    get = util.cachefunc(lambda r: repo[r].changeset())
+    changeiter, matchfn = cmdutil.walkchangerevs(ui, repo, pats, get, opts)
+    for st, rev, fns in changeiter:
+        if not st == 'add':
+            continue
+        if df and not df(get(rev)[2][0]): # doesn't match date format
             continue
 
-        who, lines = __gather(ui, repo, node1, node2)
+        ctx = repo[rev]
+        key = getkey(ctx)
+        key = amap.get(key, key) # alias remap
+        if opts.get('changesets'):
+            rate[key] = rate.get(key, 0) + 1
+        else:
+            parents = ctx.parents()
+            if len(parents) > 1:
+                ui.note(_('Revision %d is a merge, ignoring...\n') % (rev,))
+                continue
 
-        # remap the owner if possible
-        if who in amap:
-            ui.note("using '%s' alias for '%s'\n" % (amap[who], who))
-            who = amap[who]
+            ctx1 = parents[0]
+            lines = changedlines(ui, repo, ctx1, ctx)
+            rate[key] = rate.get(key, 0) + lines
 
-        if not who in stats:
-            stats[who] = 0
-        stats[who] += lines
-
-        ui.note("rev %d: %d lines by %s\n" % (rev, lines, who))
-
-        if progress:
-            nr_revs = max(nr_revs, 1)
-            if int(100.0*(cur_rev - 1)/nr_revs) < int(100.0*cur_rev/nr_revs):
-                ui.write("\rGenerating stats: %d%%" % (int(100.0*cur_rev/nr_revs),))
+        if opts.get('progress'):
+            count += 1
+            newpct = int(100.0 * count / max(len(repo), 1))
+            if pct < newpct:
+                pct = newpct
+                ui.write(_("\rGenerating stats: %d%%") % pct)
                 sys.stdout.flush()
 
-    if progress:
+    if opts.get('progress'):
         ui.write("\r")
         sys.stdout.flush()
 
-    return stats
+    return rate
 
-def churn(ui, repo, **opts):
-    "Graphs the number of lines changed"
 
+def churn(ui, repo, *pats, **opts):
+    '''Graph count of revisions grouped by template
+
+    Will graph count of changed lines or revisions grouped by template or
+    alternatively by date, if dateformat is used. In this case it will override
+    template.
+
+    By default statistics are counted for number of changed lines.
+
+    Examples:
+
+      # display count of changed lines for every committer
+      hg churn -t '{author|email}'
+
+      # display daily activity graph
+      hg churn -f '%H' -s -c
+
+      # display activity of developers by month
+      hg churn -f '%Y-%m' -s -c
+
+      # display count of lines changed in every year
+      hg churn -f '%Y' -s
+
+    The map file format used to specify aliases is fairly simple:
+
+    <alias email> <actual email>'''
     def pad(s, l):
-        if len(s) < l:
-            return s + " " * (l-len(s))
-        return s[0:l]
-
-    def graph(n, maximum, width, char):
-        maximum = max(1, maximum)
-        n = int(n * width / float(maximum))
-
-        return char * (n)
-
-    def get_aliases(f):
-        aliases = {}
-
-        for l in f.readlines():
-            l = l.strip()
-            alias, actual = l.split()
-            aliases[alias] = actual
-
-        return aliases
+        return (s + " " * l)[:l]
 
     amap = {}
     aliases = opts.get('aliases')
     if aliases:
-        try:
-            f = open(aliases,"r")
-        except OSError, e:
-            print "Error: " + e
-            return
+        for l in open(aliases, "r"):
+            l = l.strip()
+            alias, actual = l.split()
+            amap[alias] = actual
 
-        amap = get_aliases(f)
-        f.close()
-
-    revs = [int(r) for r in cmdutil.revrange(repo, opts['rev'])]
-    revs.sort()
-    stats = gather_stats(ui, repo, amap, revs, opts.get('progress'))
-
-    # make a list of tuples (name, lines) and sort it in descending order
-    ordered = stats.items()
-    if not ordered:
+    rate = countrate(ui, repo, amap, *pats, **opts).items()
+    if not rate:
         return
-    ordered.sort(lambda x, y: cmp(y[1], x[1]))
-    max_churn = ordered[0][1]
 
-    tty_width = get_tty_width()
-    ui.note(_("assuming %i character terminal\n") % tty_width)
-    tty_width -= 1
+    sortfn = ((not opts.get('sort')) and (lambda a, b: cmp(b[1], a[1])) or None)
+    rate.sort(sortfn)
 
-    max_user_width = max([len(user) for user, churn in ordered])
+    maxcount = float(max([v for k, v in rate]))
+    maxname = max([len(k) for k, v in rate])
 
-    graph_width = tty_width - max_user_width - 1 - 6 - 2 - 2
+    ttywidth = get_tty_width()
+    ui.debug(_("assuming %i character terminal\n") % ttywidth)
+    width = ttywidth - maxname - 2 - 6 - 2 - 2
 
-    for user, churn in ordered:
-        print "%s %6d %s" % (pad(user, max_user_width),
-                             churn,
-                             graph(churn, max_churn, graph_width, '*'))
+    for date, count in rate:
+        print "%s %6d %s" % (pad(date, maxname), count,
+                             "*" * int(count * width / maxcount))
+
 
 cmdtable = {
     "churn":
-    (churn,
-     [('r', 'rev', [], _('limit statistics to the specified revisions')),
-      ('', 'aliases', '', _('file with email aliases')),
-      ('', 'progress', None, _('show progress'))],
-    'hg churn [-r REVISIONS] [--aliases FILE] [--progress]'),
+        (churn,
+         [('r', 'rev', [], _('count rate for the specified revision or range')),
+          ('d', 'date', '', _('count rate for revs matching date spec')),
+          ('t', 'template', '{author|email}', _('template to group changesets')),
+          ('f', 'dateformat', '',
+              _('strftime-compatible format for grouping by date')),
+          ('c', 'changesets', False, _('count rate by number of changesets')),
+          ('s', 'sort', False, _('sort by key (default: sort by count)')),
+          ('', 'aliases', '', _('file with email aliases')),
+          ('', 'progress', None, _('show progress'))],
+         _("hg churn [-d DATE] [-r REV] [--aliases FILE] [--progress] [FILE]")),
 }

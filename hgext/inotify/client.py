@@ -6,12 +6,12 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from mercurial.i18n import gettext as _
+from mercurial.i18n import _
 from mercurial import ui
 import common
-import os, select, socket, stat, struct, sys
+import os, socket, struct
 
-def query(ui, repo, names, match, list_ignored, list_clean, list_unknown=True):
+def query(ui, repo, names, match, ignored, clean, unknown=True):
     sock = socket.socket(socket.AF_UNIX)
     sockpath = repo.join('inotify.sock')
     try:
@@ -27,10 +27,10 @@ def query(ui, repo, names, match, list_ignored, list_clean, list_unknown=True):
         for n in names or []:
             yield n
         states = 'almrx!'
-        if list_ignored:
+        if ignored:
             raise ValueError('this is insanity')
-        if list_clean: states += 'n'
-        if list_unknown: states += '?'
+        if clean: states += 'c'
+        if unknown: states += '?'
         yield states
 
     req = '\0'.join(genquery())

@@ -42,17 +42,6 @@ echo % qinit -c
 hg --cwd c qinit -c
 hg -R c/.hg/patches st
 
-echo % qnew should refuse bad patch names
-hg -R c qnew series
-hg -R c qnew status
-hg -R c qnew guards
-hg -R c qnew .hgignore
-
-echo % qnew implies add
-
-hg -R c qnew test.patch
-hg -R c/.hg/patches st
-
 echo '% qinit; qinit -c'
 hg init d
 cd d
@@ -90,31 +79,7 @@ cd ..
 
 cd a
 
-echo a > somefile
-hg add somefile
-
-echo % qnew with uncommitted changes
-
-hg qnew uncommitted.patch
-hg st
-hg qseries
-
-echo '% qnew with uncommitted changes and missing file (issue 803)'
-
-hg qnew issue803.patch someotherfile 2>&1 | \
-    sed -e 's/someotherfile:.*/someotherfile: No such file or directory/'
-hg st
-hg qseries
-hg qpop -f
-hg qdel issue803.patch
-
-hg revert --no-backup somefile
-rm somefile
-
-echo % qnew -m
-
 hg qnew -m 'foo bar' test.patch
-cat .hg/patches/test.patch
 
 echo % qrefresh
 
@@ -199,6 +164,14 @@ hg commit
 echo % push should fail
 hg push ../../k
 
+echo % import should fail
+hg st .
+echo foo >> ../a
+hg diff > ../../import.diff
+hg revert --no-backup ../a
+hg import ../../import.diff
+hg st
+
 echo % qunapplied
 hg qunapplied
 
@@ -265,6 +238,14 @@ echo x>x
 hg ci -Ama
 hg strip tip 2>&1 | sed 's/\(saving bundle to \).*/\1/'
 hg unbundle .hg/strip-backup/*
+
+echo % strip with local changes, should complain
+hg up
+echo y>y
+hg add y
+hg strip tip | sed 's/\(saving bundle to \).*/\1/'
+echo % --force strip with local changes
+hg strip -f tip 2>&1 | sed 's/\(saving bundle to \).*/\1/'
 
 echo '% cd b; hg qrefresh'
 hg init refresh

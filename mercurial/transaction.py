@@ -12,7 +12,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from i18n import _
-import os
+import os, errno
 
 class transaction(object):
     def __init__(self, report, opener, journal, after=None, createmode=None):
@@ -96,9 +96,17 @@ def rollback(opener, file):
     files = {}
     for l in open(file).readlines():
         f, o = l.split('\0')
-        files[f] = o
+        files[f] = int(o)
     for f in files:
         o = files[f]
-        opener(f, "a").truncate(int(o))
+        if o:
+            opener(f, "a").truncate(int(o))
+        else:
+            try:
+                fn = opener(f).name
+                os.unlink(fn)
+            except OSError, inst:
+                if inst.errno != errno.ENOENT:
+                    raise
     os.unlink(file)
 

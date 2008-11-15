@@ -6,7 +6,7 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-from mercurial.i18n import gettext as _
+from mercurial.i18n import _
 from mercurial import osutil, ui, util
 import common
 import errno, os, select, socket, stat, struct, sys, tempfile, time
@@ -15,7 +15,6 @@ try:
     import linux as inotify
     from linux import watcher
 except ImportError:
-    print >> sys.stderr, '*** native support is required for this extension'
     raise
 
 class AlreadyStartedException(Exception): pass
@@ -253,6 +252,8 @@ class Watcher(object):
             if not st:
                 return '!'
             st_mode, st_size, st_mtime = st
+            if size == -1:
+                return 'l'
             if size and (size != st_size or (mode ^ st_mode) & 0100):
                 return 'm'
             if time != int(st_mtime):
@@ -264,15 +265,14 @@ class Watcher(object):
             return 'i'
         return type_
 
-    def updatestatus(self, wfn, st=None, status=None, oldstatus=None):
+    def updatestatus(self, wfn, st=None, status=None):
         if st:
             status = self.filestatus(wfn, st)
         else:
             self.statcache.pop(wfn, None)
         root, fn = self.split(wfn)
         d = self.dir(self.tree, root)
-        if oldstatus is None:
-            oldstatus = d.get(fn)
+        oldstatus = d.get(fn)
         isdir = False
         if oldstatus:
             try:
@@ -290,10 +290,10 @@ class Watcher(object):
                     del self.dir(self.statustrees[oldstatus], root)[fn]
         if self.ui.debugflag and oldstatus != status:
             if isdir:
-                self.ui.note('status: %r dir(%d) -> %s\n' %
+                self.ui.note(_('status: %r dir(%d) -> %s\n') %
                              (wfn, len(oldstatus), status))
             else:
-                self.ui.note('status: %r %s -> %s\n' %
+                self.ui.note(_('status: %r %s -> %s\n') %
                              (wfn, oldstatus, status))
         if not isdir:
             if status and status != 'i':
@@ -336,12 +336,13 @@ class Watcher(object):
         for wfn, state in ds.iteritems():
             if not wfn.startswith(wtopdir):
                 continue
-            status = state[0]
-            st = self.getstat(wfn)
-            if status == 'r' and not st:
-                self.updatestatus(wfn, st, status=status)
+            try:
+                st = self.stat(wfn)
+            except OSError:
+                status = state[0]
+                self.updatestatus(wfn, None, status=status)
             else:
-                self.updatestatus(wfn, st, oldstatus=status)
+                self.updatestatus(wfn, st)
         self.check_deleted('!')
         self.check_deleted('r')
 
@@ -380,9 +381,9 @@ class Watcher(object):
         # But it's easier to do nothing than to open that can of
         # worms.
 
-        if self.repo.dirstate.ignorefunc is not None:
-            self.repo.dirstate.ignorefunc = None
-            self.ui.note('rescanning due to .hgignore change\n')
+        if '_ignore' in self.repo.dirstate.__dict__:
+            delattr(self.repo.dirstate, '_ignore')
+            self.ui.note(_('rescanning due to .hgignore change\n'))
             self.scan()
 
     def getstat(self, wpath):
@@ -401,7 +402,7 @@ class Watcher(object):
             ret = st.st_mode, st.st_size, st.st_mtime
             self.statcache[wpath] = ret
             return ret
-        except OSError, err:
+        except OSError:
             self.statcache.pop(wpath, None)
             raise
 
@@ -412,7 +413,7 @@ class Watcher(object):
             st = self.stat(wpath)
             if stat.S_ISREG(st[0]):
                 self.updatestatus(wpath, st)
-        except OSError, err:
+        except OSError:
             pass
 
     def modified(self, wpath):
@@ -467,7 +468,7 @@ class Watcher(object):
 
     def process_delete(self, wpath, evt):
         if self.ui.debugflag:
-            self.ui.note(('%s event: deleted %s\n') %
+            self.ui.note(_('%s event: deleted %s\n') %
                          (self.event_time(), wpath))
 
         if evt.mask & inotify.IN_ISDIR:
@@ -490,12 +491,12 @@ class Watcher(object):
 
     def handle_event(self, fd, event):
         if self.ui.debugflag:
-            self.ui.note('%s readable: %d bytes\n' %
+            self.ui.note(_('%s readable: %d bytes\n') %
                          (self.event_time(), self.threshold.readable()))
         if not self.threshold():
             if self.registered:
                 if self.ui.debugflag:
-                    self.ui.note('%s below threshold - unhooking\n' %
+                    self.ui.note(_('%s below threshold - unhooking\n') %
                                  (self.event_time()))
                 self.master.poll.unregister(fd)
                 self.registered = False
@@ -506,7 +507,7 @@ class Watcher(object):
     def read_events(self, bufsize=None):
         events = self.watcher.read(bufsize)
         if self.ui.debugflag:
-            self.ui.note('%s reading %d events\n' %
+            self.ui.note(_('%s reading %d events\n') %
                          (self.event_time(), len(events)))
         for evt in events:
             wpath = self.wpath(evt)
@@ -523,7 +524,7 @@ class Watcher(object):
     def handle_timeout(self):
         if not self.registered:
             if self.ui.debugflag:
-                self.ui.note('%s hooking back up with %d bytes readable\n' %
+                self.ui.note(_('%s hooking back up with %d bytes readable\n') %
                              (self.event_time(), self.threshold.readable()))
             self.read_events(0)
             self.master.poll.register(self, select.POLLIN)
@@ -531,12 +532,10 @@ class Watcher(object):
 
         if self.eventq:
             if self.ui.debugflag:
-                self.ui.note('%s processing %d deferred events as %d\n' %
+                self.ui.note(_('%s processing %d deferred events as %d\n') %
                              (self.event_time(), self.deferred,
                               len(self.eventq)))
-            eventq = self.eventq.items()
-            eventq.sort()
-            for wpath, evts in eventq:
+            for wpath, evts in util.sort(self.eventq.items()):
                 for evt in evts:
                     self.deferred_event(wpath, evt)
             self.eventq.clear()
@@ -694,9 +693,9 @@ class Master(object):
             try:
                 if self.ui.debugflag:
                     if timeout is None:
-                        self.ui.note('polling: no timeout\n')
+                        self.ui.note(_('polling: no timeout\n'))
                     else:
-                        self.ui.note('polling: %sms timeout\n' % timeout)
+                        self.ui.note(_('polling: %sms timeout\n') % timeout)
                 events = self.poll.poll(timeout)
             except select.error, err:
                 if err[0] == errno.EINTR:

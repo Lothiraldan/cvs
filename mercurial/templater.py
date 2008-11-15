@@ -9,6 +9,8 @@ from i18n import _
 import re, sys, os
 from mercurial import util
 
+path = ['templates', '../templates']
+
 def parsestring(s, quoted=True):
     '''parse a string using simple c-like syntax.
     string must be in quotes if quoted is True.'''
@@ -81,18 +83,18 @@ class templater(object):
     def __contains__(self, key):
         return key in self.cache or key in self.map
 
-    def __call__(self, t, **map):
-        '''perform expansion.
-        t is name of map element to expand.
-        map is added elements to use during expansion.'''
+    def _template(self, t):
+        '''Get the template for the given template name. Use a local cache.'''
         if not t in self.cache:
             try:
                 self.cache[t] = file(self.map[t]).read()
             except IOError, inst:
                 raise IOError(inst.args[0], _('template file %s: %s') %
                               (self.map[t], inst.args[1]))
-        tmpl = self.cache[t]
+        return self.cache[t]
 
+    def _process(self, tmpl, map):
+        '''Render a template. Returns a generator.'''
         while tmpl:
             m = self.template_re.search(tmpl)
             if not m:
@@ -114,33 +116,63 @@ class templater(object):
                 v = v(**map)
             if format:
                 if not hasattr(v, '__iter__'):
-                    raise SyntaxError(_("Error expanding '%s%s'")
+                    raise SyntaxError(_("Error expanding '%s%%%s'")
                                       % (key, format))
                 lm = map.copy()
                 for i in v:
                     lm.update(i)
-                    yield self(format, **lm)
+                    t = self._template(format)
+                    yield self._process(t, lm)
             else:
                 if fl:
                     for f in fl.split("|")[1:]:
                         v = self.filters[f](v)
                 yield v
 
+    def __call__(self, t, **map):
+        '''Perform expansion. t is name of map element to expand. map contains
+        added elements for use during expansion. Is a generator.'''
+        tmpl = self._template(t)
+        iters = [self._process(tmpl, map)]
+        while iters:
+            try:
+                item = iters[0].next()
+            except StopIteration:
+                iters.pop(0)
+                continue
+            if isinstance(item, str):
+                yield item
+            elif item is None:
+                yield ''
+            elif hasattr(item, '__iter__'):
+                iters.insert(0, iter(item))
+            else:
+                yield str(item)
+
 def templatepath(name=None):
     '''return location of template file or directory (if no name).
     returns None if not found.'''
+    normpaths = []
 
     # executable version (py2exe) doesn't support __file__
     if hasattr(sys, 'frozen'):
         module = sys.executable
     else:
         module = __file__
-    for f in 'templates', '../templates':
-        fl = f.split('/')
-        if name: fl.append(name)
-        p = os.path.join(os.path.dirname(module), *fl)
-        if (name and os.path.exists(p)) or os.path.isdir(p):
+    for f in path:
+        if f.startswith('/'):
+            p = f
+        else:
+            fl = f.split('/')
+            p = os.path.join(os.path.dirname(module), *fl)
+        if name:
+            p = os.path.join(p, name)
+        if name and os.path.exists(p):
             return os.path.normpath(p)
+        elif os.path.isdir(p):
+            normpaths.append(os.path.normpath(p))
+
+    return normpaths
 
 def stringify(thing):
     '''turn nested template iterator into string.'''

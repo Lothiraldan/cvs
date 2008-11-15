@@ -146,6 +146,8 @@ def _runcatch(ui, args):
         ui.warn(_("** or mercurial@selenic.com\n"))
         ui.warn(_("** Mercurial Distributed SCM (version %s)\n")
                % version.get_version())
+        ui.warn(_("** Extensions loaded: %s\n")
+               % ", ".join([x[0] for x in extensions.extensions()]))
         raise
 
     return -1
@@ -169,7 +171,8 @@ def _parse(ui, args):
 
     if args:
         cmd, args = args[0], args[1:]
-        aliases, i = cmdutil.findcmd(ui, cmd, commands.table)
+        aliases, i = cmdutil.findcmd(cmd, commands.table,
+                                     ui.config("ui", "strict"))
         cmd = aliases[0]
         defaults = ui.config("defaults", cmd)
         if defaults:
@@ -371,7 +374,7 @@ def _runcommand(ui, options, cmd, cmdfunc):
     def checkargs():
         try:
             return cmdfunc()
-        except TypeError, inst:
+        except TypeError:
             # was this an argument error?
             tb = traceback.extract_tb(sys.exc_info()[2])
             if len(tb) != 2: # no

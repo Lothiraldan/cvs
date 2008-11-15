@@ -21,9 +21,45 @@ echo "mq=" >> $HGRCPATH
 echo "[diff]" >> $HGRCPATH
 echo "git=1" >> $HGRCPATH
 
-echo % build diff with CRLF
 hg init repo
 cd repo
+
+echo % qimport non-existing-file
+hg qimport non-existing-file 2>&1 | sed -e 's/\(No such file or directory:\) .*/\1/'
+
+echo % import URL
+echo foo >> foo
+hg add foo
+hg diff > $HGTMP/url.diff
+hg revert --no-backup foo
+rm foo
+# Under unix: file:///foobar/blah
+# Under windows: file:///c:/foobar/blah
+patchurl=`echo $HGTMP/url.diff | tr '\\\\' /`
+expr $patchurl : "\/" > /dev/null
+if [ $? -ne 0 ]; then
+    patchurl='/'$patchurl
+fi
+hg qimport file://$patchurl
+hg qun
+
+echo % import patch that already exists
+echo foo2 >> foo
+hg add foo
+hg diff > ../url.diff
+hg revert --no-backup foo
+rm foo
+hg qimport ../url.diff
+hg qpush
+cat foo
+hg qpop
+echo % qimport -f
+hg qimport -f ../url.diff
+hg qpush
+cat foo
+hg qpop
+
+echo % build diff with CRLF
 python ../writelines.py b 5 'a\n' 5 'a\r\n'
 hg ci -Am addb
 python ../writelines.py b 2 'a\n' 10 'b\n' 2 'a\r\n'

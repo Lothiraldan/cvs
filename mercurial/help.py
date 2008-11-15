@@ -5,9 +5,11 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-helptable = {
-    "dates|Date Formats":
-    r'''
+from i18n import _
+
+helptable = (
+    (["dates"], _("Date Formats"),
+     _(r'''
     Some commands allow the user to specify a date:
     backout, commit, import, tag: Specify the commit date.
     log, revert, update: Select revision(s) by date.
@@ -21,7 +23,7 @@ helptable = {
     "13:18" (today assumed)
     "3:39" (3:39AM assumed)
     "3:39pm" (15:39)
-    "2006-12-6 13:18:29" (ISO 8601 format)
+    "2006-12-06 13:18:29" (ISO 8601 format)
     "2006-12-6 13:18"
     "2006-12-6"
     "12-6"
@@ -43,10 +45,56 @@ helptable = {
     ">{date}" - on or after a given date
     "{date} to {date}" - a date range, inclusive
     "-{days}" - within a given number of days of today
-    ''',
+    ''')),
 
-    'environment|env|Environment Variables':
-    r'''
+    (["patterns"], _("File Name Patterns"),
+     _(r'''
+    Mercurial accepts several notations for identifying one or more
+    files at a time.
+
+    By default, Mercurial treats filenames as shell-style extended
+    glob patterns.
+
+    Alternate pattern notations must be specified explicitly.
+
+    To use a plain path name without any pattern matching, start a
+    name with "path:".  These path names must match completely, from
+    the root of the current repository.
+
+    To use an extended glob, start a name with "glob:".  Globs are
+    rooted at the current directory; a glob such as "*.c" will match
+    files ending in ".c" in the current directory only.
+
+    The supported glob syntax extensions are "**" to match any string
+    across path separators, and "{a,b}" to mean "a or b".
+
+    To use a Perl/Python regular expression, start a name with "re:".
+    Regexp pattern matching is anchored at the root of the repository.
+
+    Plain examples:
+
+    path:foo/bar   a name bar in a directory named foo in the root of
+                   the repository
+    path:path:name a file or directory named "path:name"
+
+    Glob examples:
+
+    glob:*.c       any name ending in ".c" in the current directory
+    *.c            any name ending in ".c" in the current directory
+    **.c           any name ending in ".c" in the current directory, or
+                   any subdirectory
+    foo/*.c        any name ending in ".c" in the directory foo
+    foo/**.c       any name ending in ".c" in the directory foo, or any
+                   subdirectory
+
+    Regexp examples:
+
+    re:.*\.c$      any name ending in ".c", anywhere in the repository
+
+    ''')),
+
+    (['environment', 'env'], _('Environment Variables'),
+     _(r'''
 HG::
     Path to the 'hg' executable, automatically passed when running hooks,
     extensions or external tools. If unset or empty, an executable named
@@ -114,51 +162,93 @@ EDITOR::
 PYTHONPATH::
     This is used by Python to find imported modules and may need to be set
     appropriately if Mercurial is not installed system-wide.
-    ''',
+    ''')),
 
-    "patterns|File Name Patterns": r'''
-    Mercurial accepts several notations for identifying one or more
-    files at a time.
+    (['revs', 'revisions'], _('Specifying Single Revisions'),
+     _(r'''
+    Mercurial accepts several notations for identifying individual
+    revisions.
 
-    By default, Mercurial treats filenames as shell-style extended
-    glob patterns.
+    A plain integer is treated as a revision number. Negative
+    integers are treated as offsets from the tip, with -1 denoting the
+    tip.
 
-    Alternate pattern notations must be specified explicitly.
+    A 40-digit hexadecimal string is treated as a unique revision
+    identifier.
 
-    To use a plain path name without any pattern matching, start a
-    name with "path:".  These path names must match completely, from
-    the root of the current repository.
+    A hexadecimal string less than 40 characters long is treated as a
+    unique revision identifier, and referred to as a short-form
+    identifier. A short-form identifier is only valid if it is the
+    prefix of one full-length identifier.
 
-    To use an extended glob, start a name with "glob:".  Globs are
-    rooted at the current directory; a glob such as "*.c" will match
-    files ending in ".c" in the current directory only.
+    Any other string is treated as a tag name, which is a symbolic
+    name associated with a revision identifier. Tag names may not
+    contain the ":" character.
 
-    The supported glob syntax extensions are "**" to match any string
-    across path separators, and "{a,b}" to mean "a or b".
+    The reserved name "tip" is a special tag that always identifies
+    the most recent revision.
 
-    To use a Perl/Python regular expression, start a name with "re:".
-    Regexp pattern matching is anchored at the root of the repository.
+    The reserved name "null" indicates the null revision. This is the
+    revision of an empty repository, and the parent of revision 0.
 
-    Plain examples:
+    The reserved name "." indicates the working directory parent. If
+    no working directory is checked out, it is equivalent to null.
+    If an uncommitted merge is in progress, "." is the revision of
+    the first parent.
+    ''')),
 
-    path:foo/bar   a name bar in a directory named foo in the root of
-                   the repository
-    path:path:name a file or directory named "path:name"
+    (['mrevs', 'multirevs'], _('Specifying Multiple Revisions'),
+     _(r'''
+    When Mercurial accepts more than one revision, they may be
+    specified individually, or provided as a continuous range,
+    separated by the ":" character.
 
-    Glob examples:
+    The syntax of range notation is [BEGIN]:[END], where BEGIN and END
+    are revision identifiers. Both BEGIN and END are optional. If
+    BEGIN is not specified, it defaults to revision number 0. If END
+    is not specified, it defaults to the tip. The range ":" thus
+    means "all revisions".
 
-    glob:*.c       any name ending in ".c" in the current directory
-    *.c            any name ending in ".c" in the current directory
-    **.c           any name ending in ".c" in the current directory, or
-                   any subdirectory
-    foo/*.c        any name ending in ".c" in the directory foo
-    foo/**.c       any name ending in ".c" in the directory foo, or any
-                   subdirectory
+    If BEGIN is greater than END, revisions are treated in reverse
+    order.
 
-    Regexp examples:
+    A range acts as a closed interval. This means that a range of 3:5
+    gives 3, 4 and 5. Similarly, a range of 4:2 gives 4, 3, and 2.
+    ''')),
 
-    re:.*\.c$      any name ending in ".c", anywhere in the repository
+    (['gitdiffs'], _('Git Extended Diff Format'),
+     _(r'''
+    Mercurial's default format for showing changes between two versions
+    of a file is compatible to the unified format of GNU diff, which
+    can be used by GNU patch and many other standard tools.
 
-''',
-}
+    While this de facto standardized format is often enough, there are
+    cases where additional change information should be included in the
+    generated diff file:
 
+     - executable status
+     - copy or rename information
+     - changes in binary files
+     - creation or deletion of empty files
+
+    Mercurial adopted the extended diff format which was invented for
+    the git VCS to support above features.
+
+    The git extended diff format is not produced by default, because
+    there are only very few tools (yet) which understand the additional
+    information provided by them.
+
+    This means that, when generating diffs from a Mercurial repository
+    (e.g. with "hg export"), you should be careful about things like
+    file copies and renames or other things mentioned above, because
+    when applying a standard diff to a different repository, this extra
+    information is lost. Mercurial's internal operations (like push and
+    pull) are not affected by this, because they use a different, binary
+    format for communicating changes.
+
+    To make Mercurial produce the git extended diff format, use the
+    --git option available for many commands, or set 'git = True' in the
+    [diff] section of your hgrc. You do not need to set this option when
+    importing diffs in this format or using them in the mq extension.
+    ''')),
+)

@@ -29,6 +29,7 @@ list of commands:
  qcommit      commit changes in the queue repository
  qdelete      remove patches from queue
  qdiff        diff of the current patch and subsequent modifications
+ qfinish      move applied patches into repository history
  qfold        fold the named patches into the current patch
  qgoto        push or pop patches until named patch is at top of stack
  qguard       set or print guards for a patch
@@ -50,6 +51,10 @@ list of commands:
  qunapplied   print the patches not yet applied
  strip        strip a revision and all its descendants from the repository
 
+enabled extensions:
+
+ mq   patch management and development
+
 use "hg -v help mq" to show aliases and global options
 adding a
 updating working directory
@@ -60,15 +65,6 @@ adding b/z
 % qinit -c
 A .hgignore
 A series
-% qnew should refuse bad patch names
-abort: "series" cannot be used as the name of a patch
-abort: "status" cannot be used as the name of a patch
-abort: "guards" cannot be used as the name of a patch
-abort: ".hgignore" cannot be used as the name of a patch
-% qnew implies add
-A .hgignore
-A series
-A test.patch
 % qinit; qinit -c
   .hgignore:
 ^\.hg
@@ -91,16 +87,6 @@ bleh
   series:
 A
 B
-% qnew with uncommitted changes
-abort: local changes found, refresh first
-A somefile
-% qnew with uncommitted changes and missing file (issue 803)
-someotherfile: No such file or directory
-A somefile
-issue803.patch
-Patch queue now empty
-% qnew -m
-foo bar
 % qrefresh
 foo bar
 
@@ -163,6 +149,8 @@ abort: cannot commit over an applied mq patch
 % push should fail
 pushing to ../../k
 abort: source has mq patches applied
+% import should fail
+abort: cannot import over an applied patch
 % qunapplied
 test2.patch
 % qpush/qpop with index
@@ -250,6 +238,12 @@ adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
 (run 'hg update' to get a working copy)
+% strip with local changes, should complain
+1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+abort: local changes found
+% --force strip with local changes
+0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+saving bundle to 
 % cd b; hg qrefresh
 adding a
 foo
@@ -279,7 +273,7 @@ Patch queue now empty
 applying foo
 applying bar
 file foo already exists
-1 out of 1 hunk FAILED -- saving rejects to file foo.rej
+1 out of 1 hunks FAILED -- saving rejects to file foo.rej
 patch failed, unable to continue (try -v)
 patch failed, rejects left in working dir
 Errors during apply, please fix and refresh bar
