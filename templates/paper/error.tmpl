@@ -1,9 +1,5 @@
 {header}
-<title>{repo|escape}: tags</title>
-<link rel="alternate" type="application/atom+xml"
-   href="{url}atom-tags" title="Atom feed for {repo|escape}: tags">
-<link rel="alternate" type="application/rss+xml"
-   href="{url}rss-tags" title="RSS feed for {repo|escape}: tags">
+<title>{repo|escape}: error</title>
 </head>
 <body>
 
@@ -16,28 +12,30 @@
 <ul>
 <li><a href="{url}shortlog{sessionvars%urlparameter}">log</a></li>
 <li><a href="{url}graph{sessionvars%urlparameter}">graph</a></li>
-<li class="active">tags</li>
+<li><a href="{url}tags{sessionvars%urlparameter}">tags</a></li>
 </ul>
 </div>
 
 <div class="main">
-<h2><a href="{url}">{repo|escape}</a></h2>
-<h3>tags</h3>
+
+<h2><a href="{url}{sessionvars%urlparameter}">{repo|escape}</a></h2>
+<h3>error</h3>
 
 <form class="search" action="{url}log">
 {sessionvars%hiddenformentry}
 <p><input name="rev" id="search1" type="text" size="30"></p>
-<span>find changesets by author, revision, 
+<span>find changesets by author, revision,
 files, or words in the commit message</span>
 </form>
 
-<table class="bigtable">
-<tr>
- <th>tag</th>
- <th>node</th>
-</tr>
-{entries%tagentry}
-</table>
+<div class="description">
+<p>
+An error occurred while processing your request:
+</p>
+<p>
+{error|escape}
+</p>
+</div>
 </div>
 </div>
 

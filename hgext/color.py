@@ -16,15 +16,17 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-'''add color output to the status and qseries commands
+'''add color output to status, qseries, and diff-related commands
 
 This extension modifies the status command to add color to its output to
-reflect file status, and the qseries command to add color to reflect patch
-status (applied, unapplied, missing).  Other effects in addition to color,
-like bold and underlined text, are also available.  Effects are rendered
-with the ECMA-48 SGR control function (aka ANSI escape codes).  This module
-also provides the render_text function, which can be used to add effects to
-any text.
+reflect file status, the qseries command to add color to reflect patch status
+(applied, unapplied, missing), and to diff-related commands to highlight
+additions, removals, diff headers, and trailing whitespace.
+
+Other effects in addition to color, like bold and underlined text, are also
+available.  Effects are rendered with the ECMA-48 SGR control function (aka
+ANSI escape codes).  This module also provides the render_text function,
+which can be used to add effects to any text.
 
 To enable this extension, add this to your .hgrc file:
 [extensions]
@@ -47,70 +49,70 @@ status.copied = none
 qseries.applied = blue bold underline
 qseries.unapplied = black bold
 qseries.missing = red bold
+
+diff.diffline = bold
+diff.extended = cyan bold
+diff.file_a = red bold
+diff.file_b = green bold
+diff.hunk = magenta
+diff.deleted = red
+diff.inserted = green
+diff.changed = white
+diff.trailingwhitespace = bold red_background
 '''
 
-import re, sys
+import os, re, sys
 
-from mercurial import commands, cmdutil, extensions
+from mercurial import cmdutil, commands, extensions
 from mercurial.i18n import _
 
 # start and stop parameters for effects
-_effect_params = { 'none': (0, 0),
-                   'black': (30, 39),
-                   'red': (31, 39),
-                   'green': (32, 39),
-                   'yellow': (33, 39),
-                   'blue': (34, 39),
-                   'magenta': (35, 39),
-                   'cyan': (36, 39),
-                   'white': (37, 39),
-                   'bold': (1, 22),
-                   'italic': (3, 23),
-                   'underline': (4, 24),
-                   'inverse': (7, 27),
-                   'black_background': (40, 49),
-                   'red_background': (41, 49),
-                   'green_background': (42, 49),
-                   'yellow_background': (43, 49),
-                   'blue_background': (44, 49),
-                   'purple_background': (45, 49),
-                   'cyan_background': (46, 49),
-                   'white_background': (47, 49), }
+_effect_params = {'none': 0,
+                  'black': 30,
+                  'red': 31,
+                  'green': 32,
+                  'yellow': 33,
+                  'blue': 34,
+                  'magenta': 35,
+                  'cyan': 36,
+                  'white': 37,
+                  'bold': 1,
+                  'italic': 3,
+                  'underline': 4,
+                  'inverse': 7,
+                  'black_background': 40,
+                  'red_background': 41,
+                  'green_background': 42,
+                  'yellow_background': 43,
+                  'blue_background': 44,
+                  'purple_background': 45,
+                  'cyan_background': 46,
+                  'white_background': 47}
 
 def render_effects(text, *effects):
     'Wrap text in commands to turn on each effect.'
-    start = [ str(_effect_params['none'][0]) ]
-    stop = []
-    for effect in effects:
-        start.append(str(_effect_params[effect][0]))
-        stop.append(str(_effect_params[effect][1]))
-    stop.append(str(_effect_params['none'][1]))
+    start = [str(_effect_params[e]) for e in ('none',) + effects]
     start = '\033[' + ';'.join(start) + 'm'
-    stop = '\033[' + ';'.join(stop) + 'm'
-    return start + text + stop
+    stop = '\033[' + str(_effect_params['none']) + 'm'
+    return ''.join([start, text, stop])
 
 def colorstatus(orig, ui, repo, *pats, **opts):
     '''run the status command with colored output'''
 
     delimiter = opts['print0'] and '\0' or '\n'
 
-    # run status and capture it's output
+    nostatus = opts.get('no_status')
+    opts['no_status'] = False
+    # run status and capture its output
     ui.pushbuffer()
     retval = orig(ui, repo, *pats, **opts)
     # filter out empty strings
-    lines = [ line for line in ui.popbuffer().split(delimiter) if line ]
+    lines_with_status = [ line for line in ui.popbuffer().split(delimiter) if line ]
 
-    if opts['no_status']:
-        # if --no-status, run the command again without that option to get
-        # output with status abbreviations
-        opts['no_status'] = False
-        ui.pushbuffer()
-        statusfunc(ui, repo, *pats, **opts)
-        # filter out empty strings
-        lines_with_status = [ line for
-                              line in ui.popbuffer().split(delimiter) if line ]
+    if nostatus:
+        lines = [l[2:] for l in lines_with_status]
     else:
-        lines_with_status = lines
+        lines = lines_with_status
 
     # apply color to output and display it
     for i in xrange(0, len(lines)):
@@ -118,7 +120,7 @@ def colorstatus(orig, ui, repo, *pats, **opts):
         effects = _status_effects[status]
         if effects:
             lines[i] = render_effects(lines[i], *effects)
-        sys.stdout.write(lines[i] + delimiter)
+        ui.write(lines[i] + delimiter)
     return retval
 
 _status_abbreviations = { 'M': 'modified',
@@ -159,30 +161,105 @@ def colorqseries(orig, ui, repo, *dummy, **opts):
             effects = _patch_effects['applied']
         else:
             effects = _patch_effects['unapplied']
-        sys.stdout.write(render_effects(patch, *effects) + '\n')
+        ui.write(render_effects(patch, *effects) + '\n')
     return retval
 
 _patch_effects = { 'applied': ('blue', 'bold', 'underline'),
                    'missing': ('red', 'bold'),
                    'unapplied': ('black', 'bold'), }
 
+def colorwrap(orig, s):
+    '''wrap ui.write for colored diff output'''
+    lines = s.split('\n')
+    for i, line in enumerate(lines):
+        stripline = line
+        if line and line[0] in '+-':
+            # highlight trailing whitespace, but only in changed lines
+            stripline = line.rstrip()
+        for prefix, style in _diff_prefixes:
+            if stripline.startswith(prefix):
+                lines[i] = render_effects(stripline, *_diff_effects[style])
+                break
+        if line != stripline:
+            lines[i] += render_effects(
+                line[len(stripline):], *_diff_effects['trailingwhitespace'])
+    orig('\n'.join(lines))
+
+def colorshowpatch(orig, self, node):
+    '''wrap cmdutil.changeset_printer.showpatch with colored output'''
+    oldwrite = extensions.wrapfunction(self.ui, 'write', colorwrap)
+    try:
+        orig(self, node)
+    finally:
+        self.ui.write = oldwrite
+
+def colordiff(orig, ui, repo, *pats, **opts):
+    '''run the diff command with colored output'''
+    oldwrite = extensions.wrapfunction(ui, 'write', colorwrap)
+    try:
+        orig(ui, repo, *pats, **opts)
+    finally:
+        ui.write = oldwrite
+
+_diff_prefixes = [('diff', 'diffline'),
+                  ('copy', 'extended'),
+                  ('rename', 'extended'),
+                  ('old', 'extended'),
+                  ('new', 'extended'),
+                  ('deleted', 'extended'),
+                  ('---', 'file_a'),
+                  ('+++', 'file_b'),
+                  ('@', 'hunk'),
+                  ('-', 'deleted'),
+                  ('+', 'inserted')]
+
+_diff_effects = {'diffline': ('bold',),
+                 'extended': ('cyan', 'bold'),
+                 'file_a': ('red', 'bold'),
+                 'file_b': ('green', 'bold'),
+                 'hunk': ('magenta',),
+                 'deleted': ('red',),
+                 'inserted': ('green',),
+                 'changed': ('white',),
+                 'trailingwhitespace': ('bold', 'red_background'),}
+
 def uisetup(ui):
     '''Initialize the extension.'''
+    _setupcmd(ui, 'diff', commands.table, colordiff, _diff_effects)
+    _setupcmd(ui, 'incoming', commands.table, None, _diff_effects)
+    _setupcmd(ui, 'log', commands.table, None, _diff_effects)
+    _setupcmd(ui, 'outgoing', commands.table, None, _diff_effects)
+    _setupcmd(ui, 'tip', commands.table, None, _diff_effects)
     _setupcmd(ui, 'status', commands.table, colorstatus, _status_effects)
     if ui.config('extensions', 'hgext.mq') is not None or \
             ui.config('extensions', 'mq') is not None:
         from hgext import mq
+        _setupcmd(ui, 'qdiff', mq.cmdtable, colordiff, _diff_effects)
         _setupcmd(ui, 'qseries', mq.cmdtable, colorqseries, _patch_effects)
 
 def _setupcmd(ui, cmd, table, func, effectsmap):
     '''patch in command to command table and load effect map'''
-    def nocolor(orig, *args, **kwargs):
-        if kwargs['no_color']:
-            return orig(*args, **kwargs)
-        return func(orig, *args, **kwargs)
+    def nocolor(orig, *args, **opts):
+
+        if (opts['no_color'] or opts['color'] == 'never' or
+            (opts['color'] == 'auto' and (os.environ.get('TERM') == 'dumb'
+                                          or not sys.__stdout__.isatty()))):
+            return orig(*args, **opts)
+
+        oldshowpatch = extensions.wrapfunction(cmdutil.changeset_printer,
+                                               'showpatch', colorshowpatch)
+        try:
+            if func is not None:
+                return func(orig, *args, **opts)
+            return orig(*args, **opts)
+        finally:
+            cmdutil.changeset_printer.showpatch = oldshowpatch
 
     entry = extensions.wrapcommand(table, cmd, nocolor)
-    entry[1].append(('', 'no-color', None, _("don't colorize output")))
+    entry[1].extend([
+        ('', 'color', 'auto', _("when to colorize (always, auto, or never)")),
+        ('', 'no-color', None, _("don't colorize output")),
+    ])
 
     for status in effectsmap:
         effects = ui.config('color', cmd + '.' + status)

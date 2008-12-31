@@ -1,5 +1,9 @@
 {header}
-<title>{repo|escape}: {file|escape} annotate</title>
+<title>{repo|escape}: {file|escape} history</title>
+<link rel="alternate" type="application/atom+xml"
+   href="{url}atom-log/tip/{file|urlescape}" title="Atom feed for {repo|escape}:{file}">
+<link rel="alternate" type="application/rss+xml"
+   href="{url}rss-log/tip/{file|urlescape}" title="RSS feed for {repo|escape}:{file}">
 </head>
 <body>
 
@@ -14,7 +18,6 @@
 <li><a href="{url}graph/{node|short}{sessionvars%urlparameter}">graph</a></li>
 <li><a href="{url}tags{sessionvars%urlparameter}">tags</a></li>
 </ul>
-
 <ul>
 <li><a href="{url}rev/{node|short}{sessionvars%urlparameter}">changeset</a></li>
 <li><a href="{url}file/{node|short}{path|urlescape}{sessionvars%urlparameter}">browse</a></li>
@@ -22,57 +25,34 @@
 <ul>
 <li><a href="{url}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">file</a></li>
 <li><a href="{url}diff/{node|short}/{file|urlescape}{sessionvars%urlparameter}">diff</a></li>
-<li class="active">annotate</li>
-<li><a href="{url}log/{node|short}/{file|urlescape}{sessionvars%urlparameter}">file log</a></li>
-<li><a href="{url}raw-annotate/{node|short}/{file|urlescape}">raw</a></li>
+<li><a href="{url}annotate/{node|short}/{file|urlescape}{sessionvars%urlparameter}">annotate</a></li>
+<li class="active">file log</li>
+<li><a href="{url}raw-file/{node|short}/{file|urlescape}">raw</a></li>
 </ul>
 </div>
 
 <div class="main">
-<h2><a href="{url}">{repo|escape}</a></h2>
-<h3>annotate {file|escape} @ {rev}:{node|short}</h3>
+<h2><a href="{url}{sessionvars%urlparameter}">{repo|escape}</a></h2>
+<h3>log {file|escape}</h3>
 
 <form class="search" action="{url}log">
 {sessionvars%hiddenformentry}
 <p><input name="rev" id="search1" type="text" size="30"></p>
-<span>find changesets by author, revision, 
+<span>find changesets by author, revision,
 files, or words in the commit message</span>
 </form>
 
-<div class="description">{desc|strip|escape|addbreaks}</div>
+<div class="navigate">{nav%filenaventry}</div>
 
-<table id="changesetEntry">
-<tr>
- <th class="author">author</th>
- <td class="author">{author|obfuscate}</td>
-</tr>
-<tr>
- <th class="date">date</th>
- <td class="date">{date|date} ({date|age} ago)</td>
-</tr>
-<tr>
- <th class="author">parents</th>
- <td class="author">{parent%filerevparent}</td>
-</tr>
-<tr>
- <th class="author">children</th>
- <td class="author">{child%filerevchild}</td>
-</tr>
-{changesettag}
-</table>
-
-<br/>
-
-<div class="overflow">
 <table class="bigtable">
-<tr>
- <th class="annotate">rev</th>
- <th class="lineno">line</th>
- <th class="line">source</th>
-</tr>
-{annotate%annotateline}
+ <tr>
+  <th class="age">age</th>
+  <th class="author">author</th>
+  <th class="description">description</th>
+ </tr>
+{entries%filelogentry}
 </table>
-</div>
+
 </div>
 </div>
 

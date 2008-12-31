@@ -139,19 +139,13 @@ class kwtemplater(object):
         self.ct = cmdutil.changeset_templater(self.ui, self.repo,
                                               False, '', False)
 
-    def getnode(self, path, fnode):
-        '''Derives changenode from file path and filenode.'''
-        # used by kwfilelog.read and kwexpand
-        c = self.repo.filectx(path, fileid=fnode)
-        return c.node()
-
-    def substitute(self, data, path, node, subfunc):
+    def substitute(self, data, path, ctx, subfunc):
         '''Replaces keywords in data with expanded template.'''
         def kwsub(mobj):
             kw = mobj.group(1)
             self.ct.use_template(self.templates[kw])
             self.ui.pushbuffer()
-            self.ct.show(changenode=node, root=self.repo.root, file=path)
+            self.ct.show(ctx, root=self.repo.root, file=path)
             ekw = templatefilters.firstline(self.ui.popbuffer())
             return '$%s: %s $' % (kw, ekw)
         return subfunc(kwsub, data)
@@ -159,8 +153,8 @@ class kwtemplater(object):
     def expand(self, path, node, data):
         '''Returns data with keywords expanded.'''
         if not self.restrict and self.matcher(path) and not util.binary(data):
-            changenode = self.getnode(path, node)
-            return self.substitute(data, path, changenode, self.re_kw.sub)
+            ctx = self.repo.filectx(path, fileid=node).changectx()
+            return self.substitute(data, path, ctx, self.re_kw.sub)
         return data
 
     def iskwfile(self, path, flagfunc):
@@ -171,14 +165,12 @@ class kwtemplater(object):
 
     def overwrite(self, node, expand, files):
         '''Overwrites selected files expanding/shrinking keywords.'''
+        ctx = self.repo[node]
+        mf = ctx.manifest()
         if node is not None:     # commit
-            ctx = self.repo[node]
-            mf = ctx.manifest()
             files = [f for f in ctx.files() if f in mf]
             notify = self.ui.debug
         else:                    # kwexpand/kwshrink
-            ctx = self.repo['.']
-            mf = ctx.manifest()
             notify = self.ui.note
         candidates = [f for f in files if self.iskwfile(f, ctx.flags)]
         if candidates:
@@ -190,8 +182,9 @@ class kwtemplater(object):
                 if util.binary(data):
                     continue
                 if expand:
-                    changenode = node or self.getnode(f, mf[f])
-                    data, found = self.substitute(data, f, changenode,
+                    if node is None:
+                        ctx = self.repo.filectx(f, fileid=mf[f]).changectx()
+                    data, found = self.substitute(data, f, ctx,
                                                   self.re_kw.subn)
                 else:
                     found = self.re_kw.search(data)
@@ -355,8 +348,8 @@ def demo(ui, repo, *args, **opts):
     ui.note(_('unhooked all commit hooks\n'))
     ui.note('hg -R "%s" ci -m "%s"\n' % (tmpdir, msg))
     repo.commit(text=msg)
-    format = ui.verbose and ' in %s' % path or ''
-    demostatus('%s keywords expanded%s' % (kwstatus, format))
+    fmt = ui.verbose and ' in %s' % path or ''
+    demostatus('%s keywords expanded%s' % (kwstatus, fmt))
     ui.write(repo.wread(fn))
     ui.debug(_('\nremoving temporary repo %s\n') % tmpdir)
     shutil.rmtree(tmpdir, ignore_errors=True)
@@ -389,9 +382,9 @@ def files(ui, repo, *pats, **opts):
     if opts.get('all') or opts.get('ignore'):
         kwfstats += (('I', [f for f in files if f not in kwfiles]),)
     for char, filenames in kwfstats:
-        format = (opts.get('all') or ui.verbose) and '%s %%s\n' % char or '%s\n'
+        fmt = (opts.get('all') or ui.verbose) and '%s %%s\n' % char or '%s\n'
         for f in filenames:
-            ui.write(format % repo.pathto(f, cwd))
+            ui.write(fmt % repo.pathto(f, cwd))
 
 def shrink(ui, repo, *pats, **opts):
     '''revert expanded keywords in working directory
@@ -432,14 +425,10 @@ def reposetup(ui, repo):
     keyword substitutions.
     Monkeypatches patch and webcommands.'''
 
-    try:
-        if (not repo.local() or not kwtools['inc']
-            or kwtools['hgcmd'] in nokwcommands.split()
-            or '.hg' in util.splitpath(repo.root)
-            or repo._url.startswith('bundle:')):
-            return
-    except AttributeError:
-        pass
+    if (not hasattr(repo, 'dirstate') or not kwtools['inc']
+        or kwtools['hgcmd'] in nokwcommands.split()
+        or '.hg' in util.splitpath(repo.root)):
+        return
 
     kwtools['templater'] = kwt = kwtemplater(ui, repo)
 
@@ -494,10 +483,10 @@ def reposetup(ui, repo):
                 del wlock, lock
 
     # monkeypatches
-    def kwpatchfile_init(orig, self, ui, fname, missing=False):
+    def kwpatchfile_init(orig, self, ui, fname, opener, missing=False):
         '''Monkeypatch/wrap patch.patchfile.__init__ to avoid
         rejects or conflicts due to expanded keywords in working dir.'''
-        orig(self, ui, fname, missing)
+        orig(self, ui, fname, opener, missing)
         # shrink keywords read from working dir
         self.lines = kwt.shrinklines(self.fname, self.lines)
 

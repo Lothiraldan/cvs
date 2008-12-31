@@ -4,14 +4,13 @@
 # it into your zsh function path (/usr/share/zsh/site-functions for
 # instance)
 #
-# Copyright (C) 2005 Steve Borho
-# Copyright (C) 2006 Brendan Cully <brendan@kublai.com>
+# Copyright (C) 2005-6 Steve Borho
+# Copyright (C) 2006-8 Brendan Cully <brendan@kublai.com>
 #
 # This is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
 # Software Foundation; either version 2 of the License, or (at your
 # option) any later version.
-#
 
 emulate -LR zsh
 setopt extendedglob
@@ -118,27 +117,17 @@ _hg_get_commands() {
   typeset -ga _hg_cmd_list
   typeset -gA _hg_alias_list
   local hline cmd cmdalias
-  _call_program help hg --verbose help | while read -A hline
+
+  _call_program hg hg debugcomplete -v 2>/dev/null | while read -A hline
   do
-    cmd="$hline[1]"
-    case $cmd in
-      *:)
-        cmd=${cmd%:}
-        _hg_cmd_list+=($cmd)
-      ;;
-      *,)
-        cmd=${cmd%,}
-        _hg_cmd_list+=($cmd)
-        integer i=2
-        while (( i <= $#hline ))
-        do
-          cmdalias=${hline[$i]%(:|,)}
-          _hg_cmd_list+=($cmdalias)
-          _hg_alias_list+=($cmdalias $cmd)
-          (( i++ ))
-        done
-      ;;
-    esac
+    cmd=$hline[1]
+    _hg_cmd_list+=($cmd)
+
+    for cmdalias in $hline[2,-1]
+    do
+      _hg_cmd_list+=($cmdalias)
+      _hg_alias_list+=($cmdalias $cmd)
+    done
   done
 }
 
@@ -201,6 +190,30 @@ _hg_modified() {
   typeset -a status_files
   _hg_status m
   _wanted files expl 'modified files' _multi_parts / status_files
+}
+
+_hg_resolve() {
+  local rstate rpah
+
+  [[ -d $PREFIX ]] || PREFIX=$PREFIX:h
+
+  _hg_cmd resolve -l ./$PREFIX 2> /dev/null | while read rstate rpath
+  do
+    [[ $rstate == 'R' ]] && resolved_files+=($rpath)
+    [[ $rstate == 'U' ]] && unresolved_files+=($rpath)
+  done
+}
+
+_hg_resolved() {
+  typeset -a resolved_files unresolved_files
+  _hg_resolve
+  _wanted files expl 'resolved files' _multi_parts / resolved_files
+}
+
+_hg_unresolved() {
+  typeset -a resolved_files unresolved_files
+  _hg_resolve
+  _wanted files expl 'unresolved files' _multi_parts / unresolved_files
 }
 
 _hg_config() {
@@ -580,7 +593,27 @@ _hg_cmd_rename() {
   '*:file:_hg_files'
 }
 
+_hg_cmd_resolve() {
+  local context state line
+  typeset -A opt_args
+
+  _arguments -s -w : $_hg_global_opts \
+  '(--list -l --mark -m --unmark -u)'{-l,--list}'[list state of files needing merge]:*:merged files:->resolve_files' \
+  '(--mark -m --list -l --unmark -u)'{-m,--mark}'[mark files as resolved]:*:unresolved files:_hg_unresolved' \
+  '(--unmark -u --list -l --mark -m)'{-u,--unmark}'[unmark files as resolved]:*:resolved files:_hg_resolved' \
+  '*:file:_hg_unresolved'
+
+  if [[ $state == 'resolve_files' ]]
+  then
+    _alternative 'files:resolved files:_hg_resolved' \
+      'files:unresolved files:_hg_unresolved'
+  fi
+}
+
 _hg_cmd_revert() {
+  local context state line
+  typeset -A opt_args
+
   _arguments -s -w : $_hg_global_opts $_hg_pat_opts $_hg_dryrun_opts \
   '(--all -a :)'{-a,--all}'[revert all changes when no arguments given]' \
   '(--rev -r)'{-r+,--rev}'[revision to revert to]:revision:_hg_tags' \

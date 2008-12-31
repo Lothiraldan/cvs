@@ -161,10 +161,12 @@ class hgweb(object):
         # process the web interface request
 
         try:
-
             tmpl = self.templater(req)
             ctype = tmpl('mimetype', encoding=self.encoding)
             ctype = templater.stringify(ctype)
+
+            # check allow_read / deny_read config options
+            self.check_perm(req, None)
 
             if cmd == '':
                 req.form['cmd'] = [tmpl.cache['default']]
@@ -180,20 +182,20 @@ class hgweb(object):
                 content = getattr(webcommands, cmd)(self, req, tmpl)
                 req.respond(HTTP_OK, ctype)
 
-            return ''.join(content),
+            return content
 
         except revlog.LookupError, err:
             req.respond(HTTP_NOT_FOUND, ctype)
             msg = str(err)
             if 'manifest' not in msg:
                 msg = 'revision not found: %s' % err.name
-            return ''.join(tmpl('error', error=msg)),
+            return tmpl('error', error=msg)
         except (RepoError, revlog.RevlogError), inst:
             req.respond(HTTP_SERVER_ERROR, ctype)
-            return ''.join(tmpl('error', error=str(inst))),
+            return tmpl('error', error=str(inst))
         except ErrorResponse, inst:
             req.respond(inst.code, ctype)
-            return ''.join(tmpl('error', error=inst.message)),
+            return tmpl('error', error=inst.message)
 
     def templater(self, req):
 
@@ -226,23 +228,16 @@ class hgweb(object):
         def motd(**map):
             yield self.config("web", "motd", "")
 
-        def sessionvars(**map):
-            fields = []
-            if 'style' in req.form:
-                style = req.form['style'][0]
-                if style != self.config('web', 'style', ''):
-                    fields.append(('style', style))
-
-            separator = req.url[-1] == '?' and ';' or '?'
-            for name, value in fields:
-                yield dict(name=name, value=value, separator=separator)
-                separator = ';'
-
         # figure out which style to use
 
-        style = self.config("web", "style", "")
+        vars = {}
+        style = self.config("web", "style", "paper")
         if 'style' in req.form:
             style = req.form['style'][0]
+            vars['style'] = style
+
+        start = req.url[-1] == '?' and '&' or '?'
+        sessionvars = webutil.sessionvars(vars, start)
         mapfile = style_map(self.templatepath, style)
 
         if not self.reponame:
@@ -278,11 +273,24 @@ class hgweb(object):
 
     def check_perm(self, req, op):
         '''Check permission for operation based on request data (including
-        authentication info. Return true if op allowed, else false.'''
+        authentication info). Return if op allowed, else raise an ErrorResponse
+        exception.'''
+
+        user = req.env.get('REMOTE_USER')
+
+        deny_read = self.configlist('web', 'deny_read')
+        if deny_read and (not user or deny_read == ['*'] or user in deny_read):
+            raise ErrorResponse(HTTP_UNAUTHORIZED, 'read not authorized')
+
+        allow_read = self.configlist('web', 'allow_read')
+        result = (not allow_read) or (allow_read == ['*']) or (user in allow_read)
+        if not result:
+            raise ErrorResponse(HTTP_UNAUTHORIZED, 'read not authorized')
 
         if op == 'pull' and not self.allowpull:
             raise ErrorResponse(HTTP_OK, '')
-        elif op == 'pull':
+        # op is None when checking allow/deny_read permissions for a web-browser request
+        elif op == 'pull' or op is None:
             return
 
         # enforce that you can only push using POST requests
@@ -295,8 +303,6 @@ class hgweb(object):
         scheme = req.env.get('wsgi.url_scheme')
         if self.configbool('web', 'push_ssl', True) and scheme != 'https':
             raise ErrorResponse(HTTP_OK, 'ssl required')
-
-        user = req.env.get('REMOTE_USER')
 
         deny = self.configlist('web', 'deny_push')
         if deny and (not user or deny == ['*'] or user in deny):

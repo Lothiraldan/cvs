@@ -39,7 +39,7 @@ def serve(ui, repo, **opts):
     cmdutil.service(opts, initfn=service.init, runfn=service.run)
 
 def reposetup(ui, repo):
-    if not repo.local():
+    if not hasattr(repo, 'dirstate'):
         return
 
     # XXX: weakref until hg stops relying on __del__
@@ -52,6 +52,8 @@ def reposetup(ui, repo):
 
         def status(self, match, ignored, clean, unknown=True):
             files = match.files()
+            if '.' in files:
+                files = []
             try:
                 if not ignored and not self.inotifyserver:
                     result = client.query(ui, repo, files, match, False,
@@ -71,22 +73,24 @@ def reposetup(ui, repo):
                     if result is not None:
                         return result
             except (OSError, socket.error), err:
+                autostart = ui.configbool('inotify', 'autostart', True)
+
                 if err[0] == errno.ECONNREFUSED:
                     ui.warn(_('(found dead inotify server socket; '
                                    'removing it)\n'))
                     os.unlink(repo.join('inotify.sock'))
-                if err[0] in (errno.ECONNREFUSED, errno.ENOENT) and \
-                        ui.configbool('inotify', 'autostart', True):
+                if err[0] in (errno.ECONNREFUSED, errno.ENOENT) and autostart:
                     query = None
                     ui.debug(_('(starting inotify server)\n'))
                     try:
-                        server.start(ui, repo)
-                        query = client.query
-                    except server.AlreadyStartedException, inst:
-                        # another process may have started its own
-                        # inotify server while this one was starting.
-                        ui.debug(str(inst))
-                        query = client.query
+                        try:
+                            server.start(ui, repo)
+                            query = client.query
+                        except server.AlreadyStartedException, inst:
+                            # another process may have started its own
+                            # inotify server while this one was starting.
+                            ui.debug(str(inst))
+                            query = client.query
                     except Exception, inst:
                         ui.warn(_('could not start inotify server: '
                                        '%s\n') % inst)
@@ -97,8 +101,9 @@ def reposetup(ui, repo):
                         except socket.error, err:
                             ui.warn(_('could not talk to new inotify '
                                            'server: %s\n') % err[-1])
-                elif err[0] == errno.ENOENT:
-                    ui.warn(_('(inotify server not running)\n'))
+                elif err[0] in (errno.ECONNREFUSED, errno.ENOENT):
+                    # silently ignore normal errors if autostart is False
+                    ui.debug(_('(inotify server not running)\n'))
                 else:
                     ui.warn(_('failed to contact inotify server: %s\n')
                              % err[-1])

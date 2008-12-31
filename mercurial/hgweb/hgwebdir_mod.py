@@ -25,7 +25,7 @@ class hgwebdir(object):
         self.parentui = parentui or ui.ui(report_untrusted=False,
                                           interactive = False)
         self.motd = None
-        self.style = None
+        self.style = 'paper'
         self.stripecount = None
         self.repos_sorted = ('name', False)
         self._baseurl = None
@@ -51,7 +51,26 @@ class hgwebdir(object):
                 if cp.has_option('web', 'baseurl'):
                     self._baseurl = cp.get('web', 'baseurl')
             if cp.has_section('paths'):
-                self.repos.extend(cleannames(cp.items('paths')))
+                paths = cleannames(cp.items('paths'))
+                for prefix, root in paths:
+                    roothead, roottail = os.path.split(root)
+                    # "foo = /bar/*" makes every subrepo of /bar/ to be
+                    # mounted as foo/subrepo
+                    # and "foo = /bar/**" does even recurse inside the
+                    # subdirectories, remember to use it without working dir.
+                    try:
+                        recurse = {'*': False, '**': True}[roottail]
+                    except KeyError:
+                        self.repos.append((prefix, root))
+                        continue
+                    roothead = os.path.normpath(roothead)
+                    for path in util.walkrepos(roothead, followsym=True,
+                                               recurse=recurse):
+                        path = os.path.normpath(path)
+                        name = util.pconvert(path[len(roothead):]).strip('/')
+                        if prefix:
+                            name = prefix + '/' + name
+                        self.repos.append((name, path))
             if cp.has_section('collections'):
                 for prefix, root in cp.items('collections'):
                     for path in util.walkrepos(root, followsym=True):
@@ -71,6 +90,28 @@ class hgwebdir(object):
     def __call__(self, env, respond):
         req = wsgirequest(env, respond)
         return self.run_wsgi(req)
+
+    def read_allowed(self, ui, req):
+        """Check allow_read and deny_read config options of a repo's ui object
+        to determine user permissions.  By default, with neither option set (or
+        both empty), allow all users to read the repo.  There are two ways a
+        user can be denied read access:  (1) deny_read is not empty, and the
+        user is unauthenticated or deny_read contains user (or *), and (2)
+        allow_read is not empty and the user is not in allow_read.  Return True
+        if user is allowed to read the repo, else return False."""
+
+        user = req.env.get('REMOTE_USER')
+
+        deny_read = ui.configlist('web', 'deny_read', default=None, untrusted=True)
+        if deny_read and (not user or deny_read == ['*'] or user in deny_read):
+            return False
+
+        allow_read = ui.configlist('web', 'allow_read', default=None, untrusted=True)
+        # by default, allow reading if no allow_read option has been set
+        if (not allow_read) or (allow_read == ['*']) or (user in allow_read):
+            return True
+
+        return False
 
     def run_wsgi(self, req):
 
@@ -94,7 +135,7 @@ class hgwebdir(object):
                 # top-level index
                 elif not virtual:
                     req.respond(HTTP_OK, ctype)
-                    return ''.join(self.makeindex(req, tmpl)),
+                    return self.makeindex(req, tmpl)
 
                 # nested indexes and hgwebs
 
@@ -116,7 +157,7 @@ class hgwebdir(object):
                     subdir = virtual + '/'
                     if [r for r in repos if r.startswith(subdir)]:
                         req.respond(HTTP_OK, ctype)
-                        return ''.join(self.makeindex(req, tmpl, subdir)),
+                        return self.makeindex(req, tmpl, subdir)
 
                     up = virtual.rfind('/')
                     if up < 0:
@@ -125,11 +166,11 @@ class hgwebdir(object):
 
                 # prefixes not found
                 req.respond(HTTP_NOT_FOUND, ctype)
-                return ''.join(tmpl("notfound", repo=virtual)),
+                return tmpl("notfound", repo=virtual)
 
             except ErrorResponse, err:
                 req.respond(err.code, ctype)
-                return ''.join(tmpl('error', error=err.message or '')),
+                return tmpl('error', error=err.message or '')
         finally:
             tmpl = None
 
@@ -173,6 +214,9 @@ class hgwebdir(object):
                     return u.config(section, name, default, untrusted=True)
 
                 if u.configbool("web", "hidden", untrusted=True):
+                    continue
+
+                if not self.read_allowed(u, req):
                     continue
 
                 parts = [name]

@@ -28,13 +28,13 @@
 </div>
 
 <div class="main">
-<h2><a href="{url}">{repo|escape}</a></h2>
+<h2><a href="{url}{sessionvars%urlparameter}">{repo|escape}</a></h2>
 <h3>view {file|escape} @ {rev}:{node|short}</h3>
 
 <form class="search" action="{url}log">
 {sessionvars%hiddenformentry}
 <p><input name="rev" id="search1" type="text" size="30"></p>
-<span>find changesets by author, revision, 
+<span>find changesets by author, revision,
 files, or words in the commit message</span>
 </form>
 
@@ -61,13 +61,9 @@ files, or words in the commit message</span>
 </table>
 
 <div class="overflow">
-<table class="bigtable">
-<tr>
- <th class="lineno">line</th>
- <th class="source">source</th>
-</tr>
+<div class="sourcefirst"> line source</div>
 {text%fileline}
-</table>
+<div class="sourcelast"></div>
 </div>
 </div>
 </div>

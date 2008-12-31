@@ -13,7 +13,7 @@ platform-specific details from the core.
 """
 
 from i18n import _
-import cStringIO, errno, getpass, re, shutil, sys, tempfile
+import cStringIO, errno, getpass, re, shutil, sys, tempfile, traceback
 import os, stat, threading, time, calendar, ConfigParser, locale, glob, osutil
 import imp
 
@@ -81,6 +81,8 @@ except ImportError:
     popen3 = os.popen3
 
 
+_encodingfixup = {'646': 'ascii', 'ANSI_X3.4-1968': 'ascii'}
+
 try:
     _encoding = os.environ.get("HGENCODING")
     if sys.platform == 'darwin' and not _encoding:
@@ -91,6 +93,7 @@ try:
         _encoding = locale.getlocale()[1]
     if not _encoding:
         _encoding = locale.getpreferredencoding() or 'ascii'
+        _encoding = _encodingfixup.get(_encoding, _encoding)
 except locale.Error:
     _encoding = 'ascii'
 _encodingmode = os.environ.get("HGENCODINGMODE", "strict")
@@ -289,6 +292,37 @@ def sort(l):
         l = list(l)
     l.sort()
     return l
+
+def increasingchunks(source, min=1024, max=65536):
+    '''return no less than min bytes per chunk while data remains,
+    doubling min after each chunk until it reaches max'''
+    def log2(x):
+        if not x:
+            return 0
+        i = 0
+        while x:
+            x >>= 1
+            i += 1
+        return i - 1
+
+    buf = []
+    blen = 0
+    for chunk in source:
+        buf.append(chunk)
+        blen += len(chunk)
+        if blen >= min:
+            if min < max:
+                min = min << 1
+                nmin = 1 << log2(blen)
+                if nmin > min:
+                    min = nmin
+                if min > max:
+                    min = max
+            yield ''.join(buf)
+            blen = 0
+            buf = []
+    if buf:
+        yield ''.join(buf)
 
 class Abort(Exception):
     """Raised if a command needs to print an error and exit."""
@@ -576,7 +610,7 @@ def matcher(canonroot, cwd='', names=[], inc=[], exc=[], src=None, dflt_pat='glo
     if inc:
         dummy, inckinds, dummy = normalizepats(inc, 'glob')
         incmatch = matchfn(inckinds, '(?:/|$)')
-    excmatch = lambda fn: False
+    excmatch = never
     if exc:
         dummy, exckinds, dummy = normalizepats(exc, 'glob')
         excmatch = matchfn(exckinds, '(?:/|$)')
@@ -670,6 +704,21 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None):
                 os.environ[k] = v
         if cwd is not None and oldcwd != cwd:
             os.chdir(oldcwd)
+
+class SignatureError(Exception):
+    pass
+
+def checksignature(func):
+    '''wrap a function with code to check for calling errors'''
+    def check(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except TypeError:
+            if len(traceback.extract_tb(sys.exc_info()[2])) == 1:
+                raise SignatureError
+            raise
+
+    return check
 
 # os.path.lexists is not available on python2.3
 def lexists(filename):
@@ -1827,7 +1876,7 @@ def ellipsis(text, maxlength=400):
     else:
         return "%s..." % (text[:maxlength-3])
 
-def walkrepos(path, followsym=False, seen_dirs=None):
+def walkrepos(path, followsym=False, seen_dirs=None, recurse=False):
     '''yield every hg repository under path, recursively.'''
     def errhandler(err):
         if err.filename == path:
@@ -1852,11 +1901,15 @@ def walkrepos(path, followsym=False, seen_dirs=None):
         _add_dir_if_not_there(seen_dirs, path)
     for root, dirs, files in os.walk(path, topdown=True, onerror=errhandler):
         if '.hg' in dirs:
-            dirs.remove('.hg') # don't recurse inside the .hg directory
             yield root # found a repository
             qroot = os.path.join(root, '.hg', 'patches')
             if os.path.isdir(os.path.join(qroot, '.hg')):
                 yield qroot # we have a patch queue repo here
+            if recurse:
+                # avoid recursing inside the .hg directory
+                dirs.remove('.hg')
+            else:
+                dirs[:] = [] # don't descend further
         elif followsym:
             newdirs = []
             for d in dirs:
@@ -1932,3 +1985,24 @@ def drop_scheme(scheme, path):
 def uirepr(s):
     # Avoid double backslash in Windows path repr()
     return repr(s).replace('\\\\', '\\')
+
+def termwidth():
+    if 'COLUMNS' in os.environ:
+        try:
+            return int(os.environ['COLUMNS'])
+        except ValueError:
+            pass
+    try:
+        import termios, array, fcntl
+        for dev in (sys.stdout, sys.stdin):
+            try:
+                fd = dev.fileno()
+                if not os.isatty(fd):
+                    continue
+                arri = fcntl.ioctl(fd, termios.TIOCGWINSZ, '\0' * 8)
+                return array.array('h', arri)[1]
+            except ValueError:
+                pass
+    except ImportError:
+        pass
+    return 80

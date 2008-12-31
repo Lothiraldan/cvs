@@ -6,7 +6,7 @@ License: GPL
 Group: Development/Tools
 Source: http://www.selenic.com/mercurial/release/%{name}-%{version}.tar.gz
 URL: http://www.selenic.com/mercurial
-BuildRoot: /tmp/build.%{name}-%{version}-%{release}
+BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 
 # From the README:
 #
@@ -28,13 +28,13 @@ Mercurial is a fast, lightweight source control management system designed
 for efficient handling of very large distributed projects.
 
 %prep
-rm -rf $RPM_BUILD_ROOT
 %setup -q
 
 %build
 make all
 
 %install
+rm -rf $RPM_BUILD_ROOT
 python setup.py install --root $RPM_BUILD_ROOT --prefix %{_prefix}
 make install-doc DESTDIR=$RPM_BUILD_ROOT MANDIR=%{_mandir}
 
@@ -55,9 +55,6 @@ lisp_dir=$RPM_BUILD_ROOT%{_datadir}/emacs/site-lisp
 mkdir -p $lisp_dir
 install contrib/mercurial.el $lisp_dir
 
-# We don't want this, do we?
-rm -f $RPM_BUILD_ROOT%{pythonlib}/../mercurial-*-py2.5.egg-info
-
 %clean
 rm -rf $RPM_BUILD_ROOT
 
@@ -65,8 +62,6 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root,-)
 %doc CONTRIBUTORS COPYING doc/README doc/hg*.txt doc/hg*.html doc/ja *.cgi
 %{_mandir}/man?/hg*.gz
-%dir %{pythonlib}
-%dir %{hgext}
 %{_sysconfdir}/bash_completion.d/mercurial.sh
 %{_datadir}/zsh/site-functions/_mercurial
 %{_datadir}/emacs/site-lisp/mercurial.el
@@ -76,12 +71,6 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/hg-viz
 %{_bindir}/git-rev-tree
 %{_bindir}/mercurial-convert-repo
-%{pythonlib}/templates
-%{pythonlib}/*.py*
-%{pythonlib}/hgweb/*.py*
-%{pythonlib}/*.so
-%{hgext}/*.py*
-%{hgext}/convert/*.py*
-%{hgext}/inotify/*.py*
-%{hgext}/highlight/*.py*
-%{hgext}/inotify/linux/
+%{_libdir}/python%{pythonver}/site-packages/%{name}-*-py2.5.egg-info
+%{pythonlib}
+%{hgext}

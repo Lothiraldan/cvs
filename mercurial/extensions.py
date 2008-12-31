@@ -96,9 +96,11 @@ def wrapcommand(table, command, wrapper):
 
     origfn = entry[0]
     def wrap(*args, **kwargs):
-        return wrapper(origfn, *args, **kwargs)
+        return util.checksignature(wrapper)(
+            util.checksignature(origfn), *args, **kwargs)
 
     wrap.__doc__ = getattr(origfn, '__doc__')
+    wrap.__module__ = getattr(origfn, '__module__')
 
     newentry = list(entry)
     newentry[0] = wrap

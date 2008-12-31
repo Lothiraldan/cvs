@@ -9,7 +9,7 @@ from node import hex, nullid, nullrev, short
 from repo import RepoError, NoCapability
 from i18n import _, gettext
 import os, re, sys
-import hg, util, revlog, bundlerepo, extensions, copies
+import hg, util, revlog, bundlerepo, extensions, copies, context
 import difflib, patch, time, help, mdiff, tempfile, url
 import version
 import archival, changegroup, cmdutil, hgweb.server, sshserver, hbisect
@@ -156,7 +156,7 @@ def archive(ui, repo, dest, **opts):
 
     ctx = repo[opts.get('rev')]
     if not ctx:
-        raise util.Abort(_('repository has no revisions'))
+        raise util.Abort(_('no working directory: please specify a revision'))
     node = ctx.node()
     dest = cmdutil.make_filename(repo, dest, node)
     if os.path.realpath(dest) == repo.root:
@@ -288,13 +288,13 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
         if len(nodes) == 1:
             # narrowed it down to a single revision
             ui.write(_("The first %s revision is:\n") % transition)
-            displayer.show(changenode=nodes[0])
+            displayer.show(repo[nodes[0]])
         else:
             # multiple possible revisions
             ui.write(_("Due to skipped revisions, the first "
                        "%s revision could be any of:\n") % transition)
             for n in nodes:
-                displayer.show(changenode=n)
+                displayer.show(repo[n])
 
     def check_state(state, interactive=True):
         if not state['good'] or not state['bad']:
@@ -688,7 +688,10 @@ def debugcomplete(ui, cmd='', **opts):
         ui.write("%s\n" % "\n".join(options))
         return
 
-    ui.write("%s\n" % "\n".join(util.sort(cmdutil.findpossible(cmd, table))))
+    cmdlist = cmdutil.findpossible(cmd, table)
+    if ui.verbose:
+        cmdlist = [' '.join(c[0]) for c in cmdlist.values()]
+    ui.write("%s\n" % "\n".join(util.sort(cmdlist)))
 
 def debugfsinfo(ui, path = "."):
     file('.debugfsinfo', 'w').write('')
@@ -829,7 +832,7 @@ def debugindex(ui, file_):
         except:
             pp = [nullid, nullid]
         ui.write("% 6d % 9d % 7d % 6d % 7d %s %s %s\n" % (
-                i, r.start(i), r.length(i), r.base(i), r.linkrev(node),
+                i, r.start(i), r.length(i), r.base(i), r.linkrev(i),
             short(node), short(pp[0]), short(pp[1])))
 
 def debugindexdot(ui, file_):
@@ -1005,7 +1008,7 @@ def diff(ui, repo, *pats, **opts):
     probably with undesirable results.
 
     Use the --git option to generate diffs in the git extended diff
-    format. Read the gitdiffs help topic for more information.
+    format. Read the diffs help topic for more information.
     """
     node1, node2 = cmdutil.revpair(repo, opts.get('rev'))
 
@@ -1042,7 +1045,7 @@ def export(ui, repo, *changesets, **opts):
     probably with undesirable results.
 
     Use the --git option to generate diffs in the git extended diff
-    format. Read the gitdiffs help topic for more information.
+    format. Read the diffs help topic for more information.
 
     With the --switch-parent option, the diff will be against the second
     parent. It can be useful to review a merge.
@@ -1270,7 +1273,7 @@ def heads(ui, repo, *branchrevs, **opts):
         return 1
     displayer = cmdutil.show_changeset(ui, repo, opts)
     for n in heads:
-        displayer.show(changenode=n)
+        displayer.show(repo[n])
 
 def help_(ui, name=None, with_version=False):
     """show help for a given topic or a help overview
@@ -1310,7 +1313,13 @@ def help_(ui, name=None, with_version=False):
             return
 
         # synopsis
-        ui.write("%s\n" % i[2])
+        if len(i) > 2:
+            if i[2].startswith('hg'):
+                ui.write("%s\n" % i[2])
+            else:
+                ui.write('hg %s %s\n' % (aliases[0], i[2]))
+        else:
+            ui.write('hg %s\n' % aliases[0])
 
         # aliases
         if not ui.quiet and len(aliases) > 1:
@@ -1422,7 +1431,7 @@ def help_(ui, name=None, with_version=False):
 
     if name and name != 'shortlist':
         i = None
-        for f in (helpcmd, helptopic, helpext):
+        for f in (helptopic, helpcmd, helpext):
             try:
                 f(name)
                 i = None
@@ -1575,6 +1584,9 @@ def import_(ui, repo, patch1, *patches, **opts):
     recorded in the patch. This may happen due to character set
     problems or other deficiencies in the text patch format.
 
+    With --similarity, hg will attempt to discover renames and copies
+    in the patch in the same way as 'addremove'.
+
     To read a patch from standard input, use patch name "-".
     See 'hg help dates' for a list of formats valid for -d/--date.
     """
@@ -1583,6 +1595,13 @@ def import_(ui, repo, patch1, *patches, **opts):
     date = opts.get('date')
     if date:
         opts['date'] = util.parsedate(date)
+
+    try:
+        sim = float(opts.get('similarity') or 0)
+    except ValueError:
+        raise util.Abort(_('similarity must be a number'))
+    if sim < 0 or sim > 100:
+        raise util.Abort(_('similarity must be between 0 and 100'))
 
     if opts.get('exact') or not opts.get('force'):
         cmdutil.bail_if_changed(repo)
@@ -1647,7 +1666,7 @@ def import_(ui, repo, patch1, *patches, **opts):
                     fuzz = patch.patch(tmpname, ui, strip=strip, cwd=repo.root,
                                        files=files)
                 finally:
-                    files = patch.updatedir(ui, repo, files)
+                    files = patch.updatedir(ui, repo, files, similarity=sim/100.)
                 if not opts.get('no_commit'):
                     n = repo.commit(files, message, opts.get('user') or user,
                                     opts.get('date') or date)
@@ -1684,7 +1703,8 @@ def incoming(ui, repo, source="default", **opts):
     ui.status(_('comparing with %s\n') % url.hidepassword(source))
     if revs:
         revs = [other.lookup(rev) for rev in revs]
-    incoming = repo.findincoming(other, heads=revs, force=opts["force"])
+    common, incoming, rheads = repo.findcommonincoming(other, heads=revs,
+                                                       force=opts["force"])
     if not incoming:
         try:
             os.unlink(opts["bundle"])
@@ -1698,6 +1718,10 @@ def incoming(ui, repo, source="default", **opts):
         fname = opts["bundle"]
         if fname or not other.local():
             # create a bundle (uncompressed if other repo is not local)
+
+            if revs is None and other.capable('changegroupsubset'):
+                revs = rheads
+
             if revs is None:
                 cg = other.changegroup(incoming, "incoming")
             else:
@@ -1723,7 +1747,7 @@ def incoming(ui, repo, source="default", **opts):
             if opts.get('no_merges') and len(parents) == 2:
                 continue
             count += 1
-            displayer.show(changenode=n)
+            displayer.show(other[n])
     finally:
         if hasattr(other, 'close'):
             other.close()
@@ -1833,7 +1857,7 @@ def log(ui, repo, *pats, **opts):
             fl = repo.file(fn)
             for i in fl:
                 node = fl.node(i)
-                lr = fl.linkrev(node)
+                lr = fl.linkrev(i)
                 renamed = fl.renamed(node)
                 rcache[fn][lr] = renamed
                 if renamed:
@@ -1861,7 +1885,6 @@ def log(ui, repo, *pats, **opts):
     displayer = cmdutil.show_changeset(ui, repo, opts, True, matchfn)
     for st, rev, fns in changeiter:
         if st == 'add':
-            changenode = repo.changelog.node(rev)
             parents = [p for p in repo.changelog.parentrevs(rev)
                        if p != nullrev]
             if opts.get('no_merges') and len(parents) == 2:
@@ -1907,7 +1930,7 @@ def log(ui, repo, *pats, **opts):
                     rename = getrenamed(fn, rev)
                     if rename:
                         copies.append((fn, rename[0]))
-            displayer.show(rev, changenode, copies=copies)
+            displayer.show(context.changectx(repo, rev), copies=copies)
         elif st == 'iter':
             if count == limit: break
             if displayer.flush(rev):
@@ -2020,7 +2043,7 @@ def outgoing(ui, repo, dest=None, **opts):
         if opts.get('no_merges') and len(parents) == 2:
             continue
         count += 1
-        displayer.show(changenode=n)
+        displayer.show(repo[n])
 
 def parents(ui, repo, file_=None, **opts):
     """show the parents of the working dir or revision
@@ -2053,14 +2076,14 @@ def parents(ui, repo, file_=None, **opts):
         if not filenodes:
             raise util.Abort(_("'%s' not found in manifest!") % file_)
         fl = repo.file(file_)
-        p = [repo.lookup(fl.linkrev(fn)) for fn in filenodes]
+        p = [repo.lookup(fl.linkrev(fl.rev(fn))) for fn in filenodes]
     else:
         p = [cp.node() for cp in ctx.parents()]
 
     displayer = cmdutil.show_changeset(ui, repo, opts)
     for n in p:
         if n != nullid:
-            displayer.show(changenode=n)
+            displayer.show(repo[n])
 
 def paths(ui, repo, search=None):
     """show definition of symbolic path names
@@ -2086,7 +2109,7 @@ def postincoming(ui, repo, modheads, optupdate, checkout):
     if modheads == 0:
         return
     if optupdate:
-        if modheads <= 1 or checkout:
+        if (modheads <= 1 or len(repo.branchheads()) == 1) or checkout:
             return hg.update(repo, checkout)
         else:
             ui.status(_("not updating, since new heads added\n"))
@@ -2307,32 +2330,40 @@ def rename(ui, repo, *pats, **opts):
         del wlock
 
 def resolve(ui, repo, *pats, **opts):
-    """resolve file merges from a branch merge or update
+    """retry file merges from a merge or update
 
-    This command will attempt to resolve unresolved merges from the
-    last update or merge command. This will use the local file
-    revision preserved at the last update or merge to cleanly retry
-    the file merge attempt. With no file or options specified, this
-    command will attempt to resolve all unresolved files.
+    This command will cleanly retry unresolved file merges using file
+    revisions preserved from the last update or merge. To attempt to
+    resolve all unresolved files, use the -a switch.
+
+    This command will also allow listing resolved files and manually
+    marking and unmarking files as resolved.
 
     The codes used to show the status of files are:
     U = unresolved
     R = resolved
     """
 
-    if len([x for x in opts if opts[x]]) > 1:
+    all, mark, unmark, show = [opts.get(o) for o in 'all mark unmark list'.split()]
+
+    if (show and (mark or unmark)) or (mark and unmark):
         raise util.Abort(_("too many options specified"))
+    if pats and all:
+        raise util.Abort(_("can't specify --all and patterns"))
+    if not (all or pats or show or mark or unmark):
+        raise util.Abort(_('no files or directories specified; '
+                           'use --all to remerge all files'))
 
     ms = merge_.mergestate(repo)
     m = cmdutil.match(repo, pats, opts)
 
     for f in ms:
         if m(f):
-            if opts.get("list"):
+            if show:
                 ui.write("%s %s\n" % (ms[f].upper(), f))
-            elif opts.get("mark"):
+            elif mark:
                 ms.mark(f, "r")
-            elif opts.get("unmark"):
+            elif unmark:
                 ms.mark(f, "u")
             else:
                 wctx = repo[None]
@@ -2836,7 +2867,7 @@ def tip(ui, repo, **opts):
     that repository becomes the current tip. The "tip" tag is special
     and cannot be renamed or assigned to a different changeset.
     """
-    cmdutil.show_changeset(ui, repo, opts).show(len(repo) - 1)
+    cmdutil.show_changeset(ui, repo, opts).show(repo[len(repo) - 1])
 
 def unbundle(ui, repo, fname1, *fnames, **opts):
     """apply one or more changegroup files
@@ -2998,14 +3029,16 @@ diffopts2 = [
     ('U', 'unified', '', _('number of lines of context to show'))
 ]
 
+similarityopts = [
+    ('s', 'similarity', '',
+           _('guess renamed files by similarity (0<=s<=100)'))
+]
+
 table = {
-    "^add": (add, walkopts + dryrunopts, _('hg add [OPTION]... [FILE]...')),
+    "^add": (add, walkopts + dryrunopts, _('[OPTION]... [FILE]...')),
     "addremove":
-        (addremove,
-         [('s', 'similarity', '',
-           _('guess renamed files by similarity (0<=s<=100)')),
-         ] + walkopts + dryrunopts,
-         _('hg addremove [OPTION]... [FILE]...')),
+        (addremove, similarityopts + walkopts + dryrunopts,
+         _('[OPTION]... [FILE]...')),
     "^annotate|blame":
         (annotate,
          [('r', 'rev', '', _('annotate the specified revision')),
@@ -3018,7 +3051,7 @@ table = {
           ('l', 'line-number', None,
            _('show line number at the first appearance'))
          ] + walkopts,
-         _('hg annotate [-r REV] [-f] [-a] [-u] [-d] [-n] [-c] [-l] FILE...')),
+         _('[-r REV] [-f] [-a] [-u] [-d] [-n] [-c] [-l] FILE...')),
     "archive":
         (archive,
          [('', 'no-decode', None, _('do not pass files through decoders')),
@@ -3026,7 +3059,7 @@ table = {
           ('r', 'rev', '', _('revision to distribute')),
           ('t', 'type', '', _('type of distribution to create')),
          ] + walkopts,
-         _('hg archive [OPTION]... DEST')),
+         _('[OPTION]... DEST')),
     "backout":
         (backout,
          [('', 'merge', None,
@@ -3034,7 +3067,7 @@ table = {
           ('', 'parent', '', _('parent to choose when backing out merge')),
           ('r', 'rev', '', _('revision to backout')),
          ] + walkopts + commitopts + commitopts2,
-         _('hg backout [OPTION]... [-r] REV')),
+         _('[OPTION]... [-r] REV')),
     "bisect":
         (bisect,
          [('r', 'reset', False, _('reset bisect state')),
@@ -3043,18 +3076,18 @@ table = {
           ('s', 'skip', False, _('skip testing changeset')),
           ('c', 'command', '', _('Use command to check changeset state')),
           ('U', 'noupdate', False, _('do not update to target'))],
-         _("hg bisect [-gbsr] [-c CMD] [REV]")),
+         _("[-gbsr] [-c CMD] [REV]")),
     "branch":
         (branch,
          [('f', 'force', None,
            _('set branch name even if it shadows an existing branch')),
           ('C', 'clean', None, _('reset branch name to parent branch name'))],
-         _('hg branch [-fC] [NAME]')),
+         _('[-fC] [NAME]')),
     "branches":
         (branches,
          [('a', 'active', False,
            _('show only branches that have unmerged heads'))],
-         _('hg branches [-a]')),
+         _('[-a]')),
     "bundle":
         (bundle,
          [('f', 'force', None,
@@ -3066,14 +3099,14 @@ table = {
           ('a', 'all', None, _('bundle all changesets in the repository')),
           ('t', 'type', 'bzip2', _('bundle compression type to use')),
          ] + remoteopts,
-         _('hg bundle [-f] [-a] [-r REV]... [--base REV]... FILE [DEST]')),
+         _('[-f] [-a] [-r REV]... [--base REV]... FILE [DEST]')),
     "cat":
         (cat,
          [('o', 'output', '', _('print output to file with formatted name')),
           ('r', 'rev', '', _('print the given revision')),
           ('', 'decode', None, _('apply any matching decode filter')),
          ] + walkopts,
-         _('hg cat [OPTION]... FILE...')),
+         _('[OPTION]... FILE...')),
     "^clone":
         (clone,
          [('U', 'noupdate', None,
@@ -3084,70 +3117,67 @@ table = {
           ('', 'uncompressed', None,
            _('use uncompressed transfer (fast over LAN)')),
          ] + remoteopts,
-         _('hg clone [OPTION]... SOURCE [DEST]')),
+         _('[OPTION]... SOURCE [DEST]')),
     "^commit|ci":
         (commit,
          [('A', 'addremove', None,
            _('mark new/missing files as added/removed before committing')),
          ] + walkopts + commitopts + commitopts2,
-         _('hg commit [OPTION]... [FILE]...')),
+         _('[OPTION]... [FILE]...')),
     "copy|cp":
         (copy,
          [('A', 'after', None, _('record a copy that has already occurred')),
           ('f', 'force', None,
            _('forcibly copy over an existing managed file')),
          ] + walkopts + dryrunopts,
-         _('hg copy [OPTION]... [SOURCE]... DEST')),
-    "debugancestor": (debugancestor, [],
-                      _('hg debugancestor [INDEX] REV1 REV2')),
-    "debugcheckstate": (debugcheckstate, [], _('hg debugcheckstate')),
+         _('[OPTION]... [SOURCE]... DEST')),
+    "debugancestor": (debugancestor, [], _('[INDEX] REV1 REV2')),
+    "debugcheckstate": (debugcheckstate, []),
     "debugcomplete":
         (debugcomplete,
          [('o', 'options', None, _('show the command options'))],
-         _('hg debugcomplete [-o] CMD')),
+         _('[-o] CMD')),
     "debugdate":
         (debugdate,
          [('e', 'extended', None, _('try extended date formats'))],
-         _('hg debugdate [-e] DATE [RANGE]')),
-    "debugdata": (debugdata, [], _('hg debugdata FILE REV')),
-    "debugfsinfo": (debugfsinfo, [], _('hg debugfsinfo [PATH]')),
-    "debugindex": (debugindex, [], _('hg debugindex FILE')),
-    "debugindexdot": (debugindexdot, [], _('hg debugindexdot FILE')),
-    "debuginstall": (debuginstall, [], _('hg debuginstall')),
+         _('[-e] DATE [RANGE]')),
+    "debugdata": (debugdata, [], _('FILE REV')),
+    "debugfsinfo": (debugfsinfo, [], _('[PATH]')),
+    "debugindex": (debugindex, [], _('FILE')),
+    "debugindexdot": (debugindexdot, [], _('FILE')),
+    "debuginstall": (debuginstall, []),
     "debugrawcommit|rawcommit":
         (rawcommit,
          [('p', 'parent', [], _('parent')),
           ('F', 'files', '', _('file list'))
           ] + commitopts + commitopts2,
-         _('hg debugrawcommit [OPTION]... [FILE]...')),
+         _('[OPTION]... [FILE]...')),
     "debugrebuildstate":
         (debugrebuildstate,
          [('r', 'rev', '', _('revision to rebuild to'))],
-         _('hg debugrebuildstate [-r REV] [REV]')),
+         _('[-r REV] [REV]')),
     "debugrename":
         (debugrename,
          [('r', 'rev', '', _('revision to debug'))],
-         _('hg debugrename [-r REV] FILE')),
+         _('[-r REV] FILE')),
     "debugsetparents":
-        (debugsetparents,
-         [],
-         _('hg debugsetparents REV1 [REV2]')),
+        (debugsetparents, [], _('REV1 [REV2]')),
     "debugstate":
         (debugstate,
          [('', 'nodates', None, _('do not display the saved mtime'))],
-         _('hg debugstate [OPTION]...')),
-    "debugwalk": (debugwalk, walkopts, _('hg debugwalk [OPTION]... [FILE]...')),
+         _('[OPTION]...')),
+    "debugwalk": (debugwalk, walkopts, _('[OPTION]... [FILE]...')),
     "^diff":
         (diff,
          [('r', 'rev', [], _('revision'))
          ] + diffopts + diffopts2 + walkopts,
-         _('hg diff [OPTION]... [-r REV1 [-r REV2]] [FILE]...')),
+         _('[OPTION]... [-r REV1 [-r REV2]] [FILE]...')),
     "^export":
         (export,
          [('o', 'output', '', _('print output to file with formatted name')),
           ('', 'switch-parent', None, _('diff against the second parent'))
           ] + diffopts,
-         _('hg export [OPTION]... [-o OUTFILESPEC] REV...')),
+         _('[OPTION]... [-o OUTFILESPEC] REV...')),
     "grep":
         (grep,
          [('0', 'print0', None, _('end fields with NUL')),
@@ -3162,13 +3192,13 @@ table = {
           ('u', 'user', None, _('list the author (long with -v)')),
           ('d', 'date', None, _('list the date (short with -q)')),
          ] + walkopts,
-         _('hg grep [OPTION]... PATTERN [FILE]...')),
+         _('[OPTION]... PATTERN [FILE]...')),
     "heads":
         (heads,
          [('r', 'rev', '', _('show only heads which are descendants of rev')),
          ] + templateopts,
-         _('hg heads [-r REV] [REV]...')),
-    "help": (help_, [], _('hg help [TOPIC]')),
+         _('[-r REV] [REV]...')),
+    "help": (help_, [], _('[TOPIC]')),
     "identify|id":
         (identify,
          [('r', 'rev', '', _('identify the specified rev')),
@@ -3176,7 +3206,7 @@ table = {
           ('i', 'id', None, _('show global revision id')),
           ('b', 'branch', None, _('show branch')),
           ('t', 'tags', None, _('show tags'))],
-         _('hg identify [-nibt] [-r REV] [SOURCE]')),
+         _('[-nibt] [-r REV] [SOURCE]')),
     "import|patch":
         (import_,
          [('p', 'strip', 1,
@@ -3190,8 +3220,8 @@ table = {
            _('apply patch to the nodes from which it was generated')),
           ('', 'import-branch', None,
            _('Use any branch information in patch (implied by --exact)'))] +
-         commitopts + commitopts2,
-         _('hg import [OPTION]... PATCH...')),
+         commitopts + commitopts2 + similarityopts,
+         _('[OPTION]... PATCH...')),
     "incoming|in":
         (incoming,
          [('f', 'force', None,
@@ -3201,12 +3231,12 @@ table = {
           ('r', 'rev', [],
            _('a specific revision up to which you would like to pull')),
          ] + logopts + remoteopts,
-         _('hg incoming [-p] [-n] [-M] [-f] [-r REV]...'
+         _('[-p] [-n] [-M] [-f] [-r REV]...'
            ' [--bundle FILENAME] [SOURCE]')),
     "^init":
         (init,
          remoteopts,
-         _('hg init [-e CMD] [--remotecmd CMD] [DEST]')),
+         _('[-e CMD] [--remotecmd CMD] [DEST]')),
     "locate":
         (locate,
          [('r', 'rev', '', _('search the repository as it stood at rev')),
@@ -3215,7 +3245,7 @@ table = {
           ('f', 'fullpath', None,
            _('print complete paths from the filesystem root')),
          ] + walkopts,
-         _('hg locate [OPTION]... [PATTERN]...')),
+         _('[OPTION]... [PATTERN]...')),
     "^log|history":
         (log,
          [('f', 'follow', None,
@@ -3233,17 +3263,17 @@ table = {
             _('show only changesets within the given named branch')),
           ('P', 'prune', [], _('do not display revision or any of its ancestors')),
          ] + logopts + walkopts,
-         _('hg log [OPTION]... [FILE]')),
+         _('[OPTION]... [FILE]')),
     "manifest":
         (manifest,
          [('r', 'rev', '', _('revision to display'))],
-         _('hg manifest [-r REV]')),
+         _('[-r REV]')),
     "^merge":
         (merge,
          [('f', 'force', None, _('force a merge with outstanding changes')),
           ('r', 'rev', '', _('revision to merge')),
              ],
-         _('hg merge [-f] [[-r] REV]')),
+         _('[-f] [[-r] REV]')),
     "outgoing|out":
         (outgoing,
          [('f', 'force', None,
@@ -3252,13 +3282,13 @@ table = {
            _('a specific revision up to which you would like to push')),
           ('n', 'newest-first', None, _('show newest record first')),
          ] + logopts + remoteopts,
-         _('hg outgoing [-M] [-p] [-n] [-f] [-r REV]... [DEST]')),
+         _('[-M] [-p] [-n] [-f] [-r REV]... [DEST]')),
     "^parents":
         (parents,
          [('r', 'rev', '', _('show parents from the specified rev')),
          ] + templateopts,
          _('hg parents [-r REV] [FILE]')),
-    "paths": (paths, [], _('hg paths [NAME]')),
+    "paths": (paths, [], _('[NAME]')),
     "^pull":
         (pull,
          [('u', 'update', None,
@@ -3268,35 +3298,36 @@ table = {
           ('r', 'rev', [],
            _('a specific revision up to which you would like to pull')),
          ] + remoteopts,
-         _('hg pull [-u] [-f] [-r REV]... [-e CMD] [--remotecmd CMD] [SOURCE]')),
+         _('[-u] [-f] [-r REV]... [-e CMD] [--remotecmd CMD] [SOURCE]')),
     "^push":
         (push,
          [('f', 'force', None, _('force push')),
           ('r', 'rev', [],
            _('a specific revision up to which you would like to push')),
          ] + remoteopts,
-         _('hg push [-f] [-r REV]... [-e CMD] [--remotecmd CMD] [DEST]')),
-    "recover": (recover, [], _('hg recover')),
+         _('[-f] [-r REV]... [-e CMD] [--remotecmd CMD] [DEST]')),
+    "recover": (recover, []),
     "^remove|rm":
         (remove,
          [('A', 'after', None, _('record delete for missing files')),
           ('f', 'force', None,
            _('remove (and delete) file even if added or modified')),
          ] + walkopts,
-         _('hg remove [OPTION]... FILE...')),
+         _('[OPTION]... FILE...')),
     "rename|mv":
         (rename,
          [('A', 'after', None, _('record a rename that has already occurred')),
           ('f', 'force', None,
            _('forcibly copy over an existing managed file')),
          ] + walkopts + dryrunopts,
-         _('hg rename [OPTION]... SOURCE... DEST')),
+         _('[OPTION]... SOURCE... DEST')),
     "resolve":
         (resolve,
-         [('l', 'list', None, _('list state of files needing merge')),
+         [('a', 'all', None, _('remerge all unresolved files')),
+          ('l', 'list', None, _('list state of files needing merge')),
           ('m', 'mark', None, _('mark files as resolved')),
           ('u', 'unmark', None, _('unmark files as resolved'))],
-          _('hg resolve [OPTION]... [FILE]...')),
+          _('[OPTION]... [FILE]...')),
     "revert":
         (revert,
          [('a', 'all', None, _('revert all changes when no arguments given')),
@@ -3304,9 +3335,9 @@ table = {
           ('r', 'rev', '', _('revision to revert to')),
           ('', 'no-backup', None, _('do not save backup copies of files')),
          ] + walkopts + dryrunopts,
-         _('hg revert [OPTION]... [-r REV] [NAME]...')),
-    "rollback": (rollback, [], _('hg rollback')),
-    "root": (root, [], _('hg root')),
+         _('[OPTION]... [-r REV] [NAME]...')),
+    "rollback": (rollback, []),
+    "root": (root, []),
     "^serve":
         (serve,
          [('A', 'accesslog', '', _('name of access log file to write to')),
@@ -3326,11 +3357,11 @@ table = {
           ('', 'style', '', _('template style to use')),
           ('6', 'ipv6', None, _('use IPv6 in addition to IPv4')),
           ('', 'certificate', '', _('SSL certificate file'))],
-         _('hg serve [OPTION]...')),
+         _('[OPTION]...')),
     "showconfig|debugconfig":
         (showconfig,
          [('u', 'untrusted', None, _('show untrusted configuration options'))],
-         _('hg showconfig [-u] [NAME]...')),
+         _('[-u] [NAME]...')),
     "^status|st":
         (status,
          [('A', 'all', None, _('show status of all files')),
@@ -3347,7 +3378,7 @@ table = {
            _('end filenames with NUL, for use with xargs')),
           ('', 'rev', [], _('show difference from revision')),
          ] + walkopts,
-         _('hg status [OPTION]... [FILE]...')),
+         _('[OPTION]... [FILE]...')),
     "tag":
         (tag,
          [('f', 'force', None, _('replace existing tag')),
@@ -3357,26 +3388,26 @@ table = {
           # -l/--local is already there, commitopts cannot be used
           ('m', 'message', '', _('use <text> as commit message')),
          ] + commitopts2,
-         _('hg tag [-l] [-m TEXT] [-d DATE] [-u USER] [-r REV] NAME...')),
-    "tags": (tags, [], _('hg tags')),
+         _('[-l] [-m TEXT] [-d DATE] [-u USER] [-r REV] NAME...')),
+    "tags": (tags, []),
     "tip":
         (tip,
          [('p', 'patch', None, _('show patch')),
          ] + templateopts,
-         _('hg tip [-p]')),
+         _('[-p]')),
     "unbundle":
         (unbundle,
          [('u', 'update', None,
            _('update to new tip if changesets were unbundled'))],
-         _('hg unbundle [-u] FILE...')),
+         _('[-u] FILE...')),
     "^update|up|checkout|co":
         (update,
          [('C', 'clean', None, _('overwrite locally modified files (no backup)')),
           ('d', 'date', '', _('tipmost revision matching date')),
           ('r', 'rev', '', _('revision'))],
-         _('hg update [-C] [-d DATE] [[-r] REV]')),
-    "verify": (verify, [], _('hg verify')),
-    "version": (version_, [], _('hg version')),
+         _('[-C] [-d DATE] [[-r] REV]')),
+    "verify": (verify, []),
+    "version": (version_, []),
 }
 
 norepo = ("clone init version help debugcomplete debugdata"

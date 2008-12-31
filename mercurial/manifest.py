@@ -35,7 +35,8 @@ class manifest(revlog):
         return mfdict
 
     def readdelta(self, node):
-        return self.parse(mdiff.patchtext(self.delta(node)))
+        r = self.rev(node)
+        return self.parse(mdiff.patchtext(self.revdiff(r - 1, r)))
 
     def read(self, node):
         if node == nullid: return manifestdict() # don't upset local cache
@@ -62,6 +63,8 @@ class manifest(revlog):
             while i < lenm and m[i] != c:
                 i += 1
             return i
+        if not s:
+            return (lo, lo)
         lenm = len(m)
         if not hi:
             hi = lenm

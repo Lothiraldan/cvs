@@ -7,7 +7,7 @@
 # of the GNU General Public License, incorporated herein by reference.
 
 from mercurial.i18n import _
-from mercurial import osutil, ui, util
+from mercurial import osutil, util
 import common
 import errno, os, select, socket, stat, struct, sys, tempfile, time
 
@@ -15,7 +15,6 @@ try:
     import linux as inotify
     from linux import watcher
 except ImportError:
-    print >> sys.stderr, '*** native support is required for this extension'
     raise
 
 class AlreadyStartedException(Exception): pass
@@ -709,6 +708,26 @@ class Master(object):
                 timeobj.handle_timeout()
 
 def start(ui, repo):
+    def closefds(ignore):
+        # (from python bug #1177468)
+        # close all inherited file descriptors
+        # Python 2.4.1 and later use /dev/urandom to seed the random module's RNG
+        # a file descriptor is kept internally as os._urandomfd (created on demand
+        # the first time os.urandom() is called), and should not be closed
+        try:
+            os.urandom(4)
+            urandom_fd = getattr(os, '_urandomfd', None)
+        except AttributeError:
+            urandom_fd = None
+        ignore.append(urandom_fd)
+        for fd in range(3, 256):
+            if fd in ignore:
+                continue
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
     m = Master(ui, repo)
     sys.stdout.flush()
     sys.stderr.flush()
@@ -717,6 +736,7 @@ def start(ui, repo):
     if pid:
         return pid
 
+    closefds([m.server.fileno(), m.watcher.fileno()])
     os.setsid()
 
     fd = os.open('/dev/null', os.O_RDONLY)

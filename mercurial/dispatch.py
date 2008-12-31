@@ -7,7 +7,7 @@
 
 from i18n import _
 from repo import RepoError
-import os, sys, atexit, signal, pdb, traceback, socket, errno, shlex, time
+import os, sys, atexit, signal, pdb, socket, errno, shlex, time
 import util, commands, hg, lock, fancyopts, revlog, version, extensions, hook
 import cmdutil
 import ui as _ui
@@ -90,7 +90,7 @@ def _runcatch(ui, args):
             else:
                 raise
     except socket.error, inst:
-        ui.warn(_("abort: %s\n") % inst[-1])
+        ui.warn(_("abort: %s\n") % inst.args[-1])
     except IOError, inst:
         if hasattr(inst, "code"):
             ui.warn(_("abort: %s\n") % inst)
@@ -100,7 +100,7 @@ def _runcatch(ui, args):
             except: # it might be anything, for example a string
                 reason = inst.reason
             ui.warn(_("abort: error: %s\n") % reason)
-        elif hasattr(inst, "args") and inst[0] == errno.EPIPE:
+        elif hasattr(inst, "args") and inst.args[0] == errno.EPIPE:
             if ui.debugflag:
                 ui.warn(_("broken pipe\n"))
         elif getattr(inst, "strerror", None):
@@ -116,13 +116,13 @@ def _runcatch(ui, args):
         else:
             ui.warn(_("abort: %s\n") % inst.strerror)
     except util.UnexpectedOutput, inst:
-        ui.warn(_("abort: %s") % inst[0])
-        if not isinstance(inst[1], basestring):
-            ui.warn(" %r\n" % (inst[1],))
-        elif not inst[1]:
+        ui.warn(_("abort: %s") % inst.args[0])
+        if not isinstance(inst.args[1], basestring):
+            ui.warn(" %r\n" % (inst.args[1],))
+        elif not inst.args[1]:
             ui.warn(_(" empty string\n"))
         else:
-            ui.warn("\n%r\n" % util.ellipsis(inst[1]))
+            ui.warn("\n%r\n" % util.ellipsis(inst.args[1]))
     except ImportError, inst:
         m = str(inst).split()[-1]
         ui.warn(_("abort: could not import module %s!\n") % m)
@@ -356,9 +356,9 @@ def _dispatch(ui, args):
                     raise RepoError(_("There is no Mercurial repository here"
                                       " (.hg not found)"))
                 raise
-        d = lambda: func(ui, repo, *args, **cmdoptions)
-    else:
-        d = lambda: func(ui, *args, **cmdoptions)
+        args.insert(0, repo)
+
+    d = lambda: util.checksignature(func)(ui, *args, **cmdoptions)
 
     # run pre-hook, and abort if it fails
     ret = hook.hook(lui, repo, "pre-%s" % cmd, False, args=" ".join(fullargs))
@@ -374,11 +374,7 @@ def _runcommand(ui, options, cmd, cmdfunc):
     def checkargs():
         try:
             return cmdfunc()
-        except TypeError:
-            # was this an argument error?
-            tb = traceback.extract_tb(sys.exc_info()[2])
-            if len(tb) != 2: # no
-                raise
+        except util.SignatureError:
             raise ParseError(cmd, _("invalid arguments"))
 
     if options['profile']:

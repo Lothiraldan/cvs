@@ -28,7 +28,7 @@
 </div>
 
 <div class="main">
-<h2><a href="{url}">{repo|escape}</a></h2>
+<h2><a href="{url}{sessionvars%urlparameter}">{repo|escape}</a></h2>
 <h3>log</h3>
 
 <form class="search" action="{url}log">
@@ -41,7 +41,7 @@ files, or words in the commit message</span>
 <div class="navigate">rev {rev}: {changenav%navshortentry}</div>
 
 <table class="bigtable">
- <tr> 
+ <tr>
   <th class="age">age</th>
   <th class="author">author</th>
   <th class="description">description</th>

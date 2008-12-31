@@ -4,6 +4,7 @@
    href="{url}atom-log" title="Atom feed for #repo|escape#"/>
 <link rel="alternate" type="application/rss+xml"
    href="{url}rss-log" title="RSS feed for #repo|escape#"/>
+<!--[if IE]><script type="text/javascript" src="{staticurl}excanvas.js"></script><![endif]-->
 </head>
 <body>
 
@@ -25,8 +26,8 @@ graph |
 <a href="{url}tags{sessionvars%urlparameter}">tags</a> |
 <a href="{url}file/#node|short#{sessionvars%urlparameter}">files</a>
 <br/>
-<a href="{url}graph/{uprev}{sessionvars%urlparameter}?revcount={revcountless}">less</a>
-<a href="{url}graph/{uprev}{sessionvars%urlparameter}?revcount={revcountmore}">more</a>
+<a href="{url}graph/{rev}{lessvars%urlparameter}">less</a>
+<a href="{url}graph/{rev}{morevars%urlparameter}">more</a>
 | #changenav%navgraphentry#<br/>
 </div>
 
@@ -111,8 +112,8 @@ graph.render(data);
 </script>
 
 <div class="page_nav">
-<a href="{url}graph/{uprev}{sessionvars%urlparameter}?revcount={revcountless}">less</a>
-<a href="{url}graph/{uprev}{sessionvars%urlparameter}?revcount={revcountmore}">more</a>
+<a href="{url}graph/{rev}{lessvars%urlparameter}">less</a>
+<a href="{url}graph/{rev}{morevars%urlparameter}">more</a>
 | {changenav%navgraphentry}
 </div>
 

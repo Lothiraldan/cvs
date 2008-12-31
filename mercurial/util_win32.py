@@ -19,7 +19,7 @@ import osutil
 import util
 from win32com.shell import shell,shellcon
 
-class WinError:
+class WinError(Exception):
     winerror_map = {
         winerror.ERROR_ACCESS_DENIED: errno.EACCES,
         winerror.ERROR_ACCOUNT_DISABLED: errno.EACCES,
@@ -245,7 +245,7 @@ def system_rcpath_win32():
 def user_rcpath_win32():
     '''return os-specific hgrc search path to the user dir'''
     userdir = os.path.expanduser('~')
-    if sys.getwindowsversion() != 2 and userdir == '~':
+    if sys.getwindowsversion()[3] != 2 and userdir == '~':
         # We are on win < nt: fetch the APPDATA directory location and use
         # the parent directory as the user home dir.
         appdir = shell.SHGetPathFromIDList(
@@ -292,7 +292,7 @@ class posixfile_nt(object):
             raise WinIOError(err, name)
 
     def __iter__(self):
-        for line in self.read().splitlines(True):
+        for line in self.readlines():
             yield line
 
     def read(self, count=-1):
@@ -310,6 +310,11 @@ class posixfile_nt(object):
             return cs.getvalue()
         except pywintypes.error, err:
             raise WinIOError(err)
+
+    def readlines(self, sizehint=None):
+        # splitlines() splits on single '\r' while readlines()
+        # does not. cStringIO has a well behaving readlines() and is fast.
+        return cStringIO.StringIO(self.read()).readlines()
 
     def write(self, data):
         try:

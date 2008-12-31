@@ -183,7 +183,7 @@ list of commands:
  recover      roll back an interrupted transaction
  remove       remove the specified files on the next commit
  rename       rename files; equivalent of copy + remove
- resolve      resolve file merges from a branch merge or update
+ resolve      retry file merges from a merge or update
  revert       restore individual files or dirs to an earlier state
  rollback     roll back the last transaction
  root         print the root (top) of the current working dir
@@ -205,7 +205,7 @@ additional help topics:
  environment  Environment Variables
  revisions    Specifying Single Revisions
  multirevs    Specifying Multiple Revisions
- gitdiffs     Using git Diffs
+ diffs        Diff Formats
 
 use "hg -v help" to show aliases and global options
 Mercurial Distributed SCM
@@ -246,7 +246,7 @@ list of commands:
  recover      roll back an interrupted transaction
  remove       remove the specified files on the next commit
  rename       rename files; equivalent of copy + remove
- resolve      resolve file merges from a branch merge or update
+ resolve      retry file merges from a merge or update
  revert       restore individual files or dirs to an earlier state
  rollback     roll back the last transaction
  root         print the root (top) of the current working dir
@@ -268,7 +268,7 @@ additional help topics:
  environment  Environment Variables
  revisions    Specifying Single Revisions
  multirevs    Specifying Multiple Revisions
- gitdiffs     Using git Diffs
+ diffs        Diff Formats
 
 use "hg -v help" to show aliases and global options
 %% not tested: --debugger

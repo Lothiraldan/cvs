@@ -350,7 +350,7 @@ class ui(object):
         if not user:
             raise util.Abort(_("Please specify a username."))
         if "\n" in user:
-            raise util.Abort(_("username %s contains a newline\n") % `user`)
+            raise util.Abort(_("username %s contains a newline\n") % repr(user))
         return user
 
     def shortuser(self, user):
@@ -407,7 +407,8 @@ class ui(object):
                 import readline
                 # force demandimport to really load the module
                 readline.read_history_file
-            except ImportError:
+                # windows sometimes raises something other than ImportError
+            except Exception:
                 pass
         line = raw_input(prompt)
         # When stdin is in binary mode on Windows, it can cause
@@ -421,7 +422,9 @@ class ui(object):
 
         If not interactive -- the default is returned
         """
-        if not self.interactive: return default
+        if not self.interactive:
+            self.note(msg, ' ', default, "\n")
+            return default
         while True:
             try:
                 r = self._readline(msg + ' ')

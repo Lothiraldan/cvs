@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms
 # of the GNU General Public License, incorporated herein by reference.
 
-import os, mimetypes, re, cgi
+import os, mimetypes, re, cgi, copy
 import webutil
 from mercurial import revlog, archival, templatefilters
 from mercurial.node import short, hex, nullid
@@ -227,6 +227,7 @@ def shortlog(web, req, tmpl):
 def changeset(web, req, tmpl):
     ctx = webutil.changectx(web.repo, req)
     showtags = webutil.showtag(web.repo, tmpl, 'changesettag', ctx.node())
+    showbranch = webutil.nodebranchnodefault(ctx)
     parents = ctx.parents()
 
     files = []
@@ -246,6 +247,7 @@ def changeset(web, req, tmpl):
                 parent=webutil.siblings(parents),
                 child=webutil.siblings(ctx.children()),
                 changesettag=showtags,
+                changesetbranch=showbranch,
                 author=ctx.user(),
                 desc=ctx.description(),
                 date=ctx.date(),
@@ -526,13 +528,13 @@ def filelog(web, req, tmpl):
         if not numrevs: # file doesn't exist at all
             raise
         rev = webutil.changectx(web.repo, req).rev()
-        first = fl.linkrev(fl.node(0))
+        first = fl.linkrev(0)
         if rev < first: # current rev is from before file existed
             raise
         frev = numrevs - 1
-        while fl.linkrev(fl.node(frev)) > rev:
+        while fl.linkrev(frev) > rev:
             frev -= 1
-        fctx = web.repo.filectx(f, fl.linkrev(fl.node(frev)))
+        fctx = web.repo.filectx(f, fl.linkrev(frev))
 
     count = fctx.filerev() + 1
     pagelen = web.maxshortchanges
@@ -555,7 +557,11 @@ def filelog(web, req, tmpl):
                          "rename": webutil.renamelink(fctx),
                          "parent": webutil.siblings(fctx.parents()),
                          "child": webutil.siblings(fctx.children()),
-                         "desc": ctx.description()})
+                         "desc": ctx.description(),
+                         "tags": webutil.nodetagsdict(web.repo, ctx.node()),
+                         "branch": webutil.nodebranchnodefault(ctx),
+                         "inbranch": webutil.nodeinbranch(web.repo, ctx),
+                         "branches": webutil.nodebranchdict(web.repo, ctx)})
 
         if limit > 0:
             l = l[:limit]
@@ -619,21 +625,27 @@ def graph(web, req, tmpl):
     rev = webutil.changectx(web.repo, req).rev()
     bg_height = 39
 
+    revcount = 25
+    if 'revcount' in req.form:
+        revcount = int(req.form.get('revcount', [revcount])[0])
+        tmpl.defaults['sessionvars']['revcount'] = revcount
+
+    lessvars = copy.copy(tmpl.defaults['sessionvars'])
+    lessvars['revcount'] = revcount / 2
+    morevars = copy.copy(tmpl.defaults['sessionvars'])
+    morevars['revcount'] = revcount * 2
+
     max_rev = len(web.repo) - 1
-    revcount = min(max_rev, int(req.form.get('revcount', [25])[0]))
+    revcount = min(max_rev, revcount)
     revnode = web.repo.changelog.node(rev)
     revnode_hex = hex(revnode)
     uprev = min(max_rev, rev + revcount)
     downrev = max(0, rev - revcount)
-    lessrev = max(0, rev - revcount / 2)
-
-    maxchanges = web.maxshortchanges or web.maxchanges
     count = len(web.repo)
-    changenav = webutil.revnavgen(rev, maxchanges, count, web.repo.changectx)
+    changenav = webutil.revnavgen(rev, revcount, count, web.repo.changectx)
 
     tree = list(graphmod.graph(web.repo, rev, downrev))
     canvasheight = (len(tree) + 1) * bg_height - 27;
-
     data = []
     for i, (ctx, vtx, edges) in enumerate(tree):
         node = short(ctx.node())
@@ -646,7 +658,6 @@ def graph(web, req, tmpl):
         data.append((node, vtx, edges, desc, user, age, branch, ctx.tags()))
 
     return tmpl('graph', rev=rev, revcount=revcount, uprev=uprev,
-                lessrev=lessrev, revcountmore=revcount and 2 * revcount or 1,
-                revcountless=revcount / 2, downrev=downrev,
-                canvasheight=canvasheight, bg_height=bg_height,
-                jsdata=data, node=revnode_hex, changenav=changenav)
+                lessvars=lessvars, morevars=morevars, downrev=downrev,
+                canvasheight=canvasheight, jsdata=data, bg_height=bg_height,
+                node=revnode_hex, changenav=changenav)

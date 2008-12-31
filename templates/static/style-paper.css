@@ -82,10 +82,10 @@ a { text-decoration:none; }
 .age { white-space:nowrap; }
 .date { white-space:nowrap; }
 .indexlinks { white-space:nowrap; }
-.parity0 { background-color: #f5f5f5; }
+.parity0 { background-color: #f0f0f0; }
 .parity1 { background-color: white; }
 .plusline { color: green; }
-.minusline { color: red; }
+.minusline { color: #dc143c; } /* crimson */
 .atline { color: purple; }
 
 .navigate {
@@ -100,6 +100,30 @@ a { text-decoration:none; }
   font-weight: normal;
   margin-left: .5em;
   vertical-align: baseline;
+}
+
+.branchhead {
+  color: #000;
+  font-size: 80%;
+  font-weight: normal;
+  margin-left: .5em;
+  vertical-align: baseline;
+}
+
+ul#graphnodes .branchhead {
+  font-size: 75%;
+}
+
+.branchname {
+  color: #000;
+  font-size: 60%; 
+  font-weight: normal;
+  margin-left: .5em;
+  vertical-align: baseline;
+}
+
+h3 .branchname {
+  font-size: 80%;
 }
 
 /* Common */
@@ -117,7 +141,7 @@ h3 {
   border-bottom: 1px solid #999;
   border-collapse: collapse;
   font-size: 90%;
-  width: 100%; 
+  width: 100%;
   font-weight: normal;
   text-align: left;
 }
@@ -127,9 +151,9 @@ h3 {
   vertical-align: top;
 }
 
-.bigtable th { 
+.bigtable th {
   padding: 1px 4px 1px 4px;
-  border-bottom: 1px solid #999; 
+  border-bottom: 1px solid #999;
   font-size: smaller;
 }
 .bigtable tr { border: none; }
@@ -137,26 +161,34 @@ h3 {
 .bigtable .author { width: 12em; }
 .bigtable .description { }
 .bigtable .node { width: 5em; font-family: monospace;}
-.bigtable .lineno { width: 2em; text-align: right;}
-.bigtable .lineno a { color: #999; font-size: smaller; font-family: monospace;}
-.bigtable td.source { font-family: monospace; white-space: pre; }
 .bigtable .permissions { width: 8em; text-align: left;}
 .bigtable .size { width: 5em; text-align: right; }
 .bigtable .annotate { text-align: right; }
 .bigtable td.annotate { font-size: smaller; }
+.bigtable td.source { font-size: inherit; }
+
+.source, .sourcefirst, .sourcelast {
+  font-family: monospace;
+  white-space: pre;
+  font-size: 90%;
+}
+.sourcefirst { border-bottom: 1px solid #999; font-weight: bold; font-size: smaller; }
+.sourcelast { border-top: 1px solid #999; }
+.source a { color: #999; font-size: smaller; font-family: monospace;}
+.bottomline { border-bottom: 1px solid #999; }
 
 .fileline { font-family: monospace; }
 .fileline img { border: 0; }
 
 /* Changeset entry */
-#changesetEntry { 
+#changesetEntry {
   border-collapse: collapse;
   font-size: 90%;
   width: 100%;
   margin-bottom: 1em;
 }
 
-#changesetEntry th { 
+#changesetEntry th {
   padding: 1px 4px 1px 4px;
   width: 4em;
   text-align: right;
@@ -194,7 +226,7 @@ ul#nodebgs {
 	margin: 0;
 	top: -0.7em;
 }
- 
+
 ul#graphnodes li, ul#nodebgs li {
 	height: 39px;
 }

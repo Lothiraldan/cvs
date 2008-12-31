@@ -9,7 +9,7 @@
 from i18n import _
 from node import hex, nullid, short
 import base85, cmdutil, mdiff, util, revlog, diffhelpers, copies
-import cStringIO, email.Parser, os, re, errno
+import cStringIO, email.Parser, os, re, errno, math
 import sys, tempfile, zlib
 
 gitre = re.compile('diff --git a/(.*) b/(.*)')
@@ -22,17 +22,20 @@ class NoHunks(PatchError):
 
 # helper functions
 
-def copyfile(src, dst, basedir=None):
-    if not basedir:
-        basedir = os.getcwd()
-
-    abssrc, absdst = [os.path.join(basedir, n) for n in (src, dst)]
+def copyfile(src, dst, basedir):
+    abssrc, absdst = [util.canonpath(basedir, basedir, x) for x in [src, dst]]
     if os.path.exists(absdst):
         raise util.Abort(_("cannot create %s: destination already exists") %
                          dst)
 
-    if not os.path.isdir(basedir):
-        os.makedirs(basedir)
+    dstdir = os.path.dirname(absdst)
+    if dstdir and not os.path.isdir(dstdir):
+        try:
+            os.makedirs(dstdir)
+        except IOError:
+            raise util.Abort(
+                _("cannot create %s: unable to create destination directory")
+                % dst)            
 
     util.copyfile(abssrc, absdst)
 
@@ -207,6 +210,8 @@ def readgitpatch(lr):
                 gp.path = line[8:].rstrip()
             elif line.startswith('deleted file'):
                 gp.op = 'DELETE'
+                # is the deleted file a symlink?
+                gp.setmode(int(line.rstrip()[-6:], 8))
             elif line.startswith('new file mode '):
                 gp.op = 'ADD'
                 gp.setmode(int(line.rstrip()[-6:], 8))
@@ -228,26 +233,21 @@ unidesc = re.compile('@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@')
 contextdesc = re.compile('(---|\*\*\*) (\d+)(,(\d+))? (---|\*\*\*)')
 
 class patchfile:
-    def __init__(self, ui, fname, missing=False):
+    def __init__(self, ui, fname, opener, missing=False):
         self.fname = fname
+        self.opener = opener
         self.ui = ui
         self.lines = []
         self.exists = False
         self.missing = missing
         if not missing:
             try:
-                fp = file(fname, 'rb')
-                self.lines = fp.readlines()
+                self.lines = self.readlines(fname)
                 self.exists = True
             except IOError:
                 pass
         else:
             self.ui.warn(_("unable to find '%s' for patching\n") % self.fname)
-
-        if not self.exists:
-            dirname = os.path.dirname(fname)
-            if dirname and not os.path.isdir(dirname):
-                os.makedirs(dirname)
 
         self.hash = {}
         self.dirty = 0
@@ -256,6 +256,23 @@ class patchfile:
         self.fileprinted = False
         self.printfile(False)
         self.hunks = 0
+
+    def readlines(self, fname):
+        fp = self.opener(fname, 'r')
+        try:
+            return fp.readlines()
+        finally:
+            fp.close()
+
+    def writelines(self, fname, lines):
+        fp = self.opener(fname, 'w')
+        try:
+            fp.writelines(lines)
+        finally:
+            fp.close()
+
+    def unlink(self, fname):
+        os.unlink(fname)
 
     def printfile(self, warn):
         if self.fileprinted:
@@ -307,35 +324,24 @@ class patchfile:
         self.ui.warn(
             _("%d out of %d hunks FAILED -- saving rejects to file %s\n") %
             (len(self.rej), self.hunks, fname))
-        try: os.unlink(fname)
-        except:
-            pass
-        fp = file(fname, 'wb')
-        base = os.path.basename(self.fname)
-        fp.write("--- %s\n+++ %s\n" % (base, base))
-        for x in self.rej:
-            for l in x.hunk:
-                fp.write(l)
-                if l[-1] != '\n':
-                    fp.write("\n\ No newline at end of file\n")
+
+        def rejlines():
+            base = os.path.basename(self.fname)
+            yield "--- %s\n+++ %s\n" % (base, base)
+            for x in self.rej:
+                for l in x.hunk:
+                    yield l
+                    if l[-1] != '\n':
+                        yield "\n\ No newline at end of file\n"
+
+        self.writelines(fname, rejlines())
 
     def write(self, dest=None):
-        if self.dirty:
-            if not dest:
-                dest = self.fname
-            st = None
-            try:
-                st = os.lstat(dest)
-            except OSError, inst:
-                if inst.errno != errno.ENOENT:
-                    raise
-            if st and st.st_nlink > 1:
-                os.unlink(dest)
-            fp = file(dest, 'wb')
-            if st and st.st_nlink > 1:
-                os.chmod(dest, st.st_mode)
-            fp.writelines(self.lines)
-            fp.close()
+        if not self.dirty:
+            return
+        if not dest:
+            dest = self.fname
+        self.writelines(dest, self.lines)
 
     def close(self):
         self.write()
@@ -360,9 +366,9 @@ class patchfile:
             self.rej.append(h)
             return -1
 
-        if isinstance(h, binhunk):
+        if isinstance(h, githunk):
             if h.rmfile():
-                os.unlink(self.fname)
+                self.unlink(self.fname)
             else:
                 self.lines[:] = h.new()
                 self.offset += len(h.new())
@@ -379,7 +385,7 @@ class patchfile:
         orig_start = start
         if diffhelpers.testhunk(old, self.lines, start) == 0:
             if h.rmfile():
-                os.unlink(self.fname)
+                self.unlink(self.fname)
             else:
                 self.lines[start : start + h.lena] = h.new()
                 self.offset += h.lenb - h.lena
@@ -650,12 +656,12 @@ class hunk:
     def new(self, fuzz=0, toponly=False):
         return self.fuzzit(self.b, fuzz, toponly)
 
-class binhunk:
-    'A binary patch file. Only understands literals so far.'
+class githunk(object):
+    """A git hunk"""
     def __init__(self, gitpatch):
         self.gitpatch = gitpatch
         self.text = None
-        self.hunk = ['GIT binary patch\n']
+        self.hunk = []
 
     def createfile(self):
         return self.gitpatch.op in ('ADD', 'RENAME', 'COPY')
@@ -668,6 +674,12 @@ class binhunk:
 
     def new(self):
         return [self.text]
+
+class binhunk(githunk):
+    'A binary patch file. Only understands literals so far.'
+    def __init__(self, gitpatch):
+        super(binhunk, self).__init__(gitpatch)
+        self.hunk = ['GIT binary patch\n']
 
     def extract(self, lr):
         line = lr.readline()
@@ -695,6 +707,18 @@ class binhunk:
             raise PatchError(_('binary patch is %d bytes, not %d') %
                              len(text), size)
         self.text = text
+
+class symlinkhunk(githunk):
+    """A git symlink hunk"""
+    def __init__(self, gitpatch, hunk):
+        super(symlinkhunk, self).__init__(gitpatch)
+        self.hunk = hunk
+
+    def complete(self):
+        return True
+
+    def fix_newline(self):
+        return
 
 def parsefilename(str):
     # --- filename \t|space stuff
@@ -770,9 +794,7 @@ class linereader:
 
     def readline(self):
         if self.buf:
-            l = self.buf[0]
-            del self.buf[0]
-            return l
+            return self.buf.pop(0)
         return self.fp.readline()
 
     def __iter__(self):
@@ -855,6 +877,10 @@ def iterhunks(ui, fp, sourcefile=None):
                 create = afile == '/dev/null' or gpatch and gpatch.op == 'ADD'
                 remove = bfile == '/dev/null' or gpatch and gpatch.op == 'DELETE'
                 current_hunk = hunk(x, hunknum + 1, lr, context, create, remove)
+                if remove:
+                    gpatch = changed.get(afile[2:])
+                    if gpatch and gpatch.mode[0]:
+                        current_hunk = symlinkhunk(gpatch, current_hunk)
             except PatchError, err:
                 ui.debug(err)
                 current_hunk = None
@@ -938,6 +964,7 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, reverse=False):
     err = 0
     current_file = None
     gitpatches = None
+    opener = util.opener(os.getcwd())
 
     def closefile():
         if not current_file:
@@ -960,11 +987,11 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, reverse=False):
             afile, bfile, first_hunk = values
             try:
                 if sourcefile:
-                    current_file = patchfile(ui, sourcefile)
+                    current_file = patchfile(ui, sourcefile, opener)
                 else:
                     current_file, missing = selectfile(afile, bfile, first_hunk,
                                             strip, reverse)
-                    current_file = patchfile(ui, current_file, missing)
+                    current_file = patchfile(ui, current_file, opener, missing)
             except PatchError, err:
                 ui.warn(str(err) + '\n')
                 current_file, current_hunk = None, None
@@ -975,9 +1002,7 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, reverse=False):
             cwd = os.getcwd()
             for gp in gitpatches:
                 if gp.op in ('COPY', 'RENAME'):
-                    src, dst = [util.canonpath(cwd, cwd, x)
-                                for x in [gp.oldpath, gp.path]]
-                    copyfile(src, dst)
+                    copyfile(gp.oldpath, gp.path, cwd)
                 changed[gp.path] = gp
         else:
             raise util.Abort(_('unsupported parser state: %s') % state)
@@ -1002,7 +1027,7 @@ def diffopts(ui, opts={}, untrusted=False):
         ignoreblanklines=get('ignore_blank_lines', 'ignoreblanklines'),
         context=get('unified', getter=ui.config))
 
-def updatedir(ui, repo, patches):
+def updatedir(ui, repo, patches, similarity=0):
     '''Update dirstate after patch application according to metadata'''
     if not patches:
         return
@@ -1026,7 +1051,7 @@ def updatedir(ui, repo, patches):
     for src, dst in copies:
         repo.copy(src, dst)
     removes = removes.keys()
-    if removes:
+    if (not similarity) and removes:
         repo.remove(util.sort(removes), True)
     for f in patches:
         gp = patches[f]
@@ -1037,9 +1062,9 @@ def updatedir(ui, repo, patches):
             if gp.op == 'ADD' and not os.path.exists(dst):
                 flags = (isexec and 'x' or '') + (islink and 'l' or '')
                 repo.wwrite(gp.path, '', flags)
-            else:
+            elif gp.op != 'DELETE':
                 util.set_flags(dst, islink, isexec)
-    cmdutil.addremove(repo, cfiles)
+    cmdutil.addremove(repo, cfiles, similarity=similarity)
     files = patches.keys()
     files.extend([r for r in removes if r not in files])
     return util.sort(files)
@@ -1294,7 +1319,8 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
 
         if not fp:
             fp = cmdutil.make_file(repo, template, node, total=total,
-                                   seqno=seqno, revwidth=revwidth)
+                                   seqno=seqno, revwidth=revwidth,
+                                   mode='ab')
         if fp != sys.stdout and hasattr(fp, 'name'):
             repo.ui.note("%s\n" % fp.name)
 
@@ -1318,13 +1344,57 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
     for seqno, rev in enumerate(revs):
         single(rev, seqno+1, fp)
 
-def diffstat(patchlines):
-    if not util.find_exe('diffstat'):
-        return
-    output = util.filter('\n'.join(patchlines),
-                         'diffstat -p1 -w79 2>%s' % util.nulldev)
-    stat = [l.lstrip() for l in output.splitlines(True)]
-    last = stat.pop()
-    stat.insert(0, last)
-    stat = ''.join(stat)
-    return stat
+def diffstatdata(lines):
+    filename = None
+    for line in lines:
+        if line.startswith('diff'):
+            if filename:
+                yield (filename, adds, removes)
+            # set numbers to 0 anyway when starting new file
+            adds = 0
+            removes = 0
+            if line.startswith('diff --git'):
+                filename = gitre.search(line).group(1)
+            else:
+                # format: "diff -r ... -r ... file name"
+                filename = line.split(None, 5)[-1]
+        elif line.startswith('+') and not line.startswith('+++'):
+            adds += 1
+        elif line.startswith('-') and not line.startswith('---'):
+            removes += 1
+    yield (filename, adds, removes)
+
+def diffstat(lines):
+    output = []
+    stats = list(diffstatdata(lines))
+    width = util.termwidth() - 2
+
+    maxtotal, maxname = 0, 0
+    totaladds, totalremoves = 0, 0
+    for filename, adds, removes in stats:
+        totaladds += adds
+        totalremoves += removes
+        maxname = max(maxname, len(filename))
+        maxtotal = max(maxtotal, adds+removes)
+
+    countwidth = len(str(maxtotal))
+    graphwidth = width - countwidth - maxname
+    if graphwidth < 10:
+        graphwidth = 10
+
+    factor = int(math.ceil(float(maxtotal) / graphwidth))
+
+    for filename, adds, removes in stats:
+        # If diffstat runs out of room it doesn't print anything, which
+        # isn't very useful, so always print at least one + or - if there
+        # were at least some changes
+        pluses = '+' * max(adds/factor, int(bool(adds)))
+        minuses = '-' * max(removes/factor, int(bool(removes)))
+        output.append(' %-*s |  %*.d %s%s\n' % (maxname, filename, countwidth,
+                                                adds+removes, pluses, minuses))
+
+    if stats:
+        output.append(' %d files changed, %d insertions(+), %d deletions(-)\n' %
+                      (len(stats), totaladds, totalremoves))
+
+    return ''.join(output)

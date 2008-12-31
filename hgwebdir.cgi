@@ -28,11 +28,31 @@ import mercurial.hgweb.wsgicgi as wsgicgi
 # repos, collections of repos in a directory tree, or both.
 #
 # [paths]
-# virtual/path = /real/path
-# virtual/path = /real/path
+# virtual/path1 = /real/path1
+# virtual/path2 = /real/path2
+# virtual/root = /real/root/*
+# / = /real/root2/*
+# virtual/root2 = /real/root2/**
 #
 # [collections]
 # /prefix/to/strip/off = /root/of/tree/full/of/repos
+#
+# paths example: 
+#
+# * First two lines mount one repository into one virtual path, like
+# '/real/path1' into 'virtual/path1'.
+#
+# * The third entry mounts every mercurial repository found in '/real/root'
+# in 'virtual/root'. This format is preferred over the [collections] one,
+# since using absolute paths as configuration keys is not supported on every
+# platform (especially on Windows).
+#
+# * The fourth entry is a special case mounting all repositories in
+# /'real/root2' in the root of the virtual directory.
+#
+# * The fifth entry recursively finds all repositories under the real root,
+# and mounts them using their relative path (to given real root) under the
+# virtual root.
 #
 # collections example: say directory tree /foo contains repos /foo/bar,
 # /foo/quux/baz.  Give this config section:

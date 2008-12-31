@@ -32,8 +32,8 @@ from mercurial.i18n import _
 
 from cStringIO import StringIO
 
-from common import NoRepo, commit, converter_source, encodeargs, decodeargs
-from common import commandline, converter_sink, mapfile
+from common import NoRepo, MissingTool, commit, encodeargs, decodeargs
+from common import commandline, converter_source, converter_sink, mapfile
 
 try:
     from svn.core import SubversionException, Pool
@@ -44,6 +44,9 @@ try:
     import svn.delta
     import transport
 except ImportError:
+    pass
+
+class SvnPathNotFound(Exception):
     pass
 
 def geturl(path):
@@ -152,7 +155,16 @@ class svn_source(converter_source):
         try:
             SubversionException
         except NameError:
-            raise NoRepo('Subversion python bindings could not be loaded')
+            raise MissingTool(_('Subversion python bindings could not be loaded'))
+
+        try:
+            version = svn.core.SVN_VER_MAJOR, svn.core.SVN_VER_MINOR
+            if version < (1, 4):
+                raise MissingTool(_('Subversion python bindings %d.%d found, '
+                                    '1.4 or later required') % version)
+        except AttributeError:
+            raise MissingTool(_('Subversion python bindings are too old, 1.4 '
+                                'or later required'))
 
         self.encoding = locale.getpreferredencoding()
         self.lastrevs = {}
@@ -414,9 +426,15 @@ class svn_source(converter_source):
                         remainings.append([source, sourcerev, tagname])
                         continue
                     # From revision may be fake, get one with changes
-                    tagid = self.latest(source, sourcerev)
-                    if tagid:
-                        tags[tagname] = tagid
+                    try:
+                        tagid = self.latest(source, sourcerev)
+                        if tagid:
+                            tags[tagname] = tagid
+                    except SvnPathNotFound:
+                        # It happens when we are following directories we assumed
+                        # were copied with their parents but were really created
+                        # in the tag directory.
+                        pass
                 pendings = remainings
                 tagspath = srctagspath
 
@@ -474,7 +492,7 @@ class svn_source(converter_source):
         except SubversionException:
             dirent = None
         if not dirent:
-            raise util.Abort(_('%s not found up to revision %d') % (path, stop))
+            raise SvnPathNotFound(_('%s not found up to revision %d') % (path, stop))
 
         # stat() gives us the previous revision on this line of development, but
         # it might be in *another module*. Fetch the log and detect renames down
@@ -706,12 +724,6 @@ class svn_source(converter_source):
 
         self.child_cset = None
 
-        def isdescendantof(parent, child):
-            if not child or not parent or not child.startswith(parent):
-                return False
-            subpath = child[len(parent):]
-            return len(subpath) > 1 and subpath[0] == '/'
-
         def parselogentry(orig_paths, revnum, author, date, message):
             """Return the parsed commit object or None, and True if
             the revision is a branch root.
@@ -734,21 +746,10 @@ class svn_source(converter_source):
             if root_paths:
                 path, ent = root_paths[-1]
                 if ent.copyfrom_path:
-                    # If dir was moved while one of its file was removed
-                    # the log may look like:
-                    # A /dir   (from /dir:x)
-                    # A /dir/a (from /dir/a:y)
-                    # A /dir/b (from /dir/b:z)
-                    # ...
-                    # for all remaining children.
-                    # Let's take the highest child element from rev as source.
-                    copies = [(p,e) for p,e in orig_paths[:-1]
-                          if isdescendantof(ent.copyfrom_path, e.copyfrom_path)]
-                    fromrev = max([e.copyfrom_rev for p,e in copies] + [ent.copyfrom_rev])
                     branched = True
                     newpath = ent.copyfrom_path + self.module[len(path):]
                     # ent.copyfrom_rev may not be the actual last revision
-                    previd = self.latest(newpath, fromrev)
+                    previd = self.latest(newpath, ent.copyfrom_rev)
                     if previd is not None:
                         prevmodule, prevnum = self.revsplit(previd)[1:]
                         if prevnum >= self.startrev:
@@ -834,7 +835,7 @@ class svn_source(converter_source):
                         latest = self.latest(self.module, firstrevnum - 1)
                         if latest:
                             firstcset.parents.append(latest)
-                except util.Abort:
+                except SvnPathNotFound:
                     pass
         except SubversionException, (inst, num):
             if num == svn.core.SVN_ERR_FS_NO_SUCH_REVISION:
@@ -842,7 +843,6 @@ class svn_source(converter_source):
             raise
 
     def _getfile(self, file, rev):
-        io = StringIO()
         # TODO: ra.get_file transmits the whole file instead of diffs.
         mode = ''
         try:
@@ -850,7 +850,12 @@ class svn_source(converter_source):
             if self.module != new_module:
                 self.module = new_module
                 self.reparent(self.module)
+            io = StringIO()
             info = svn.ra.get_file(self.ra, file, revnum, io)
+            data = io.getvalue()
+            # ra.get_files() seems to keep a reference on the input buffer
+            # preventing collection. Release it explicitely.
+            io.close()
             if isinstance(info, list):
                 info = info[-1]
             mode = ("svn:executable" in info) and 'x' or ''
@@ -861,7 +866,6 @@ class svn_source(converter_source):
             if e.apr_err in notfound: # File not found
                 raise IOError()
             raise
-        data = io.getvalue()
         if mode == 'l':
             link_prefix = "link "
             if data.startswith(link_prefix):

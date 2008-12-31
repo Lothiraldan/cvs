@@ -1,6 +1,6 @@
 # CVS conversion code inspired by hg-cvs-import and git-cvsimport
 
-import os, locale, re, socket
+import os, locale, re, socket, errno
 from cStringIO import StringIO
 from mercurial import util
 from mercurial.i18n import _
@@ -103,18 +103,18 @@ class convert_cvs(converter_source):
                             if maxrev and int(id) > maxrev:
                                 # ignore everything
                                 state = 3
-                        elif l.startswith("Date"):
+                        elif l.startswith("Date:"):
                             date = util.parsedate(l[6:-1], ["%Y/%m/%d %H:%M:%S"])
                             date = util.datestr(date)
-                        elif l.startswith("Branch"):
+                        elif l.startswith("Branch:"):
                             branch = l[8:-1]
                             self.parent[id] = self.lastbranch.get(branch, 'bad')
                             self.lastbranch[branch] = id
-                        elif l.startswith("Ancestor branch"):
+                        elif l.startswith("Ancestor branch:"):
                             ancestor = l[17:-1]
                             # figure out the parent later
                             self.parent[id] = self.lastbranch[ancestor]
-                        elif l.startswith("Author"):
+                        elif l.startswith("Author:"):
                             author = self.recode(l[8:-1])
                         elif l.startswith("Tag:") or l.startswith("Tags:"):
                             t = l[l.index(':')+1:]
@@ -144,11 +144,11 @@ class convert_cvs(converter_source):
                             if branch == "HEAD":
                                 branch = ""
                             if branch:
-                                latest = None
+                                latest = 0
                                 # the last changeset that contains a base
                                 # file is our parent
                                 for r in oldrevs:
-                                    latest = max(filerevids.get(r, None), latest)
+                                    latest = max(filerevids.get(r, 0), latest)
                                 if latest:
                                     p = [latest]
 
@@ -201,20 +201,27 @@ class convert_cvs(converter_source):
 
                 if not passw:
                     passw = "A"
-                    pf = open(os.path.expanduser("~/.cvspass"))
-                    for line in pf.read().splitlines():
-                        part1, part2 = line.split(' ', 1)
-                        if part1 == '/1':
-                            # /1 :pserver:user@example.com:2401/cvsroot/foo Ah<Z
-                            part1, part2 = part2.split(' ', 1)
-                            format = format1
-                        else:
-                            # :pserver:user@example.com:/cvsroot/foo Ah<Z
-                            format = format0
-                        if part1 == format:
-                            passw = part2
-                            break
-                    pf.close()
+                    cvspass = os.path.expanduser("~/.cvspass")
+                    try:
+                        pf = open(cvspass)
+                        for line in pf.read().splitlines():
+                            part1, part2 = line.split(' ', 1)
+                            if part1 == '/1':
+                                # /1 :pserver:user@example.com:2401/cvsroot/foo Ah<Z
+                                part1, part2 = part2.split(' ', 1)
+                                format = format1
+                            else:
+                                # :pserver:user@example.com:/cvsroot/foo Ah<Z
+                                format = format0
+                            if part1 == format:
+                                passw = part2
+                                break
+                        pf.close()
+                    except IOError, inst:
+                        if inst.errno != errno.ENOENT:
+                            if not getattr(inst, 'filename', None):
+                                inst.filename = cvspass
+                            raise
 
                 sck = socket.socket()
                 sck.connect((serv, port))
@@ -321,9 +328,6 @@ class convert_cvs(converter_source):
                     self.ui.warn(_("cvs server: %s\n") % line[2:])
                 elif line.startswith("Remove"):
                     l = self.readp.readline()
-                    l = self.readp.readline()
-                    if l != "ok\n":
-                        raise util.Abort(_("unknown CVS response: %s") % l)
                 else:
                     raise util.Abort(_("unknown CVS response: %s") % line)
 

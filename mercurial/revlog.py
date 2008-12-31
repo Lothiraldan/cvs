@@ -500,11 +500,12 @@ class revlog(object):
             raise LookupError(node, self.indexfile, _('no node'))
     def node(self, rev):
         return self.index[rev][7]
-    def linkrev(self, node):
-        return self.index[self.rev(node)][4]
+    def linkrev(self, rev):
+        return self.index[rev][4]
     def parents(self, node):
-        d = self.index[self.rev(node)][5:7]
-        return (self.node(d[0]), self.node(d[1]))
+        i = self.index
+        d = i[self.rev(node)]
+        return i[d[5]][7], i[d[6]][7] # map revisions to nodes inline
     def parentrevs(self, rev):
         return self.index[rev][5:7]
     def start(self, rev):
@@ -872,16 +873,16 @@ class revlog(object):
         if len(id) < 40:
             try:
                 # hex(node)[:...]
-                bin_id = bin(id[:len(id) & ~1]) # grab an even number of digits
-                node = None
-                for n in self.nodemap:
-                    if n.startswith(bin_id) and hex(n).startswith(id):
-                        if node is not None:
-                            raise LookupError(id, self.indexfile,
-                                              _('ambiguous identifier'))
-                        node = n
-                if node is not None:
-                    return node
+                l = len(id) / 2  # grab an even number of digits
+                bin_id = bin(id[:l*2])
+                nl = [n for n in self.nodemap if n[:l] == bin_id]
+                nl = [n for n in nl if hex(n).startswith(id)]
+                if len(nl) > 0:
+                    if len(nl) == 1:
+                        return nl[0]
+                    raise LookupError(id, self.indexfile,
+                                      _('ambiguous identifier'))
+                return None
             except TypeError:
                 pass
 
@@ -940,11 +941,6 @@ class revlog(object):
             c = c[offset:offset + length]
 
         return decompress(c)
-
-    def delta(self, node):
-        """return or calculate a delta between a node and its predecessor"""
-        r = self.rev(node)
-        return self.revdiff(r - 1, r)
 
     def revdiff(self, rev1, rev2):
         """return or calculate a delta between two revisions"""
