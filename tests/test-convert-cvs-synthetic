@@ -1,0 +1,78 @@
+#!/bin/sh
+
+# This feature requires use of builtin cvsps!
+"$TESTDIR/hghave" cvs || exit 80
+
+set -e
+
+echo "[extensions]" >> $HGRCPATH
+echo "convert = " >> $HGRCPATH
+echo "[convert]" >> $HGRCPATH
+echo "cvsps=builtin" >> $HGRCPATH
+
+echo % create cvs repository with one project
+mkdir cvsrepo
+cd cvsrepo
+export CVSROOT=`pwd`
+export CVS_OPTIONS=-f
+cd ..
+
+filterpath()
+{
+    eval "$@" | sed "s:$CVSROOT:*REPO*:g"
+}
+
+cvscall()
+{
+    echo cvs -f "$@"
+    cvs -f "$@" 2>&1
+}
+
+# output of 'cvs ci' varies unpredictably, so just discard it
+cvsci()
+{
+    echo cvs -f ci "$@"
+    cvs -f ci "$@" >/dev/null 2>&1
+}
+
+filterpath cvscall -d "$CVSROOT" init
+mkdir cvsrepo/proj
+
+cvscall -q co proj
+
+echo % create file1 on the trunk
+cd proj
+touch file1
+cvscall -Q add file1
+cvsci -m"add file1 on trunk" file1
+
+echo % create two branches
+cvscall -q tag -b v1_0
+cvscall -q tag -b v1_1
+
+echo % create file2 on branch v1_0
+cvscall -q up -rv1_0
+touch file2
+cvscall -Q add file2
+cvsci -m"add file2 on branch v1_0" file2
+
+echo % create file3, file4 on branch v1_1
+cvscall -Q up -rv1_1
+touch file3
+touch file4
+cvscall -Q add file3 file4
+cvsci -m"add file3, file4 on branch v1_1" file3 file4
+
+echo % merge file2 from v1_0 to v1_1
+cvscall -q up -jv1_0
+cvsci -m"merge file2 from v1_0 to v1_1"
+
+echo % cvs rlog output
+filterpath cvscall -q rlog proj | egrep '^(RCS file|revision)'
+
+echo % convert to hg
+cd ..
+filterpath hg convert proj proj.hg
+
+echo % hg log output
+hg -R proj.hg log --template "{rev} {desc}\n"
