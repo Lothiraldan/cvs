@@ -252,10 +252,9 @@ def matchall(repo):
 def matchfiles(repo, files):
     return _match.exact(repo.root, repo.getcwd(), files)
 
-def findrenames(repo, added=None, removed=None, threshold=0.5):
+def findrenames(repo, match=None, threshold=0.5):
     '''find renamed files -- yields (before, after, score) tuples'''
-    if added is None or removed is None:
-        added, removed = repo.status()[1:3]
+    added, removed = repo.status(match=match)[1:3]
     ctx = repo['.']
     for a in added:
         aa = repo.wread(a)
@@ -286,7 +285,6 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
     if similarity is None:
         similarity = float(opts.get('similarity') or 0)
     add, remove = [], []
-    mapping = {}
     audit_path = util.path_auditor(repo.root)
     m = match(repo, pats, opts)
     for abs in repo.walk(m):
@@ -300,23 +298,21 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
         exact = m.exact(abs)
         if good and abs not in repo.dirstate:
             add.append(abs)
-            mapping[abs] = rel, m.exact(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
         if repo.dirstate[abs] != 'r' and (not good or not util.lexists(target)
             or (os.path.isdir(target) and not os.path.islink(target))):
             remove.append(abs)
-            mapping[abs] = rel, exact
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('removing %s\n') % ((pats and rel) or abs))
     if not dry_run:
         repo.remove(remove)
         repo.add(add)
     if similarity > 0:
-        for old, new, score in findrenames(repo, add, remove, similarity):
-            oldrel, oldexact = mapping[old]
-            newrel, newexact = mapping[new]
+        for old, new, score in findrenames(repo, m, similarity):
+            oldexact, newexact = m.exact(old), m.exact(new)
             if repo.ui.verbose or not oldexact or not newexact:
+                oldrel, newrel = m.rel(old), m.rel(new)
                 repo.ui.status(_('recording removal of %s as rename to %s '
                                  '(%d%% similar)\n') %
                                (oldrel, newrel, score * 100))
