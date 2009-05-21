@@ -1,0 +1,57 @@
+% create cvs repository with one project
+cvs -f -d *REPO* init
+cvs -f -q co proj
+% create file1 on the trunk
+cvs -f -Q add file1
+cvs -f ci -madd file1 on trunk file1
+% create two branches
+cvs -f -q tag -b v1_0
+T file1
+cvs -f -q tag -b v1_1
+T file1
+% create file2 on branch v1_0
+cvs -f -q up -rv1_0
+cvs -f -Q add file2
+cvs -f ci -madd file2 on branch v1_0 file2
+% create file3, file4 on branch v1_1
+cvs -f -Q up -rv1_1
+cvs -f -Q add file3 file4
+cvs -f ci -madd file3, file4 on branch v1_1 file3 file4
+% merge file2 from v1_0 to v1_1
+cvs -f -q up -jv1_0
+U file2
+cvs -f ci -mmerge file2 from v1_0 to v1_1
+% cvs rlog output
+RCS file: *REPO*/proj/file1,v
+revision 1.1
+RCS file: *REPO*/proj/Attic/file2,v
+revision 1.1
+revision 1.1.4.2
+revision 1.1.4.1
+revision 1.1.2.1
+RCS file: *REPO*/proj/Attic/file3,v
+revision 1.1
+revision 1.1.2.1
+RCS file: *REPO*/proj/Attic/file4,v
+revision 1.1
+revision 1.1.2.1
+% convert to hg
+initializing destination proj.hg repository
+using builtin cvsps
+collecting CVS rlog
+9 log entries
+creating changesets
+4 changeset entries
+connecting to *REPO*
+scanning source...
+sorting...
+converting...
+3 add file1 on trunk
+2 add file2 on branch v1_0
+1 add file3, file4 on branch v1_1
+0 merge file2 from v1_0 to v1_1
+% hg log output
+3 merge file2 from v1_0 to v1_1
+2 add file3, file4 on branch v1_1
+1 add file2 on branch v1_0
+0 add file1 on trunk
