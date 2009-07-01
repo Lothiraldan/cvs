@@ -265,14 +265,15 @@ def matchall(repo):
 def matchfiles(repo, files):
     return _match.exact(repo.root, repo.getcwd(), files)
 
-def findrenames(repo, match=None, threshold=0.5):
+def findrenames(repo, added, removed, threshold):
     '''find renamed files -- yields (before, after, score) tuples'''
-    added, removed = repo.status(match=match)[1:3]
     ctx = repo['.']
     for a in added:
         aa = repo.wread(a)
         bestname, bestscore = None, threshold
         for r in removed:
+            if r not in ctx:
+                continue
             rr = ctx.filectx(r).data()
 
             # bdiff.blocks() returns blocks of matching lines
@@ -297,7 +298,8 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
         dry_run = opts.get('dry_run')
     if similarity is None:
         similarity = float(opts.get('similarity') or 0)
-    add, remove = [], []
+    # we'd use status here, except handling of symlinks and ignore is tricky
+    added, unknown, deleted, removed = [], [], [], []
     audit_path = util.path_auditor(repo.root)
     m = match(repo, pats, opts)
     for abs in repo.walk(m):
@@ -310,19 +312,25 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
         rel = m.rel(abs)
         exact = m.exact(abs)
         if good and abs not in repo.dirstate:
-            add.append(abs)
+            unknown.append(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        if repo.dirstate[abs] != 'r' and (not good or not util.lexists(target)
+        elif repo.dirstate[abs] != 'r' and (not good or not util.lexists(target)
             or (os.path.isdir(target) and not os.path.islink(target))):
-            remove.append(abs)
+            deleted.append(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('removing %s\n') % ((pats and rel) or abs))
+        # for finding renames
+        elif repo.dirstate[abs] == 'r':
+            removed.append(abs)
+        elif repo.dirstate[abs] == 'a':
+            added.append(abs)
     if not dry_run:
-        repo.remove(remove)
-        repo.add(add)
+        repo.remove(deleted)
+        repo.add(unknown)
     if similarity > 0:
-        for old, new, score in findrenames(repo, m, similarity):
+        for old, new, score in findrenames(repo, added + unknown,
+                                           removed + deleted, similarity):
             if repo.ui.verbose or not m.exact(old) or not m.exact(new):
                 repo.ui.status(_('recording removal of %s as rename to %s '
                                  '(%d%% similar)\n') %
@@ -1201,12 +1209,12 @@ def commit(ui, repo, commitfunc, pats, opts):
 
     return commitfunc(ui, repo, message, match(repo, pats, opts), opts)
 
-def commiteditor(repo, ctx):
+def commiteditor(repo, ctx, subs):
     if ctx.description():
         return ctx.description()
-    return commitforceeditor(repo, ctx)
+    return commitforceeditor(repo, ctx, subs)
 
-def commitforceeditor(repo, ctx):
+def commitforceeditor(repo, ctx, subs):
     edittext = []
     modified, added, removed = ctx.modified(), ctx.added(), ctx.removed()
     if ctx.description():
@@ -1223,6 +1231,7 @@ def commitforceeditor(repo, ctx):
     if ctx.branch():
         edittext.append(_("HG: branch '%s'")
                         % encoding.tolocal(ctx.branch()))
+    edittext.extend([_("HG: subrepo %s") % s for s in subs])
     edittext.extend([_("HG: added %s") % f for f in added])
     edittext.extend([_("HG: changed %s") % f for f in modified])
     edittext.extend([_("HG: removed %s") % f for f in removed])

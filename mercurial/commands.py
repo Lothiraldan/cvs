@@ -419,7 +419,8 @@ def branch(ui, repo, label=None, **opts):
     the parent of the working directory, negating a previous branch
     change.
 
-    Use the command 'hg update' to switch to an existing branch.
+    Use the command 'hg update' to switch to an existing branch. Use
+    'hg commit --close-branch' to mark this branch as closed.
     """
 
     if opts.get('clean'):
@@ -436,16 +437,19 @@ def branch(ui, repo, label=None, **opts):
     else:
         ui.write("%s\n" % encoding.tolocal(repo.dirstate.branch()))
 
-def branches(ui, repo, active=False):
+def branches(ui, repo, active=False, closed=False):
     """list repository named branches
 
     List the repository's named branches, indicating which ones are
-    inactive. If -a/--active is specified, only show active branches.
+    inactive. If -c/--closed is specified, also list branches which have
+    been marked closed (see hg commit --close-branch).
 
-    A branch is considered active if it contains repository heads.
+    If -a/--active is specified, only show active branches. A branch
+    is considered active if it contains repository heads.
 
     Use the command 'hg update' to switch to an existing branch.
     """
+
     hexfunc = ui.debugflag and hex or short
     activebranches = [encoding.tolocal(repo[n].branch())
                             for n in repo.heads()]
@@ -466,6 +470,8 @@ def branches(ui, repo, active=False):
                 if isactive:
                     notice = ''
                 elif hn not in repo.branchheads(tag, closed=False):
+                    if not closed:
+                        continue
                     notice = ' (closed)'
                 else:
                     notice = ' (inactive)'
@@ -659,6 +665,7 @@ def commit(ui, repo, *pats, **opts):
 
     node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
     if not node:
+        ui.status(_("nothing changed\n"))
         return
     cl = repo.changelog
     rev = cl.rev(node)
@@ -1371,7 +1378,8 @@ def heads(ui, repo, *branchrevs, **opts):
     any descendants on the same branch. A branch head could be a true head
     or it could be the last changeset on a branch before a new branch
     was created. If none of the branch heads are true heads, the branch
-    is considered inactive.
+    is considered inactive. If -c/--closed is specified, also show branch
+    heads marked closed (see hg commit --close-branch).
 
     If STARTREV is specified only those heads (or branch heads) that
     are descendants of STARTREV will be displayed.
@@ -3205,7 +3213,9 @@ table = {
     "branches":
         (branches,
          [('a', 'active', False,
-           _('show only branches that have unmerged heads'))],
+           _('show only branches that have unmerged heads')),
+          ('c', 'closed', False,
+           _('show normal and closed heads'))],
          _('[-a]')),
     "bundle":
         (bundle,
