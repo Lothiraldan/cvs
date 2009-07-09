@@ -12,6 +12,7 @@ U src/b/c
 % commit a new revision changing b/c
 checking in src/b/c,v
 % convert fresh repo
+warning: support for external cvsps is deprecated and will be removed in Mercurial 1.4
 initializing destination src-hg repository
 connecting to cvsrepo
 scanning source...
@@ -25,6 +26,7 @@ a
 c
 c
 % convert fresh repo with --filemap
+warning: support for external cvsps is deprecated and will be removed in Mercurial 1.4
 initializing destination src-filemap repository
 connecting to cvsrepo
 scanning source...
@@ -32,6 +34,7 @@ sorting...
 converting...
 2 Initial revision
 1 import
+filtering out empty revision
 rolling back last transaction
 0 ci0
 updating tags
@@ -44,6 +47,7 @@ c
 checking in src/a,v
 checking in src/b/c,v
 % convert again
+warning: support for external cvsps is deprecated and will be removed in Mercurial 1.4
 connecting to cvsrepo
 scanning source...
 sorting...
@@ -55,6 +59,7 @@ c
 c
 c
 % convert again with --filemap
+warning: support for external cvsps is deprecated and will be removed in Mercurial 1.4
 connecting to cvsrepo
 scanning source...
 sorting...
@@ -73,6 +78,7 @@ T a
 T b/c
 checking in src/b/c,v
 % convert again
+warning: support for external cvsps is deprecated and will be removed in Mercurial 1.4
 connecting to cvsrepo
 scanning source...
 sorting...
@@ -82,6 +88,7 @@ a
 c
 d
 % convert again with --filemap
+warning: support for external cvsps is deprecated and will be removed in Mercurial 1.4
 connecting to cvsrepo
 scanning source...
 sorting...

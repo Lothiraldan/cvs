@@ -30,15 +30,15 @@ def recode(s):
         return s.decode('utf-8').encode(orig_encoding, 'replace')
 
 source_converters = [
-    ('cvs', convert_cvs),
-    ('git', convert_git),
-    ('svn', svn_source),
-    ('hg', mercurial_source),
-    ('darcs', darcs_source),
-    ('mtn', monotone_source),
-    ('gnuarch', gnuarch_source),
-    ('bzr', bzr_source),
-    ('p4', p4_source),
+    ('cvs', convert_cvs, 'branchsort'),
+    ('git', convert_git, 'branchsort'),
+    ('svn', svn_source, 'branchsort'),
+    ('hg', mercurial_source, 'sourcesort'),
+    ('darcs', darcs_source, 'branchsort'),
+    ('mtn', monotone_source, 'branchsort'),
+    ('gnuarch', gnuarch_source, 'branchsort'),
+    ('bzr', bzr_source, 'branchsort'),
+    ('p4', p4_source, 'branchsort'),
     ]
 
 sink_converters = [
@@ -48,10 +48,10 @@ sink_converters = [
 
 def convertsource(ui, path, type, rev):
     exceptions = []
-    for name, source in source_converters:
+    for name, source, sortmode in source_converters:
         try:
             if not type or name == type:
-                return source(ui, path, rev)
+                return source(ui, path, rev), sortmode
         except (NoRepo, MissingTool), inst:
             exceptions.append(inst)
     if not ui.quiet:
@@ -79,6 +79,9 @@ class converter(object):
         self.authors = {}
         self.authorfile = None
 
+        # Record converted revisions persistently: maps source revision
+        # ID to target revision ID (both strings).  (This is how
+        # incremental conversions work.)
         self.map = mapfile(ui, revmapfile)
 
         # Read first the dst author map if any
@@ -91,17 +94,18 @@ class converter(object):
             self.authorfile = self.dest.authorfile()
 
         self.splicemap = mapfile(ui, opts.get('splicemap'))
+        self.branchmap = mapfile(ui, opts.get('branchmap'))
 
     def walktree(self, heads):
         '''Return a mapping that identifies the uncommitted parents of every
         uncommitted changeset.'''
         visit = heads
-        known = {}
+        known = set()
         parents = {}
         while visit:
             n = visit.pop(0)
             if n in known or n in self.map: continue
-            known[n] = 1
+            known.add(n)
             commit = self.cachecommit(n)
             parents[n] = []
             for p in commit.parents:
@@ -110,34 +114,70 @@ class converter(object):
 
         return parents
 
-    def toposort(self, parents):
+    def toposort(self, parents, sortmode):
         '''Return an ordering such that every uncommitted changeset is
         preceeded by all its uncommitted ancestors.'''
-        visit = parents.keys()
-        seen = {}
-        children = {}
-        actives = []
 
-        while visit:
-            n = visit.pop(0)
-            if n in seen: continue
-            seen[n] = 1
-            # Ensure that nodes without parents are present in the 'children'
-            # mapping.
-            children.setdefault(n, [])
-            hasparent = False
-            for p in parents[n]:
-                if not p in self.map:
-                    visit.append(p)
-                    hasparent = True
-                children.setdefault(p, []).append(n)
-            if not hasparent:
-                actives.append(n)
+        def mapchildren(parents):
+            """Return a (children, roots) tuple where 'children' maps parent
+            revision identifiers to children ones, and 'roots' is the list of
+            revisions without parents. 'parents' must be a mapping of revision
+            identifier to its parents ones.
+            """
+            visit = parents.keys()
+            seen = set()
+            children = {}
+            roots = []
 
-        del seen
-        del visit
+            while visit:
+                n = visit.pop(0)
+                if n in seen:
+                    continue
+                seen.add(n)
+                # Ensure that nodes without parents are present in the
+                # 'children' mapping.
+                children.setdefault(n, [])
+                hasparent = False
+                for p in parents[n]:
+                    if not p in self.map:
+                        visit.append(p)
+                        hasparent = True
+                    children.setdefault(p, []).append(n)
+                if not hasparent:
+                    roots.append(n)
 
-        if self.opts.get('datesort'):
+            return children, roots
+
+        # Sort functions are supposed to take a list of revisions which
+        # can be converted immediately and pick one
+
+        def makebranchsorter():
+            """If the previously converted revision has a child in the
+            eligible revisions list, pick it. Return the list head
+            otherwise. Branch sort attempts to minimize branch
+            switching, which is harmful for Mercurial backend
+            compression.
+            """
+            prev = [None]
+            def picknext(nodes):
+                next = nodes[0]
+                for n in nodes:
+                    if prev[0] in parents[n]:
+                        next = n
+                        break
+                prev[0] = next
+                return next
+            return picknext
+
+        def makesourcesorter():
+            """Source specific sort."""
+            keyfn = lambda n: self.commitcache[n].sortkey
+            def picknext(nodes):
+                return sorted(nodes, key=keyfn)[0]
+            return picknext
+
+        def makedatesorter():
+            """Sort revisions by date."""
             dates = {}
             def getdate(n):
                 if n not in dates:
@@ -146,18 +186,19 @@ class converter(object):
 
             def picknext(nodes):
                 return min([(getdate(n), n) for n in nodes])[1]
+
+            return picknext
+
+        if sortmode == 'branchsort':
+            picknext = makebranchsorter()
+        elif sortmode == 'datesort':
+            picknext = makedatesorter()
+        elif sortmode == 'sourcesort':
+            picknext = makesourcesorter()
         else:
-            prev = [None]
-            def picknext(nodes):
-                # Return the first eligible child of the previously converted
-                # revision, or any of them.
-                next = nodes[0]
-                for n in nodes:
-                    if prev[0] in parents[n]:
-                        next = n
-                        break
-                prev[0] = next
-                return next
+            raise util.Abort(_('unknown sort mode: %s') % sortmode)
+
+        children, actives = mapchildren(parents)
 
         s = []
         pendings = {}
@@ -225,6 +266,7 @@ class converter(object):
     def cachecommit(self, rev):
         commit = self.source.getcommit(rev)
         commit.author = self.authors.get(commit.author, commit.author)
+        commit.branch = self.branchmap.get(commit.branch, commit.branch)
         self.commitcache[rev] = commit
         return commit
 
@@ -255,12 +297,12 @@ class converter(object):
             parents = [self.map.get(p, p) for p in parents]
         except KeyError:
             parents = [b[0] for b in pbranches]
-        newnode = self.dest.putcommit(files, copies, parents, commit, self.source)
+        newnode = self.dest.putcommit(files, copies, parents, commit,
+                                      self.source, self.map)
         self.source.converted(rev, newnode)
         self.map[rev] = newnode
 
-    def convert(self):
-
+    def convert(self, sortmode):
         try:
             self.source.before()
             self.dest.before()
@@ -269,7 +311,7 @@ class converter(object):
             heads = self.source.getheads()
             parents = self.walktree(heads)
             self.ui.status(_("sorting...\n"))
-            t = self.toposort(parents)
+            t = self.toposort(parents, sortmode)
             num = len(t)
             c = None
 
@@ -323,12 +365,20 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     destc = convertsink(ui, dest, opts.get('dest_type'))
 
     try:
-        srcc = convertsource(ui, src, opts.get('source_type'),
-                             opts.get('rev'))
+        srcc, defaultsort = convertsource(ui, src, opts.get('source_type'),
+                                          opts.get('rev'))
     except Exception:
         for path in destc.created:
             shutil.rmtree(path, True)
         raise
+
+    sortmodes = ('branchsort', 'datesort', 'sourcesort')
+    sortmode = [m for m in sortmodes if opts.get(m)]
+    if len(sortmode) > 1:
+        raise util.Abort(_('more than one sort mode specified'))
+    sortmode = sortmode and sortmode[0] or defaultsort
+    if sortmode == 'sourcesort' and not srcc.hasnativeorder():
+        raise util.Abort(_('--sourcesort is not supported by this data source'))
 
     fmap = opts.get('filemap')
     if fmap:
@@ -342,5 +392,5 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
             revmapfile = os.path.join(destc, "map")
 
     c = converter(ui, srcc, destc, revmapfile, opts)
-    c.convert()
+    c.convert(sortmode)
 

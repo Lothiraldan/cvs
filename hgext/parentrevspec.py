@@ -5,15 +5,14 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''\
-use suffixes to refer to ancestor revisions
+'''interpret suffixes to refer to ancestor revisions
 
 This extension allows you to use git-style suffixes to refer to the
 ancestors of a specific revision.
 
 For example, if you can refer to a revision as "foo", then:
 
-- foo^N = Nth parent of foo:
+- foo^N = Nth parent of foo
   foo^0 = foo
   foo^1 = first parent of foo
   foo^2 = second parent of foo

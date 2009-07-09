@@ -7,7 +7,7 @@
 
 from node import nullid, nullrev, short, hex
 from i18n import _
-import ancestor, bdiff, error, util
+import ancestor, bdiff, error, util, subrepo
 import os, errno
 
 propertycache = util.propertycache
@@ -73,6 +73,10 @@ class changectx(object):
             p = p[:-1]
         return [changectx(self._repo, x) for x in p]
 
+    @propertycache
+    def substate(self):
+        return subrepo.state(self)
+
     def __contains__(self, key):
         return key in self._manifest
 
@@ -85,6 +89,7 @@ class changectx(object):
 
     def changeset(self): return self._changeset
     def manifest(self): return self._manifest
+    def manifestnode(self): return self._changeset[0]
 
     def rev(self): return self._rev
     def node(self): return self._node
@@ -100,6 +105,14 @@ class changectx(object):
     def parents(self):
         """return contexts for each parent changeset"""
         return self._parents
+
+    def p1(self):
+        return self._parents[0]
+
+    def p2(self):
+        if len(self._parents) == 2:
+            return self._parents[1]
+        return changectx(self._repo, -1)
 
     def children(self):
         """return contexts for each child changeset"""
@@ -155,21 +168,24 @@ class changectx(object):
         return changectx(self._repo, n)
 
     def walk(self, match):
-        fdict = dict.fromkeys(match.files())
+        fset = set(match.files())
         # for dirstate.walk, files=['.'] means "walk the whole tree".
         # follow that here, too
-        fdict.pop('.', None)
+        fset.discard('.')
         for fn in self:
-            for ffn in fdict:
+            for ffn in fset:
                 # match if the file is the exact name or a directory
                 if ffn == fn or fn.startswith("%s/" % ffn):
-                    del fdict[ffn]
+                    fset.remove(ffn)
                     break
             if match(fn):
                 yield fn
-        for fn in sorted(fdict):
+        for fn in sorted(fset):
             if match.bad(fn, 'No such file in rev ' + str(self)) and match(fn):
                 yield fn
+
+    def sub(self, path):
+        return subrepo.subrepo(self, path)
 
 class filectx(object):
     """A filecontext object makes access to data related to a particular
@@ -435,7 +451,7 @@ class filectx(object):
 
         # prime the ancestor cache for the working directory
         for c in (self, fc2):
-            if c._filerev == None:
+            if c._filerev is None:
                 pl = [(n.path(), n.filenode()) for n in c.parents()]
                 acache[(c._path, None)] = pl
 
@@ -609,6 +625,13 @@ class workingctx(changectx):
     def walk(self, match):
         return sorted(self._repo.dirstate.walk(match, True, False))
 
+    def dirty(self, missing=False):
+        "check whether a working directory is modified"
+
+        return (self.p2() or self.branch() != self.p1().branch() or
+                self.modified() or self.added() or self.removed() or
+                (missing and self.deleted()))
+
 class workingfilectx(filectx):
     """A workingfilectx object makes access to data related to a particular
        file in the working directory convenient."""
@@ -629,49 +652,36 @@ class workingfilectx(filectx):
     def _changectx(self):
         return workingctx(self._repo)
 
-    @propertycache
-    def _repopath(self):
-        return self._repo.dirstate.copied(self._path) or self._path
-
-    @propertycache
-    def _filelog(self):
-        return self._repo.file(self._repopath)
-
     def __nonzero__(self):
         return True
 
     def __str__(self):
         return "%s@%s" % (self.path(), self._changectx)
 
-    def filectx(self, fileid):
-        '''opens an arbitrary revision of the file without
-        opening a new filelog'''
-        return filectx(self._repo, self._repopath, fileid=fileid,
-                       filelog=self._filelog)
-
-    def rev(self):
-        if '_changectx' in self.__dict__:
-            return self._changectx.rev()
-        return self._filelog.linkrev(self._filerev)
-
     def data(self): return self._repo.wread(self._path)
     def renamed(self):
-        rp = self._repopath
-        if rp == self._path:
+        rp = self._repo.dirstate.copied(self._path)
+        if not rp:
             return None
         return rp, self._changectx._parents[0]._manifest.get(rp, nullid)
 
     def parents(self):
         '''return parent filectxs, following copies if necessary'''
-        p = self._path
-        rp = self._repopath
-        pcl = self._changectx._parents
+        def filenode(ctx, path):
+            return ctx._manifest.get(path, nullid)
+
+        path = self._path
         fl = self._filelog
-        pl = [(rp, pcl[0]._manifest.get(rp, nullid), fl)]
-        if len(pcl) > 1:
-            if rp != p:
-                fl = None
-            pl.append((p, pcl[1]._manifest.get(p, nullid), fl))
+        pcl = self._changectx._parents
+        renamed = self.renamed()
+
+        if renamed:
+            pl = [renamed + (None,)]
+        else:
+            pl = [(path, filenode(pcl[0], path), fl)]
+
+        for pc in pcl[1:]:
+            pl.append((path, filenode(pc, path), fl))
 
         return [filectx(self._repo, p, fileid=n, filelog=l)
                 for p,n,l in pl if n != nullid]
@@ -747,6 +757,12 @@ class memctx(object):
     def __nonzero__(self):
         return True
 
+    def __getitem__(self, key):
+        return self.filectx(key)
+
+    def p1(self): return self._parents[0]
+    def p2(self): return self._parents[1]
+
     def user(self): return self._user or self._repo.ui.username()
     def date(self): return self._date
     def description(self): return self._text
@@ -797,4 +813,3 @@ class memfilectx(object):
     def isexec(self): return 'x' in self._flags
     def islink(self): return 'l' in self._flags
     def renamed(self): return self._copied
-

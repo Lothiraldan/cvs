@@ -5,13 +5,13 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''move sets of revisions to a different ancestor
+'''command to move sets of revisions to a different ancestor
 
 This extension lets you rebase changesets in an existing Mercurial
 repository.
 
 For more information:
-http://www.selenic.com/mercurial/wiki/index.cgi/RebaseProject
+http://mercurial.selenic.com/wiki/RebaseProject
 '''
 
 from mercurial import util, repair, merge, cmdutil, commands, error
@@ -51,7 +51,8 @@ def rebase(ui, repo, **opts):
     """
     originalwd = target = None
     external = nullrev
-    state = skipped = {}
+    state = {}
+    skipped = set()
 
     lock = wlock = None
     try:
@@ -95,7 +96,7 @@ def rebase(ui, repo, **opts):
             if result:
                 originalwd, target, state, external = result
             else: # Empty state built, nothing to rebase
-                repo.ui.status(_('nothing to rebase\n'))
+                ui.status(_('nothing to rebase\n'))
                 return
 
         if keepbranchesf:
@@ -132,7 +133,7 @@ def rebase(ui, repo, **opts):
                 ui.warn(_("warning: new changesets detected on source branch, "
                                                         "not stripping\n"))
             else:
-                repair.strip(repo.ui, repo, repo[min(state)].node(), "strip")
+                repair.strip(ui, repo, repo[min(state)].node(), "strip")
 
         clearstatus(repo)
         ui.status(_("rebase completed\n"))
@@ -143,7 +144,7 @@ def rebase(ui, repo, **opts):
     finally:
         release(lock, wlock)
 
-def concludenode(repo, rev, p1, p2, state, collapse, last=False, skipped={},
+def concludenode(repo, rev, p1, p2, state, collapse, last=False, skipped=None,
                  extrafn=None):
     """Skip commit if collapsing has been required and rev is not the last
     revision, commit otherwise
@@ -155,8 +156,10 @@ def concludenode(repo, rev, p1, p2, state, collapse, last=False, skipped={},
 
     repo.dirstate.setparents(repo[p1].node(), repo[p2].node())
 
+    if skipped is None:
+        skipped = set()
+
     # Commit, record the old nodeid
-    m, a, r = repo.status()[:3]
     newrev = nullrev
     try:
         if last:
@@ -171,11 +174,8 @@ def concludenode(repo, rev, p1, p2, state, collapse, last=False, skipped={},
         extra = {'rebase_source': repo[rev].hex()}
         if extrafn:
             extrafn(repo[rev], extra)
-        newrev = repo.commit(m+a+r,
-                            text=commitmsg,
-                            user=repo[rev].user(),
-                            date=repo[rev].date(),
-                            extra=extra)
+        newrev = repo.commit(text=commitmsg, user=repo[rev].user(),
+                             date=repo[rev].date(), extra=extra)
         repo.dirstate.setbranch(repo[newrev].branch())
         return newrev
     except util.Abort:
@@ -234,7 +234,7 @@ def rebasenode(repo, rev, target, state, skipped, targetancestors, collapse,
         if not collapse:
             repo.ui.note(_('no changes, revision %d skipped\n') % rev)
             repo.ui.debug(_('next revision set to %s\n') % p1)
-            skipped[rev] = True
+            skipped.add(rev)
         state[rev] = p1
 
 def defineparents(repo, rev, target, state, targetancestors):

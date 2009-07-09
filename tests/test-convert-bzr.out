@@ -35,6 +35,19 @@ converting...
 b
 d
 f
+% convert from lightweight checkout
+initializing destination source-light-hg repository
+warning: lightweight checkouts may cause conversion failures, try with a regular branch instead.
+scanning source...
+sorting...
+converting...
+1 Initial add: a, c, e
+0 rename a into b, create a, rename c into d
+% lightweight manifest
+a
+b
+d
+f
 % compare timestamps
 good: hg timestamps match bzr timestamps
 % merge
@@ -72,3 +85,6 @@ converting...
 755 * newprog
 644   program
 644 @ syma
+% test the symlinks can be recreated
+5 files updated, 0 files merged, 0 files removed, 0 files unresolved
+a

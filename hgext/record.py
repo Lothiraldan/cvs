@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''interactive change selection during commit or qrefresh'''
+'''commands to interactively select changes for commit/qrefresh'''
 
 from mercurial.i18n import gettext, _
 from mercurial import cmdutil, commands, extensions, hg, mdiff, patch
@@ -251,7 +251,7 @@ def filterpatch(ui, chunks):
     """Interactively filter patch chunks into applied-only chunks"""
     chunks = list(chunks)
     chunks.reverse()
-    seen = {}
+    seen = set()
     def consumefile():
         """fetch next portion from chunks until a 'header' is seen
         NB: header == new-file mark
@@ -321,7 +321,7 @@ def filterpatch(ui, chunks):
             if hdr in seen:
                 consumefile()
                 continue
-            seen[hdr] = True
+            seen.add(hdr)
             if resp_all[0] is None:
                 chunk.pretty(ui)
             r = prompt(_('examine changes to %s?') %
@@ -385,7 +385,8 @@ def record(ui, repo, *pats, **opts):
 def qrecord(ui, repo, patch, *pats, **opts):
     '''interactively record a new patch
 
-    see 'hg help qnew' & 'hg help record' for more information and usage
+    See 'hg help qnew' & 'hg help record' for more information and
+    usage.
     '''
 
     try:
@@ -480,7 +481,8 @@ def dorecord(ui, repo, committer, *pats, **opts):
                     ui.debug(_('applying patch\n'))
                     ui.debug(fp.getvalue())
                     pfiles = {}
-                    patch.internalpatch(fp, ui, 1, repo.root, files=pfiles)
+                    patch.internalpatch(fp, ui, 1, repo.root, files=pfiles,
+                                        eolmode=None)
                     patch.updatedir(ui, repo, pfiles)
                 except patch.PatchError, err:
                     s = str(err)

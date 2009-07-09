@@ -35,13 +35,14 @@ foo
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
 </div>
 <ul>
 <li><a href="/shortlog">log</a></li>
 <li><a href="/graph">graph</a></li>
 <li><a href="/tags">tags</a></li>
+<li><a href="/branches">branches</a></li>
 </ul>
 </div>
 
@@ -104,13 +105,14 @@ error: bork@2ef0ac749a14: not found in manifest
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
 </div>
 <ul>
 <li><a href="/shortlog">log</a></li>
 <li><a href="/graph">graph</a></li>
 <li><a href="/tags">tags</a></li>
+<li><a href="/branches">branches</a></li>
 </ul>
 </div>
 

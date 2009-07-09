@@ -44,7 +44,7 @@ def get_cmd(cmd):
     s = 'hg ' + cmds[0]
     if len(attr) > 2:
         if not attr[2].startswith('hg'):
-            s += attr[2]
+            s += ' ' + attr[2]
         else:
             s = attr[2]
     d['synopsis'] = s
@@ -103,7 +103,9 @@ def show_doc(ui):
         underlined(gettext(section).upper())
         if callable(doc):
             doc = doc()
-        ui.write(gettext(doc))
+        else:
+            doc = gettext(doc)
+        ui.write(doc)
         ui.write("\n")
 
 if __name__ == "__main__":

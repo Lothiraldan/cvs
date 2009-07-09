@@ -34,7 +34,9 @@ class logentry(object):
         .revision  - revision number as tuple
         .tags      - list of tags on the file
         .synthetic - is this a synthetic "file ... added on ..." revision?
-        .mergepoint- the branch that has been merged from (if present in rlog output)
+        .mergepoint- the branch that has been merged from
+                     (if present in rlog output)
+        .branchpoints- the branches that start at the current entry
     '''
     def __init__(self, **entries):
         self.__dict__.update(entries)
@@ -105,14 +107,18 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
     re_00 = re.compile('RCS file: (.+)$')
     re_01 = re.compile('cvs \\[r?log aborted\\]: (.+)$')
     re_02 = re.compile('cvs (r?log|server): (.+)\n$')
-    re_03 = re.compile("(Cannot access.+CVSROOT)|(can't create temporary directory.+)$")
+    re_03 = re.compile("(Cannot access.+CVSROOT)|"
+                       "(can't create temporary directory.+)$")
     re_10 = re.compile('Working file: (.+)$')
     re_20 = re.compile('symbolic names:')
     re_30 = re.compile('\t(.+): ([\\d.]+)$')
     re_31 = re.compile('----------------------------$')
-    re_32 = re.compile('=============================================================================$')
+    re_32 = re.compile('======================================='
+                       '======================================$')
     re_50 = re.compile('revision ([\\d.]+)(\s+locked by:\s+.+;)?$')
-    re_60 = re.compile(r'date:\s+(.+);\s+author:\s+(.+);\s+state:\s+(.+?);(\s+lines:\s+(\+\d+)?\s+(-\d+)?;)?(.*mergepoint:\s+([^;]+);)?')
+    re_60 = re.compile(r'date:\s+(.+);\s+author:\s+(.+);\s+state:\s+(.+?);'
+                       r'(\s+lines:\s+(\+\d+)?\s+(-\d+)?;)?'
+                       r'(.*mergepoint:\s+([^;]+);)?')
     re_70 = re.compile('branches: (.+);$')
 
     file_added_re = re.compile(r'file [^/]+ was (initially )?added on branch')
@@ -282,7 +288,8 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
             if re_31.match(line):
                 state = 5
             else:
-                assert not re_32.match(line), _('must have at least some revisions')
+                assert not re_32.match(line), _('must have at least '
+                                                'some revisions')
 
         elif state == 5:
             # expecting revision number and possibly (ignored) lock indication
@@ -308,7 +315,9 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
             if len(d.split()) != 3:
                 # cvs log dates always in GMT
                 d = d + ' UTC'
-            e.date = util.parsedate(d, ['%y/%m/%d %H:%M:%S', '%Y/%m/%d %H:%M:%S', '%Y-%m-%d %H:%M:%S'])
+            e.date = util.parsedate(d, ['%y/%m/%d %H:%M:%S',
+                                        '%Y/%m/%d %H:%M:%S',
+                                        '%Y-%m-%d %H:%M:%S'])
             e.author = scache(match.group(2))
             e.dead = match.group(3).lower() == 'dead'
 
@@ -392,6 +401,19 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
             else:
                 e.branch = None
 
+            # find the branches starting from this revision
+            branchpoints = set()
+            for branch, revision in branchmap.iteritems():
+                revparts = tuple([int(i) for i in revision.split('.')])
+                if revparts[-2] == 0 and revparts[-1] % 2 == 0:
+                    # normal branch
+                    if revparts[:-2] == e.revision:
+                        branchpoints.add(branch)
+                elif revparts == (1,1,1): # vendor branch
+                    if revparts in e.branches:
+                        branchpoints.add(branch)
+            e.branchpoints = branchpoints
+
             log.append(e)
 
             if len(log) % 100 == 0:
@@ -443,7 +465,9 @@ class changeset(object):
         .parents   - list of one or two parent changesets
         .tags      - list of tags on this changeset
         .synthetic - from synthetic revision "file ... added on branch ..."
-        .mergepoint- the branch that has been merged from (if present in rlog output)
+        .mergepoint- the branch that has been merged from
+                     (if present in rlog output)
+        .branchpoints- the branches that start at the current entry
     '''
     def __init__(self, **entries):
         self.__dict__.update(entries)
@@ -463,30 +487,49 @@ def createchangeset(ui, log, fuzz=60, mergefrom=None, mergeto=None):
     listsort(log, key=lambda x:(x.comment, x.author, x.branch, x.date))
 
     changesets = []
-    files = {}
+    files = set()
     c = None
     for i, e in enumerate(log):
 
         # Check if log entry belongs to the current changeset or not.
+
+        # Since CVS is file centric, two different file revisions with
+        # different branchpoints should be treated as belonging to two
+        # different changesets (and the ordering is important and not
+        # honoured by cvsps at this point).
+        #
+        # Consider the following case:
+        # foo 1.1 branchpoints: [MYBRANCH]
+        # bar 1.1 branchpoints: [MYBRANCH, MYBRANCH2]
+        #
+        # Here foo is part only of MYBRANCH, but not MYBRANCH2, e.g. a
+        # later version of foo may be in MYBRANCH2, so foo should be the
+        # first changeset and bar the next and MYBRANCH and MYBRANCH2
+        # should both start off of the bar changeset. No provisions are
+        # made to ensure that this is, in fact, what happens.
         if not (c and
                   e.comment == c.comment and
                   e.author == c.author and
                   e.branch == c.branch and
+                  (not hasattr(e, 'branchpoints') or
+                    not hasattr (c, 'branchpoints') or
+                    e.branchpoints == c.branchpoints) and
                   ((c.date[0] + c.date[1]) <=
                    (e.date[0] + e.date[1]) <=
                    (c.date[0] + c.date[1]) + fuzz) and
                   e.file not in files):
             c = changeset(comment=e.comment, author=e.author,
                           branch=e.branch, date=e.date, entries=[],
-                          mergepoint=getattr(e, 'mergepoint', None))
+                          mergepoint=getattr(e, 'mergepoint', None),
+                          branchpoints=getattr(e, 'branchpoints', set()))
             changesets.append(c)
-            files = {}
+            files = set()
             if len(changesets) % 100 == 0:
                 t = '%d %s' % (len(changesets), repr(e.comment)[1:-1])
                 ui.status(util.ellipsis(t, 80) + '\n')
 
         c.entries.append(e)
-        files[e.file] = True
+        files.add(e.file)
         c.date = e.date       # changeset date is date of latest commit in it
 
     # Mark synthetic changesets
@@ -564,19 +607,17 @@ def createchangeset(ui, log, fuzz=60, mergefrom=None, mergeto=None):
 
     globaltags = {}
     for c in changesets:
-        tags = {}
         for e in c.entries:
             for tag in e.tags:
                 # remember which is the latest changeset to have this tag
                 globaltags[tag] = c
 
     for c in changesets:
-        tags = {}
+        tags = set()
         for e in c.entries:
-            for tag in e.tags:
-                tags[tag] = True
+            tags.update(e.tags)
         # remember tags only if this is the latest changeset to have it
-        c.tags = sorted([tag for tag in tags if globaltags[tag] is c])
+        c.tags = sorted(tag for tag in tags if globaltags[tag] is c)
 
     # Find parent changesets, handle {{mergetobranch BRANCHNAME}}
     # by inserting dummy changesets with two parents, and handle
@@ -606,8 +647,17 @@ def createchangeset(ui, log, fuzz=60, mergefrom=None, mergeto=None):
         if c.branch in branches:
             p = branches[c.branch]
         else:
-            for f in c.entries:
-                p = max(p, versions.get((f.rcs, f.parent), None))
+            # first changeset on a new branch
+            # the parent is a changeset with the branch in its
+            # branchpoints such that it is the latest possible
+            # commit without any intervening, unrelated commits.
+
+            for candidate in xrange(i):
+                if c.branch not in changesets[candidate].branchpoints:
+                    if p is not None:
+                        break
+                    continue
+                p = candidate
 
         c.parents = []
         if p is not None:
@@ -691,9 +741,10 @@ def createchangeset(ui, log, fuzz=60, mergefrom=None, mergeto=None):
 
 
 def debugcvsps(ui, *args, **opts):
-    '''Read CVS rlog for current directory or named path in repository, and
-    convert the log to changesets based on matching commit log entries and dates.'''
-
+    '''Read CVS rlog for current directory or named path in
+    repository, and convert the log to changesets based on matching
+    commit log entries and dates.
+    '''
     if opts["new_cache"]:
         cache = "write"
     elif opts["update_cache"]:
@@ -726,7 +777,8 @@ def debugcvsps(ui, *args, **opts):
 
         if opts["ancestors"]:
             if cs.branch not in branches and cs.parents and cs.parents[0].id:
-                ancestors[cs.branch] = changesets[cs.parents[0].id-1].branch, cs.parents[0].id
+                ancestors[cs.branch] = (changesets[cs.parents[0].id-1].branch,
+                                        cs.parents[0].id)
             branches[cs.branch] = cs.id
 
         # limit by branches
@@ -738,11 +790,15 @@ def debugcvsps(ui, *args, **opts):
             #       bug-for-bug compatibility with cvsps.
             ui.write('---------------------\n')
             ui.write('PatchSet %d \n' % cs.id)
-            ui.write('Date: %s\n' % util.datestr(cs.date, '%Y/%m/%d %H:%M:%S %1%2'))
+            ui.write('Date: %s\n' % util.datestr(cs.date,
+                                                 '%Y/%m/%d %H:%M:%S %1%2'))
             ui.write('Author: %s\n' % cs.author)
             ui.write('Branch: %s\n' % (cs.branch or 'HEAD'))
             ui.write('Tag%s: %s \n' % (['', 's'][len(cs.tags)>1],
                                   ','.join(cs.tags) or '(none)'))
+            branchpoints = getattr(cs, 'branchpoints', None)
+            if branchpoints:
+                ui.write('Branchpoints: %s \n' % ', '.join(branchpoints))
             if opts["parents"] and cs.parents:
                 if len(cs.parents)>1:
                     ui.write('Parents: %s\n' % (','.join([str(p.id) for p in cs.parents])))

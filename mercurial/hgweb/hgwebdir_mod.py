@@ -6,10 +6,10 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-import os
+import os, time
 from mercurial.i18n import _
-from mercurial import ui, hg, util, templater, templatefilters
-from mercurial import config, error, encoding
+from mercurial import ui, hg, util, templater
+from mercurial import error, encoding
 from common import ErrorResponse, get_mtime, staticfile, paritygen,\
                    get_contact, HTTP_OK, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
 from hgweb_mod import hgweb
@@ -19,72 +19,83 @@ import webutil
 def cleannames(items):
     return [(util.pconvert(name).strip('/'), path) for name, path in items]
 
+def findrepos(paths):
+    repos = {}
+    for prefix, root in cleannames(paths):
+        roothead, roottail = os.path.split(root)
+        # "foo = /bar/*" makes every subrepo of /bar/ to be
+        # mounted as foo/subrepo
+        # and "foo = /bar/**" also recurses into the subdirectories,
+        # remember to use it without working dir.
+        try:
+            recurse = {'*': False, '**': True}[roottail]
+        except KeyError:
+            repos[prefix] = root
+            continue
+        roothead = os.path.normpath(roothead)
+        for path in util.walkrepos(roothead, followsym=True, recurse=recurse):
+            path = os.path.normpath(path)
+            name = util.pconvert(path[len(roothead):]).strip('/')
+            if prefix:
+                name = prefix + '/' + name
+            repos[name] = path
+    return repos.items()
+
 class hgwebdir(object):
+    refreshinterval = 20
 
     def __init__(self, conf, baseui=None):
+        self.conf = conf
+        self.baseui = baseui
+        self.lastrefresh = 0
+        self.refresh()
 
-        if baseui:
-            self.ui = baseui.copy()
+    def refresh(self):
+        if self.lastrefresh + self.refreshinterval > time.time():
+            return
+
+        if self.baseui:
+            self.ui = self.baseui.copy()
         else:
             self.ui = ui.ui()
             self.ui.setconfig('ui', 'report_untrusted', 'off')
             self.ui.setconfig('ui', 'interactive', 'off')
 
-        self.motd = None
-        self.style = 'paper'
-        self.stripecount = 1
-        self.repos_sorted = ('name', False)
-        self._baseurl = None
+        if not isinstance(self.conf, (dict, list, tuple)):
+            map = {'paths': 'hgweb-paths'}
+            self.ui.readconfig(self.conf, remap=map, trust=True)
+            paths = self.ui.configitems('hgweb-paths')
+        elif isinstance(self.conf, (list, tuple)):
+            paths = self.conf
+        elif isinstance(self.conf, dict):
+            paths = self.conf.items()
 
-        if isinstance(conf, (list, tuple)):
-            self.repos = cleannames(conf)
-            self.repos_sorted = ('', False)
-        elif isinstance(conf, dict):
-            self.repos = sorted(cleannames(conf.items()))
-        else:
-            if isinstance(conf, config.config):
-                cp = conf
-            else:
-                cp = config.config()
-                cp.read(conf)
-            self.repos = []
-            self.motd = cp.get('web', 'motd')
-            self.style = cp.get('web', 'style', 'paper')
-            self.stripecount = cp.get('web', 'stripes', 1)
-            self._baseurl = cp.get('web', 'baseurl')
-            if 'paths' in cp:
-                paths = cleannames(cp.items('paths'))
-                for prefix, root in paths:
-                    roothead, roottail = os.path.split(root)
-                    # "foo = /bar/*" makes every subrepo of /bar/ to be
-                    # mounted as foo/subrepo
-                    # and "foo = /bar/**" does even recurse inside the
-                    # subdirectories, remember to use it without working dir.
-                    try:
-                        recurse = {'*': False, '**': True}[roottail]
-                    except KeyError:
-                        self.repos.append((prefix, root))
-                        continue
-                    roothead = os.path.normpath(roothead)
-                    for path in util.walkrepos(roothead, followsym=True,
-                                               recurse=recurse):
-                        path = os.path.normpath(path)
-                        name = util.pconvert(path[len(roothead):]).strip('/')
-                        if prefix:
-                            name = prefix + '/' + name
-                        self.repos.append((name, path))
-            for prefix, root in cp.items('collections'):
-                for path in util.walkrepos(root, followsym=True):
-                    repo = os.path.normpath(path)
-                    name = repo
-                    if name.startswith(prefix):
-                        name = name[len(prefix):]
-                    self.repos.append((name.lstrip(os.sep), repo))
-            self.repos.sort()
+        encoding.encoding = self.ui.config('web', 'encoding',
+                                           encoding.encoding)
+        self.motd = self.ui.config('web', 'motd')
+        self.style = self.ui.config('web', 'style', 'paper')
+        self.stripecount = self.ui.config('web', 'stripes', 1)
+        if self.stripecount:
+            self.stripecount = int(self.stripecount)
+        self._baseurl = self.ui.config('web', 'baseurl')
+
+        self.repos = findrepos(paths)
+        for prefix, root in self.ui.configitems('collections'):
+            prefix = util.pconvert(prefix)
+            for path in util.walkrepos(root, followsym=True):
+                repo = os.path.normpath(path)
+                name = util.pconvert(repo)
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+                self.repos.append((name.lstrip('/'), repo))
+
+        self.repos.sort()
+        self.lastrefresh = time.time()
 
     def run(self):
         if not os.environ.get('GATEWAY_INTERFACE', '').startswith("CGI/1."):
-            raise RuntimeError("This function is only intended to be called while running as a CGI script.")
+            raise RuntimeError("This function is only intended to be "
+                               "called while running as a CGI script.")
         import mercurial.hgweb.wsgicgi as wsgicgi
         wsgicgi.launch(self)
 
@@ -115,9 +126,9 @@ class hgwebdir(object):
         return False
 
     def run_wsgi(self, req):
-
         try:
             try:
+                self.refresh()
 
                 virtual = req.env.get("PATH_INFO", "").strip('/')
                 tmpl = self.templater(req)
@@ -185,6 +196,7 @@ class hgwebdir(object):
                     yield {"type" : i[0], "extension": i[1],
                            "node": nodeid, "url": url}
 
+        sortdefault = 'name', False
         def entries(sortcolumn="", descending=False, subdir="", **map):
             rows = []
             parity = paritygen(self.stripecount)
@@ -234,8 +246,7 @@ class hgwebdir(object):
                            lastchange=d,
                            lastchange_sort=d[1]-d[0],
                            archives=archivelist(u, "tip", url))
-                if (not sortcolumn
-                    or (sortcolumn, descending) == self.repos_sorted):
+                if (not sortcolumn or (sortcolumn, descending) == sortdefault):
                     # fast path for unsorted output
                     row['parity'] = parity.next()
                     yield row
@@ -249,8 +260,9 @@ class hgwebdir(object):
                     row['parity'] = parity.next()
                     yield row
 
+        self.refresh()
         sortable = ["name", "description", "contact", "lastchange"]
-        sortcolumn, descending = self.repos_sorted
+        sortcolumn, descending = sortdefault
         if 'sort' in req.form:
             sortcolumn = req.form['sort'][0]
             descending = sortcolumn.startswith('-')
@@ -264,6 +276,7 @@ class hgwebdir(object):
                             and "-" or "", column))
                 for column in sortable]
 
+        self.refresh()
         if self._baseurl is not None:
             req.env['SCRIPT_NAME'] = self._baseurl
 
@@ -308,7 +321,7 @@ class hgwebdir(object):
 
         style = 'style' in req.form and req.form['style'][0] or self.style
         mapfile = templater.stylemap(style)
-        tmpl = templater.templater(mapfile, templatefilters.filters,
+        tmpl = templater.templater(mapfile,
                                    defaults={"header": header,
                                              "footer": footer,
                                              "motd": motd,

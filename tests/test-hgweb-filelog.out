@@ -106,13 +106,14 @@ diff -r 000000000000 -r 6563da9dcf87 b
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" alt="mercurial" /></a>
 </div>
 <ul>
 <li><a href="/shortlog/01de2d66a28d">log</a></li>
 <li><a href="/graph/01de2d66a28d">graph</a></li>
 <li><a href="/tags">tags</a></li>
+<li><a href="/branches">branches</a></li>
 </ul>
 <ul>
 <li><a href="/rev/01de2d66a28d">changeset</a></li>
@@ -188,13 +189,14 @@ files, or words in the commit message</div>
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" alt="mercurial" /></a>
 </div>
 <ul>
 <li><a href="/shortlog/01de2d66a28d">log</a></li>
 <li><a href="/graph/01de2d66a28d">graph</a></li>
 <li><a href="/tags">tags</a></li>
+<li><a href="/branches">branches</a></li>
 </ul>
 <ul>
 <li><a href="/rev/01de2d66a28d">changeset</a></li>
@@ -270,13 +272,14 @@ files, or words in the commit message</div>
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" alt="mercurial" /></a>
 </div>
 <ul>
 <li><a href="/shortlog/5ed941583260">log</a></li>
 <li><a href="/graph/5ed941583260">graph</a></li>
 <li><a href="/tags">tags</a></li>
+<li><a href="/branches">branches</a></li>
 </ul>
 <ul>
 <li><a href="/rev/5ed941583260">changeset</a></li>
@@ -347,13 +350,14 @@ files, or words in the commit message</div>
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" alt="mercurial" /></a>
 </div>
 <ul>
 <li><a href="/shortlog/5ed941583260">log</a></li>
 <li><a href="/graph/5ed941583260">graph</a></li>
 <li><a href="/tags">tags</a></li>
+<li><a href="/branches">branches</a></li>
 </ul>
 <ul>
 <li><a href="/rev/5ed941583260">changeset</a></li>
@@ -420,13 +424,14 @@ files, or words in the commit message</div>
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
 </div>
 <ul>
 <li><a href="/shortlog">log</a></li>
 <li><a href="/graph">graph</a></li>
 <li><a href="/tags">tags</a></li>
+<li><a href="/branches">branches</a></li>
 </ul>
 </div>
 
@@ -481,6 +486,7 @@ a@6563da9dcf87: not found in manifest
 <a href="/shortlog?style=spartan">shortlog</a>
 <a href="/graph?style=spartan">graph</a>
 <a href="/tags?style=spartan">tags</a>
+<a href="/branches?style=spartan">branches</a>
 <a href="/file/38d962e6234d/c?style=spartan">file</a>
 <a href="/annotate/38d962e6234d/c?style=spartan">annotate</a>
 <a type="application/rss+xml" href="/rss-log/tip/c">rss</a>
@@ -529,7 +535,15 @@ a@6563da9dcf87: not found in manifest
    <a href="/annotate/a3b6a9e4507e/c?style=spartan">(annotate)</a>
   </td>
  </tr>
- <tr><th>base:</th><td><a href="/file/1e88685f5dde/b?style=spartan">b@1e88685f5dde</a></td></tr>
+ 
+<tr>
+<th>base:</th>
+<td>
+<a href="/file/1e88685f5dde/b?style=spartan">
+b@1e88685f5dde
+</a>
+</td>
+</tr>
  <tr>
   <th class="author">author:</th>
   <td class="author">&#116;&#101;&#115;&#116;</td>
@@ -545,7 +559,7 @@ a@6563da9dcf87: not found in manifest
 
 
 <div class="logo">
-<a href="http://www.selenic.com/mercurial/">
+<a href="http://mercurial.selenic.com/">
 <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial"></a>
 </div>
 

@@ -7,9 +7,10 @@
 
 from i18n import _
 import re, sys, os
-import util, config
+import util, config, templatefilters
 
 path = ['templates', '../templates']
+stringify = templatefilters.stringify
 
 def parsestring(s, quoted=True):
     '''parse a string using simple c-like syntax.
@@ -41,13 +42,13 @@ class engine(object):
     filter uses function to transform value. syntax is
     {key|filter1|filter2|...}.'''
 
-    template_re = re.compile(r"(?:(?:#(?=[\w\|%]+#))|(?:{(?=[\w\|%]+})))"
-                             r"(\w+)(?:(?:%(\w+))|((?:\|\w+)*))[#}]")
+    template_re = re.compile(r'{([\w\|%]+)}|#([\w\|%]+)#')
 
     def __init__(self, loader, filters={}, defaults={}):
         self.loader = loader
         self.filters = filters
         self.defaults = defaults
+        self.cache = {}
 
     def process(self, t, map):
         '''Perform expansion. t is name of map element to expand. map contains
@@ -69,8 +70,43 @@ class engine(object):
             else:
                 yield str(item)
 
+    def _format(self, expr, get, map):
+        key, format = expr.split('%')
+        v = get(key)
+        if not hasattr(v, '__iter__'):
+            raise SyntaxError(_("error expanding '%s%%%s'") % (key, format))
+        lm = map.copy()
+        for i in v:
+            lm.update(i)
+            yield self.process(format, lm)
+
+    def _filter(self, expr, get, map):
+        if expr not in self.cache:
+            parts = expr.split('|')
+            val = parts[0]
+            try:
+                filters = [self.filters[f] for f in parts[1:]]
+            except KeyError, i:
+                raise SyntaxError(_("unknown filter '%s'") % i[0])
+            def apply(get):
+                    x = get(val)
+                    for f in filters:
+                        x = f(x)
+                    return x
+            self.cache[expr] = apply
+        return self.cache[expr](get)
+
     def _process(self, tmpl, map):
         '''Render a template. Returns a generator.'''
+
+        def get(key):
+            v = map.get(key)
+            if v is None:
+                v = self.defaults.get(key, '')
+            if hasattr(v, '__call__'):
+                v = v(**map)
+            return v
+
         while tmpl:
             m = self.template_re.search(tmpl)
             if not m:
@@ -78,31 +114,21 @@ class engine(object):
                 break
 
             start, end = m.span(0)
-            key, format, fl = m.groups()
+            variants = m.groups()
+            expr = variants[0] or variants[1]
 
             if start:
                 yield tmpl[:start]
             tmpl = tmpl[end:]
 
-            if key in map:
-                v = map[key]
+            if '%' in expr:
+                yield self._format(expr, get, map)
+            elif '|' in expr:
+                yield self._filter(expr, get, map)
             else:
-                v = self.defaults.get(key, "")
-            if callable(v):
-                v = v(**map)
-            if format:
-                if not hasattr(v, '__iter__'):
-                    raise SyntaxError(_("Error expanding '%s%%%s'")
-                                      % (key, format))
-                lm = map.copy()
-                for i in v:
-                    lm.update(i)
-                    yield self.process(format, lm)
-            else:
-                if fl:
-                    for f in fl.split("|")[1:]:
-                        v = self.filters[f](v)
-                yield v
+                yield get(expr)
+
+engines = {'default': engine}
 
 class templater(object):
 
@@ -116,9 +142,11 @@ class templater(object):
         self.cache = cache.copy()
         self.map = {}
         self.base = (mapfile and os.path.dirname(mapfile)) or ''
-        self.filters = filters
+        self.filters = templatefilters.filters.copy()
+        self.filters.update(filters)
         self.defaults = defaults
         self.minchunk, self.maxchunk = minchunk, maxchunk
+        self.engines = {}
 
         if not mapfile:
             return
@@ -136,7 +164,10 @@ class templater(object):
                     raise SyntaxError('%s: %s' %
                                       (conf.source('', key), inst.args[0]))
             else:
-                self.map[key] = os.path.join(self.base, val)
+                val = 'default', val
+                if ':' in val[1]:
+                    val = val[1].split(':', 1)
+                self.map[key] = val[0], os.path.join(self.base, val[1])
 
     def __contains__(self, key):
         return key in self.cache or key in self.map
@@ -145,14 +176,19 @@ class templater(object):
         '''Get the template for the given template name. Use a local cache.'''
         if not t in self.cache:
             try:
-                self.cache[t] = file(self.map[t]).read()
+                self.cache[t] = open(self.map[t][1]).read()
             except IOError, inst:
                 raise IOError(inst.args[0], _('template file %s: %s') %
-                              (self.map[t], inst.args[1]))
+                              (self.map[t][1], inst.args[1]))
         return self.cache[t]
 
     def __call__(self, t, **map):
-        proc = engine(self.load, self.filters, self.defaults)
+        ttype = t in self.map and self.map[t][0] or 'default'
+        proc = self.engines.get(ttype)
+        if proc is None:
+            proc = engines[ttype](self.load, self.filters, self.defaults)
+            self.engines[ttype] = proc
+
         stream = proc.process(t, map)
         if self.minchunk:
             stream = util.increasingchunks(stream, min=self.minchunk,
@@ -207,9 +243,3 @@ def stylemap(style, paths=None):
                 return mapfile
 
     raise RuntimeError("No hgweb templates found in %r" % paths)
-
-def stringify(thing):
-    '''turn nested template iterator into string.'''
-    if hasattr(thing, '__iter__') and not isinstance(thing, str):
-        return "".join([stringify(t) for t in thing if t is not None])
-    return str(thing)

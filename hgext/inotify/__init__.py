@@ -6,15 +6,15 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''inotify-based status acceleration for Linux systems
-'''
+'''accelerate status report using Linux's inotify service'''
 
 # todo: socket permissions
 
 from mercurial.i18n import _
 from mercurial import cmdutil, util
-import client, errno, os, server, socket
+import server
 from weakref import proxy
+from client import client, QueryFailed
 
 def serve(ui, repo, **opts):
     '''start an inotify server for this repository'''
@@ -22,10 +22,10 @@ def serve(ui, repo, **opts):
     if timeout:
         timeout = float(timeout) * 1e3
 
-    class service:
+    class service(object):
         def init(self):
             try:
-                self.master = server.Master(ui, repo, timeout)
+                self.master = server.master(ui, repo, timeout)
             except server.AlreadyStartedException, inst:
                 raise util.Abort(str(inst))
 
@@ -36,7 +36,21 @@ def serve(ui, repo, **opts):
                 self.master.shutdown()
 
     service = service()
-    cmdutil.service(opts, initfn=service.init, runfn=service.run)
+    logfile = ui.config('inotify', 'log')
+    cmdutil.service(opts, initfn=service.init, runfn=service.run,
+                    logfile=logfile)
+
+def debuginotify(ui, repo, **opts):
+    '''debugging information for inotify extension
+
+    Prints the list of directories being watched by the inotify server.
+    '''
+    cli = client(ui, repo)
+    response = cli.debugquery()
+
+    ui.write(_('directories being watched:\n'))
+    for path in response:
+        ui.write(('  %s/\n') % path)
 
 def reposetup(ui, repo):
     if not hasattr(repo, 'dirstate'):
@@ -46,19 +60,28 @@ def reposetup(ui, repo):
     repo = proxy(repo)
 
     class inotifydirstate(repo.dirstate.__class__):
-        # Set to True if we're the inotify server, so we don't attempt
-        # to recurse.
-        inotifyserver = False
+
+        # We'll set this to false after an unsuccessful attempt so that
+        # next calls of status() within the same instance don't try again
+        # to start an inotify server if it won't start.
+        _inotifyon = True
 
         def status(self, match, ignored, clean, unknown=True):
             files = match.files()
             if '.' in files:
                 files = []
-            try:
-                if not ignored and not self.inotifyserver:
-                    result = client.query(ui, repo, files, match, False,
-                                          clean, unknown)
-                    if result and ui.config('inotify', 'debug'):
+            if self._inotifyon and not ignored:
+                cli = client(ui, repo)
+                try:
+                    result = cli.statusquery(files, match, False,
+                                            clean, unknown)
+                except QueryFailed, instr:
+                    ui.debug(str(instr))
+                    # don't retry within the same hg instance
+                    inotifydirstate._inotifyon = False
+                    pass
+                else:
+                    if ui.config('inotify', 'debug'):
                         r2 = super(inotifydirstate, self).status(
                             match, False, clean, unknown)
                         for c,a,b in zip('LMARDUIC', result, r2):
@@ -69,57 +92,20 @@ def reposetup(ui, repo):
                                 if f not in a:
                                     ui.warn('*** inotify: %s -%s\n' % (c, f))
                         result = r2
-
-                    if result is not None:
-                        return result
-            except (OSError, socket.error), err:
-                autostart = ui.configbool('inotify', 'autostart', True)
-
-                if err[0] == errno.ECONNREFUSED:
-                    ui.warn(_('(found dead inotify server socket; '
-                                   'removing it)\n'))
-                    os.unlink(repo.join('inotify.sock'))
-                if err[0] in (errno.ECONNREFUSED, errno.ENOENT) and autostart:
-                    ui.debug(_('(starting inotify server)\n'))
-                    try:
-                        try:
-                            server.start(ui, repo)
-                        except server.AlreadyStartedException, inst:
-                            # another process may have started its own
-                            # inotify server while this one was starting.
-                            ui.debug(str(inst))
-                    except Exception, inst:
-                        ui.warn(_('could not start inotify server: '
-                                       '%s\n') % inst)
-                    else:
-                        # server is started, send query again
-                        try:
-                            return client.query(ui, repo, files, match,
-                                         ignored, clean, unknown)
-                        except socket.error, err:
-                            ui.warn(_('could not talk to new inotify '
-                                           'server: %s\n') % err[-1])
-                elif err[0] in (errno.ECONNREFUSED, errno.ENOENT):
-                    # silently ignore normal errors if autostart is False
-                    ui.debug(_('(inotify server not running)\n'))
-                else:
-                    ui.warn(_('failed to contact inotify server: %s\n')
-                             % err[-1])
-                ui.traceback()
-                # replace by old status function
-                self.status = super(inotifydirstate, self).status
-
+                    return result
             return super(inotifydirstate, self).status(
                 match, ignored, clean, unknown)
 
     repo.dirstate.__class__ = inotifydirstate
 
 cmdtable = {
+    'debuginotify':
+        (debuginotify, [], ('hg debuginotify')),
     '^inserve':
-    (serve,
-     [('d', 'daemon', None, _('run server in background')),
-      ('', 'daemon-pipefds', '', _('used internally by daemon mode')),
-      ('t', 'idle-timeout', '', _('minutes to sit idle before exiting')),
-      ('', 'pid-file', '', _('name of file to write process ID to'))],
-     _('hg inserve [OPT]...')),
+        (serve,
+         [('d', 'daemon', None, _('run server in background')),
+          ('', 'daemon-pipefds', '', _('used internally by daemon mode')),
+          ('t', 'idle-timeout', '', _('minutes to sit idle before exiting')),
+          ('', 'pid-file', '', _('name of file to write process ID to'))],
+         _('hg inserve [OPTION]...')),
     }

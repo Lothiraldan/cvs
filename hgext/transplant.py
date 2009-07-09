@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''patch transplanting tool
+'''command to transplant changesets from another branch
 
 This extension allows you to transplant patches from another branch.
 
@@ -15,15 +15,15 @@ map from a changeset hash to its hash in the source repository.
 
 from mercurial.i18n import _
 import os, tempfile
-from mercurial import bundlerepo, changegroup, cmdutil, hg, merge
+from mercurial import bundlerepo, changegroup, cmdutil, hg, merge, match
 from mercurial import patch, revlog, util, error
 
-class transplantentry:
+class transplantentry(object):
     def __init__(self, lnode, rnode):
         self.lnode = lnode
         self.rnode = rnode
 
-class transplants:
+class transplants(object):
     def __init__(self, path=None, transplantfile=None, opener=None):
         self.path = path
         self.transplantfile = transplantfile
@@ -64,7 +64,7 @@ class transplants:
         del self.transplants[self.transplants.index(transplant)]
         self.dirty = True
 
-class transplanter:
+class transplanter(object):
     def __init__(self, ui, repo):
         self.ui = ui
         self.path = repo.join('transplant')
@@ -218,7 +218,7 @@ class transplanter:
                 files = {}
                 try:
                     patch.patch(patchfile, self.ui, cwd=repo.root,
-                                files=files)
+                                files=files, eolmode=None)
                     if not files:
                         self.ui.warn(_('%s: empty changeset')
                                      % revlog.hex(node))
@@ -242,8 +242,11 @@ class transplanter:
         if merge:
             p1, p2 = repo.dirstate.parents()
             repo.dirstate.setparents(p1, node)
+            m = match.always(repo.root, '')
+        else:
+            m = match.exact(repo.root, '', files)
 
-        n = repo.commit(files, message, user, date, extra=extra)
+        n = repo.commit(message, user, date, extra=extra, match=m)
         if not merge:
             self.transplants.set(n, node)
 
@@ -285,7 +288,7 @@ class transplanter:
                                  revlog.hex(parents[0]))
             if merge:
                 repo.dirstate.setparents(p1, parents[1])
-            n = repo.commit(None, message, user, date, extra=extra)
+            n = repo.commit(message, user, date, extra=extra)
             if not n:
                 raise util.Abort(_('commit failed'))
             if not merge:
@@ -413,7 +416,7 @@ def browserevs(ui, repo, nodes, opts):
             elif action == 'p':
                 parent = repo.changelog.parents(node)[0]
                 for chunk in patch.diff(repo, parent, node):
-                    repo.ui.write(chunk)
+                    ui.write(chunk)
                 action = None
             elif action not in ('y', 'n', 'm', 'c', 'q'):
                 ui.write('no such option\n')

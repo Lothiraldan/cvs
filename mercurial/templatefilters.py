@@ -6,7 +6,13 @@
 # GNU General Public License version 2, incorporated herein by reference.
 
 import cgi, re, os, time, urllib, textwrap
-import util, templater, encoding
+import util, encoding
+
+def stringify(thing):
+    '''turn nested template iterator into string.'''
+    if hasattr(thing, '__iter__') and not isinstance(thing, str):
+        return "".join([stringify(t) for t in thing if t is not None])
+    return str(thing)
 
 agescales = [("second", 1),
              ("minute", 60),
@@ -90,6 +96,7 @@ def domain(author):
 
 def person(author):
     '''get name of author, or else username.'''
+    if not '@' in author: return author
     f = author.find('<')
     if f == -1: return util.shortuser(author)
     return author[:f].rstrip()
@@ -166,7 +173,7 @@ def stripdir(text):
         return dir
 
 def nonempty(str):
-  return str or "(none)"
+    return str or "(none)"
 
 filters = {
     "addbreaks": nl2br,
@@ -186,6 +193,7 @@ filters = {
     "isodatesec": lambda x: util.datestr(x, '%Y-%m-%d %H:%M:%S %1%2'),
     "json": json,
     "jsonescape": jsonescape,
+    "localdate": lambda x: (x[0], util.makedate()[1]),
     "nonempty": nonempty,
     "obfuscate": obfuscate,
     "permissions": permissions,
@@ -194,7 +202,7 @@ filters = {
     "rfc3339date": lambda x: util.datestr(x, "%Y-%m-%dT%H:%M:%S%1:%2"),
     "short": lambda x: x[:12],
     "shortdate": util.shortdate,
-    "stringify": templater.stringify,
+    "stringify": stringify,
     "strip": lambda x: x.strip(),
     "urlescape": lambda x: urllib.quote(x),
     "user": lambda x: util.shortuser(x),

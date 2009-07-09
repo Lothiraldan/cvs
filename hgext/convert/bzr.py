@@ -45,9 +45,30 @@ class bzr_source(converter_source):
             raise NoRepo('Bazaar modules could not be loaded')
 
         path = os.path.abspath(path)
+        self._checkrepotype(path)
         self.branch = branch.Branch.open(path)
         self.sourcerepo = self.branch.repository
         self._parentids = {}
+
+    def _checkrepotype(self, path):
+        # Lightweight checkouts detection is informational but probably
+        # fragile at API level. It should not terminate the conversion.
+        try:
+            from bzrlib import bzrdir
+            dir = bzrdir.BzrDir.open_containing(path)[0]
+            try:
+                tree = dir.open_workingtree(recommend_upgrade=False)
+                branch = tree.branch
+            except (errors.NoWorkingTree, errors.NotLocalUrl), e:
+                tree = None
+                branch = dir.open_branch()
+            if (tree is not None and tree.bzrdir.root_transport.base !=
+                branch.bzrdir.root_transport.base):
+                self.ui.warn(_('warning: lightweight checkouts may cause '
+                               'conversion failures, try with a regular '
+                               'branch instead.\n'))
+        except:
+            self.ui.note(_('bzr source type could not be determined\n'))
 
     def before(self):
         """Before the conversion begins, acquire a read lock
@@ -78,13 +99,23 @@ class bzr_source(converter_source):
 
     def getfile(self, name, rev):
         revtree = self.sourcerepo.revision_tree(rev)
-        fileid = revtree.path2id(name)
-        if fileid is None or revtree.kind(fileid) not in supportedkinds:
+        fileid = revtree.path2id(name.decode(self.encoding or 'utf-8'))
+        kind = None
+        if fileid is not None:
+            kind = revtree.kind(fileid)
+        if kind not in supportedkinds:
             # the file is not available anymore - was deleted
             raise IOError(_('%s is not available in %s anymore') %
                     (name, rev))
-        sio = revtree.get_file(fileid)
-        return sio.read()
+        if kind == 'symlink':
+            target = revtree.get_symlink_target(fileid)
+            if target is None:
+                raise util.Abort(_('%s.%s symlink has no target')
+                                 % (name, rev))
+            return target
+        else:
+            sio = revtree.get_file(fileid)
+            return sio.read()
 
     def getmode(self, name, rev):
         return self._modecache[(name, rev)]

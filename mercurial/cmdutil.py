@@ -7,8 +7,8 @@
 
 from node import hex, nullid, nullrev, short
 from i18n import _
-import os, sys, bisect, stat, errno
-import mdiff, bdiff, util, templater, templatefilters, patch, error, encoding
+import os, sys, errno, re, glob
+import mdiff, bdiff, util, templater, patch, error, encoding
 import match as _match
 
 revrangesep = ':'
@@ -101,10 +101,10 @@ def loglimit(opts):
 def remoteui(src, opts):
     'build a remote ui from ui or repo and opts'
     if hasattr(src, 'baseui'): # looks like a repository
-        dst = src.baseui # drop repo-specific config
+        dst = src.baseui.copy() # drop repo-specific config
         src = src.ui # copy target options from repo
     else: # assume it's a global ui object
-        dst = src # keep all global options
+        dst = src.copy() # keep all global options
 
     # copy ssh-specific options
     for o in 'ssh', 'remotecmd':
@@ -154,7 +154,7 @@ def revrange(repo, revs):
             return defval
         return repo.changelog.rev(repo.lookup(val))
 
-    seen, l = {}, []
+    seen, l = set(), []
     for spec in revs:
         if revrangesep in spec:
             start, end = spec.split(revrangesep, 1)
@@ -164,13 +164,13 @@ def revrange(repo, revs):
             for rev in xrange(start, end+step, step):
                 if rev in seen:
                     continue
-                seen[rev] = 1
+                seen.add(rev)
                 l.append(rev)
         else:
             rev = revfix(repo, spec, None)
             if rev in seen:
                 continue
-            seen[rev] = 1
+            seen.add(rev)
             l.append(rev)
 
     return l
@@ -217,7 +217,7 @@ def make_filename(repo, pat, node,
             i += 1
         return ''.join(newname)
     except KeyError, inst:
-        raise util.Abort(_("invalid format spec '%%%s' in output file name") %
+        raise util.Abort(_("invalid format spec '%%%s' in output filename") %
                          inst.args[0])
 
 def make_file(repo, pat, node=None,
@@ -235,14 +235,27 @@ def make_file(repo, pat, node=None,
                               pathname),
                 mode)
 
+def expandpats(pats):
+    if not util.expandglobs:
+        return list(pats)
+    ret = []
+    for p in pats:
+        kind, name = _match._patsplit(p, None)
+        if kind is None:
+            globbed = glob.glob(name)
+            if globbed:
+                ret.extend(globbed)
+                continue
+        ret.append(p)
+    return ret
+
 def match(repo, pats=[], opts={}, globbed=False, default='relpath'):
     if not globbed and default == 'relpath':
-        pats = util.expand_glob(pats or [])
+        pats = expandpats(pats or [])
     m = _match.match(repo.root, repo.getcwd(), pats,
                     opts.get('include'), opts.get('exclude'), default)
     def badfn(f, msg):
         repo.ui.warn("%s: %s\n" % (m.rel(f), msg))
-        return False
     m.bad = badfn
     return m
 
@@ -252,15 +265,15 @@ def matchall(repo):
 def matchfiles(repo, files):
     return _match.exact(repo.root, repo.getcwd(), files)
 
-def findrenames(repo, added=None, removed=None, threshold=0.5):
+def findrenames(repo, added, removed, threshold):
     '''find renamed files -- yields (before, after, score) tuples'''
-    if added is None or removed is None:
-        added, removed = repo.status()[1:3]
     ctx = repo['.']
     for a in added:
         aa = repo.wread(a)
         bestname, bestscore = None, threshold
         for r in removed:
+            if r not in ctx:
+                continue
             rr = ctx.filectx(r).data()
 
             # bdiff.blocks() returns blocks of matching lines
@@ -285,8 +298,8 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
         dry_run = opts.get('dry_run')
     if similarity is None:
         similarity = float(opts.get('similarity') or 0)
-    add, remove = [], []
-    mapping = {}
+    # we'd use status here, except handling of symlinks and ignore is tricky
+    added, unknown, deleted, removed = [], [], [], []
     audit_path = util.path_auditor(repo.root)
     m = match(repo, pats, opts)
     for abs in repo.walk(m):
@@ -299,27 +312,29 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
         rel = m.rel(abs)
         exact = m.exact(abs)
         if good and abs not in repo.dirstate:
-            add.append(abs)
-            mapping[abs] = rel, m.exact(abs)
+            unknown.append(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        if repo.dirstate[abs] != 'r' and (not good or not util.lexists(target)
+        elif repo.dirstate[abs] != 'r' and (not good or not util.lexists(target)
             or (os.path.isdir(target) and not os.path.islink(target))):
-            remove.append(abs)
-            mapping[abs] = rel, exact
+            deleted.append(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('removing %s\n') % ((pats and rel) or abs))
+        # for finding renames
+        elif repo.dirstate[abs] == 'r':
+            removed.append(abs)
+        elif repo.dirstate[abs] == 'a':
+            added.append(abs)
     if not dry_run:
-        repo.remove(remove)
-        repo.add(add)
+        repo.remove(deleted)
+        repo.add(unknown)
     if similarity > 0:
-        for old, new, score in findrenames(repo, add, remove, similarity):
-            oldrel, oldexact = mapping[old]
-            newrel, newexact = mapping[new]
-            if repo.ui.verbose or not oldexact or not newexact:
+        for old, new, score in findrenames(repo, added + unknown,
+                                           removed + deleted, similarity):
+            if repo.ui.verbose or not m.exact(old) or not m.exact(new):
                 repo.ui.status(_('recording removal of %s as rename to %s '
                                  '(%d%% similar)\n') %
-                               (oldrel, newrel, score * 100))
+                               (m.rel(old), m.rel(new), score * 100))
             if not dry_run:
                 repo.copy(old, new)
 
@@ -451,7 +466,7 @@ def copy(ui, repo, pats, opts, rename=False):
     # srcs: list of (hgsep, hgsep, ossep, bool)
     # return: function that takes hgsep and returns ossep
     def targetpathafterfn(pat, dest, srcs):
-        if util.patkind(pat, None)[0]:
+        if _match.patkind(pat):
             # a mercurial pattern
             res = lambda p: os.path.join(dest,
                                          os.path.basename(util.localpath(p)))
@@ -491,7 +506,7 @@ def copy(ui, repo, pats, opts, rename=False):
         return res
 
 
-    pats = util.expand_glob(pats)
+    pats = expandpats(pats)
     if not pats:
         raise util.Abort(_('no source or destination specified'))
     if len(pats) == 1:
@@ -499,7 +514,7 @@ def copy(ui, repo, pats, opts, rename=False):
     dest = pats.pop()
     destdirexists = os.path.isdir(dest) and not os.path.islink(dest)
     if not destdirexists:
-        if len(pats) > 1 or util.patkind(pats[0], None)[0]:
+        if len(pats) > 1 or _match.patkind(pats[0]):
             raise util.Abort(_('with multiple sources, destination must be an '
                                'existing directory'))
         if util.endswithsep(dest):
@@ -528,7 +543,7 @@ def copy(ui, repo, pats, opts, rename=False):
 
     return errors
 
-def service(opts, parentfn=None, initfn=None, runfn=None):
+def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None):
     '''Run a command as a service.'''
 
     if opts['daemon'] and not opts['daemon_pipefds']:
@@ -572,11 +587,18 @@ def service(opts, parentfn=None, initfn=None, runfn=None):
         os.close(wfd)
         sys.stdout.flush()
         sys.stderr.flush()
-        fd = os.open(util.nulldev, os.O_RDWR)
-        if fd != 0: os.dup2(fd, 0)
-        if fd != 1: os.dup2(fd, 1)
-        if fd != 2: os.dup2(fd, 2)
-        if fd not in (0, 1, 2): os.close(fd)
+
+        nullfd = os.open(util.nulldev, os.O_RDWR)
+        logfilefd = nullfd
+        if logfile:
+            logfilefd = os.open(logfile, os.O_RDWR | os.O_CREAT | os.O_APPEND)
+        os.dup2(nullfd, 0)
+        os.dup2(logfilefd, 1)
+        os.dup2(logfilefd, 2)
+        if nullfd not in (0, 1, 2):
+            os.close(nullfd)
+        if logfile and logfilefd not in (0, 1, 2):
+            os.close(logfilefd)
 
     if runfn:
         return runfn()
@@ -712,10 +734,8 @@ class changeset_templater(changeset_printer):
 
     def __init__(self, ui, repo, patch, diffopts, mapfile, buffered):
         changeset_printer.__init__(self, ui, repo, patch, diffopts, buffered)
-        filters = templatefilters.filters.copy()
-        filters['formatnode'] = (ui.debugflag and (lambda x: x)
-                                 or (lambda x: x[:12]))
-        self.t = templater.templater(mapfile, filters,
+        formatnode = ui.debugflag and (lambda x: x) or (lambda x: x[:12])
+        self.t = templater.templater(mapfile, {'formatnode': formatnode},
                                      cache={
                                          'parent': '{rev}:{node|formatnode} ',
                                          'manifest': '{rev}:{node|formatnode}',
@@ -998,7 +1018,7 @@ def walkchangerevs(ui, repo, pats, change, opts):
     positive if walking forwards through revs, last rev in the
     sequence iterated over - use to reset state for the current window
 
-    "add", rev, fns: out-of-order traversal of the given file names
+    "add", rev, fns: out-of-order traversal of the given filenames
     fns, which changed during revision rev - use to gather data for
     possible display
 
@@ -1089,7 +1109,7 @@ def walkchangerevs(ui, repo, pats, change, opts):
     if slowpath:
         if follow:
             raise util.Abort(_('can only follow copies/renames for explicit '
-                               'file names'))
+                               'filenames'))
 
         # The slow path checks files modified in every changeset.
         def changerevgen():
@@ -1103,7 +1123,7 @@ def walkchangerevs(ui, repo, pats, change, opts):
                 fncache[rev] = matches
                 wanted.add(rev)
 
-    class followfilter:
+    class followfilter(object):
         def __init__(self, onlyfirst=False):
             self.startrev = nullrev
             self.roots = []
@@ -1187,39 +1207,45 @@ def commit(ui, repo, commitfunc, pats, opts):
     if opts.get('addremove'):
         addremove(repo, pats, opts)
 
-    m = match(repo, pats, opts)
-    if pats:
-        modified, added, removed = repo.status(match=m)[:3]
-        files = sorted(modified + added + removed)
+    return commitfunc(ui, repo, message, match(repo, pats, opts), opts)
 
-        def is_dir(f):
-            name = f + '/'
-            i = bisect.bisect(files, name)
-            return i < len(files) and files[i].startswith(name)
+def commiteditor(repo, ctx, subs):
+    if ctx.description():
+        return ctx.description()
+    return commitforceeditor(repo, ctx, subs)
 
-        for f in m.files():
-            if f == '.':
-                continue
-            if f not in files:
-                rf = repo.wjoin(f)
-                rel = repo.pathto(f)
-                try:
-                    mode = os.lstat(rf)[stat.ST_MODE]
-                except OSError:
-                    if is_dir(f): # deleted directory ?
-                        continue
-                    raise util.Abort(_("file %s not found!") % rel)
-                if stat.S_ISDIR(mode):
-                    if not is_dir(f):
-                        raise util.Abort(_("no match under directory %s!")
-                                         % rel)
-                elif not (stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
-                    raise util.Abort(_("can't commit %s: "
-                                       "unsupported file type!") % rel)
-                elif f not in repo.dirstate:
-                    raise util.Abort(_("file %s not tracked!") % rel)
-        m = matchfiles(repo, files)
-    try:
-        return commitfunc(ui, repo, message, m, opts)
-    except ValueError, inst:
-        raise util.Abort(str(inst))
+def commitforceeditor(repo, ctx, subs):
+    edittext = []
+    modified, added, removed = ctx.modified(), ctx.added(), ctx.removed()
+    if ctx.description():
+        edittext.append(ctx.description())
+    edittext.append("")
+    edittext.append("") # Empty line between message and comments.
+    edittext.append(_("HG: Enter commit message."
+                      "  Lines beginning with 'HG:' are removed."))
+    edittext.append(_("HG: Leave message empty to abort commit."))
+    edittext.append("HG: --")
+    edittext.append(_("HG: user: %s") % ctx.user())
+    if ctx.p2():
+        edittext.append(_("HG: branch merge"))
+    if ctx.branch():
+        edittext.append(_("HG: branch '%s'")
+                        % encoding.tolocal(ctx.branch()))
+    edittext.extend([_("HG: subrepo %s") % s for s in subs])
+    edittext.extend([_("HG: added %s") % f for f in added])
+    edittext.extend([_("HG: changed %s") % f for f in modified])
+    edittext.extend([_("HG: removed %s") % f for f in removed])
+    if not added and not modified and not removed:
+        edittext.append(_("HG: no files changed"))
+    edittext.append("")
+    # run editor in the repository root
+    olddir = os.getcwd()
+    os.chdir(repo.root)
+    text = repo.ui.edit("\n".join(edittext), ctx.user())
+    text = re.sub("(?m)^HG:.*\n", "", text)
+    os.chdir(olddir)
+
+    if not text.strip():
+        raise util.Abort(_("empty commit message"))
+
+    return text

@@ -5,49 +5,57 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 #
-# this hook allows to allow or deny access to parts of a repo when
-# taking incoming changesets.
-#
-# authorization is against local user name on system where hook is
-# run, not committer of original changeset (since that is easy to
-# spoof).
-#
-# acl hook is best to use if you use hgsh to set up restricted shells
-# for authenticated users to only push to / pull from.  not safe if
-# user has interactive shell access, because they can disable hook.
-# also not safe if remote users share one local account, because then
-# no way to tell remote users apart.
-#
-# to use, configure acl extension in hgrc like this:
-#
-#   [extensions]
-#   hgext.acl =
-#
-#   [hooks]
-#   pretxnchangegroup.acl = python:hgext.acl.hook
-#
-#   [acl]
-#   sources = serve        # check if source of incoming changes in this list
-#                          # ("serve" == ssh or http, "push", "pull", "bundle")
-#
-# allow and deny lists have subtree pattern (default syntax is glob)
-# on left, user names on right. deny list checked before allow list.
-#
-#   [acl.allow]
-#   # if acl.allow not present, all users allowed by default
-#   # empty acl.allow = no users allowed
-#   docs/** = doc_writer
-#   .hgtags = release_engineer
-#
-#   [acl.deny]
-#   # if acl.deny not present, no users denied by default
-#   # empty acl.deny = all users allowed
-#   glob pattern = user4, user5
-#   ** = user6
+
+'''hooks for controlling repository access
+
+This hook makes it possible to allow or deny write access to portions
+of a repository when receiving incoming changesets.
+
+The authorization is matched based on the local user name on the
+system where the hook runs, and not the committer of the original
+changeset (since the latter is merely informative).
+
+The acl hook is best used along with a restricted shell like hgsh,
+preventing authenticating users from doing anything other than
+pushing or pulling. The hook is not safe to use if users have
+interactive shell access, as they can then disable the hook.
+Nor is it safe if remote users share an account, because then there
+is no way to distinguish them.
+
+To use this hook, configure the acl extension in your hgrc like this:
+
+  [extensions]
+  hgext.acl =
+
+  [hooks]
+  pretxnchangegroup.acl = python:hgext.acl.hook
+
+  [acl]
+  # Check whether the source of incoming changes is in this list
+  # ("serve" == ssh or http, "push", "pull", "bundle")
+  sources = serve
+
+The allow and deny sections take a subtree pattern as key (with a
+glob syntax by default), and a comma separated list of users as
+the corresponding value. The deny list is checked before the allow
+list is.
+
+  [acl.allow]
+  # If acl.allow is not present, all users are allowed by default.
+  # An empty acl.allow section means no users allowed.
+  docs/** = doc_writer
+  .hgtags = release_engineer
+
+  [acl.deny]
+  # If acl.deny is not present, no users are refused by default.
+  # An empty acl.deny section means all users allowed.
+  glob pattern = user4, user5
+   ** = user6
+'''
 
 from mercurial.i18n import _
-from mercurial import util
-import getpass
+from mercurial import util, match
+import getpass, urllib
 
 def buildmatch(ui, repo, user, key):
     '''return tuple of (match function, list enabled).'''
@@ -60,8 +68,9 @@ def buildmatch(ui, repo, user, key):
     ui.debug(_('acl: %s enabled, %d entries for user %s\n') %
              (key, len(pats), user))
     if pats:
-        return util.matcher(repo.root, names=pats)[1]
-    return util.never
+        return match.match(repo.root, '', pats)
+    return match.exact(repo.root, '', [])
+
 
 def hook(ui, repo, hooktype, node=None, source=None, **kwargs):
     if hooktype != 'pretxnchangegroup':
@@ -71,7 +80,15 @@ def hook(ui, repo, hooktype, node=None, source=None, **kwargs):
         ui.debug(_('acl: changes have source "%s" - skipping\n') % source)
         return
 
-    user = getpass.getuser()
+    user = None
+    if source == 'serve' and 'url' in kwargs:
+        url = kwargs['url'].split(':')
+        if url[0] == 'remote' and url[1].startswith('http'):
+            user = urllib.unquote(url[3])
+
+    if user is None:
+        user = getpass.getuser()
+
     cfg = ui.config('acl', 'config')
     if cfg:
         ui.readconfig(cfg, sections = ['acl.allow', 'acl.deny'])

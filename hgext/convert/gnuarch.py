@@ -14,7 +14,7 @@ from email.Parser import Parser
 
 class gnuarch_source(converter_source, commandline):
 
-    class gnuarch_rev:
+    class gnuarch_rev(object):
         def __init__(self, rev):
             self.rev = rev
             self.summary = ''
@@ -83,7 +83,8 @@ class gnuarch_source(converter_source, commandline):
 
             archive = treeversion.split('/')[0]
             if archive not in self.archives:
-                self.ui.status(_('tree analysis stopped because it points to an unregistered archive %s...\n') % archive)
+                self.ui.status(_('tree analysis stopped because it points to '
+                                 'an unregistered archive %s...\n') % archive)
                 break
 
             # Get the complete list of revisions for that tree version
@@ -178,8 +179,8 @@ class gnuarch_source(converter_source, commandline):
 
     def getcommit(self, rev):
         changes = self.changes[rev]
-        return commit(author = changes.author, date = changes.date,
-                      desc = changes.summary, parents = self.parents[rev], rev=rev)
+        return commit(author=changes.author, date=changes.date,
+                      desc=changes.summary, parents=self.parents[rev], rev=rev)
 
     def gettags(self):
         return self.tags
@@ -256,7 +257,7 @@ class gnuarch_source(converter_source, commandline):
         self.ui.debug(_('obtaining revision %s...\n') % rev)
         output = self._execute('get', rev, self.tmppath)
         self.checkexit(output)
-        self.ui.debug(_('analysing revision %s...\n') % rev)
+        self.ui.debug(_('analyzing revision %s...\n') % rev)
         files = self._readcontents(self.tmppath)
         self.changes[rev].add_files += files
 

@@ -11,6 +11,24 @@ import os, stat
 
 _sha = util.sha1
 
+# This avoids a collision between a file named foo and a dir named
+# foo.i or foo.d
+def encodedir(path):
+    if not path.startswith('data/'):
+        return path
+    return (path
+            .replace(".hg/", ".hg.hg/")
+            .replace(".i/", ".i.hg/")
+            .replace(".d/", ".d.hg/"))
+
+def decodedir(path):
+    if not path.startswith('data/'):
+        return path
+    return (path
+            .replace(".d.hg/", ".d/")
+            .replace(".i.hg/", ".i/")
+            .replace(".hg.hg/", ".hg/"))
+
 def _buildencodefun():
     e = '_'
     win_reserved = [ord(x) for x in '\\:*?"<>|']
@@ -34,8 +52,8 @@ def _buildencodefun():
                     pass
             else:
                 raise KeyError
-    return (lambda s: "".join([cmap[c] for c in s]),
-            lambda s: "".join(list(decode(s))))
+    return (lambda s: "".join([cmap[c] for c in encodedir(s)]),
+            lambda s: decodedir("".join(list(decode(s)))))
 
 encodefilename, decodefilename = _buildencodefun()
 
@@ -104,6 +122,8 @@ def hybridencode(path):
     '''
     if not path.startswith('data/'):
         return path
+    # escape directories ending with .i and .d
+    path = encodedir(path)
     ndpath = path[len('data/'):]
     res = 'data/' + auxencode(encodefilename(ndpath))
     if len(res) > MAX_PATH_LEN_IN_HGSTORE:
@@ -145,17 +165,18 @@ def _calcmode(path):
 
 _data = 'data 00manifest.d 00manifest.i 00changelog.d  00changelog.i'
 
-class basicstore:
+class basicstore(object):
     '''base class for local repository stores'''
     def __init__(self, path, opener, pathjoiner):
         self.pathjoiner = pathjoiner
         self.path = path
         self.createmode = _calcmode(path)
-        self.opener = opener(self.path)
-        self.opener.createmode = self.createmode
+        op = opener(self.path)
+        op.createmode = self.createmode
+        self.opener = lambda f, *args, **kw: op(encodedir(f), *args, **kw)
 
     def join(self, f):
-        return self.pathjoiner(self.path, f)
+        return self.pathjoiner(self.path, encodedir(f))
 
     def _walk(self, relpath, recurse):
         '''yields (unencoded, encoded, size)'''
@@ -170,7 +191,7 @@ class basicstore:
                     fp = self.pathjoiner(p, f)
                     if kind == stat.S_IFREG and f[-2:] in ('.d', '.i'):
                         n = util.pconvert(fp[striplen:])
-                        l.append((n, n, st.st_size))
+                        l.append((decodedir(n), n, st.st_size))
                     elif kind == stat.S_IFDIR and recurse:
                         visit.append(fp)
         return sorted(l)
@@ -214,39 +235,49 @@ class encodedstore(basicstore):
         return (['requires', '00changelog.i'] +
                 [self.pathjoiner('store', f) for f in _data.split()])
 
-def fncache(opener):
-    '''yields the entries in the fncache file'''
-    try:
-        fp = opener('fncache', mode='rb')
-    except IOError:
-        # skip nonexistent file
-        return
-    for n, line in enumerate(fp):
-        if (len(line) < 2) or (line[-1] != '\n'):
-            t = _('invalid entry in fncache, line %s') % (n + 1)
-            raise util.Abort(t)
-        yield line[:-1]
-    fp.close()
-
-class fncacheopener(object):
+class fncache(object):
+    # the filename used to be partially encoded
+    # hence the encodedir/decodedir dance
     def __init__(self, opener):
         self.opener = opener
         self.entries = None
 
-    def loadfncache(self):
-        self.entries = {}
-        for f in fncache(self.opener):
-            self.entries[f] = True
+    def _load(self):
+        '''fill the entries from the fncache file'''
+        self.entries = set()
+        try:
+            fp = self.opener('fncache', mode='rb')
+        except IOError:
+            # skip nonexistent file
+            return
+        for n, line in enumerate(fp):
+            if (len(line) < 2) or (line[-1] != '\n'):
+                t = _('invalid entry in fncache, line %s') % (n + 1)
+                raise util.Abort(t)
+            self.entries.add(decodedir(line[:-1]))
+        fp.close()
 
-    def __call__(self, path, mode='r', *args, **kw):
-        if mode not in ('r', 'rb') and path.startswith('data/'):
-            if self.entries is None:
-                self.loadfncache()
-            if path not in self.entries:
-                self.opener('fncache', 'ab').write(path + '\n')
-                # fncache may contain non-existent files after rollback / strip
-                self.entries[path] = True
-        return self.opener(hybridencode(path), mode, *args, **kw)
+    def rewrite(self, files):
+        fp = self.opener('fncache', mode='wb')
+        for p in files:
+            fp.write(encodedir(p) + '\n')
+        fp.close()
+        self.entries = set(files)
+
+    def add(self, fn):
+        if self.entries is None:
+            self._load()
+        self.opener('fncache', 'ab').write(encodedir(fn) + '\n')
+
+    def __contains__(self, fn):
+        if self.entries is None:
+            self._load()
+        return fn in self.entries
+
+    def __iter__(self):
+        if self.entries is None:
+            self._load()
+        return iter(self.entries)
 
 class fncachestore(basicstore):
     def __init__(self, path, opener, pathjoiner):
@@ -255,7 +286,15 @@ class fncachestore(basicstore):
         self.createmode = _calcmode(self.path)
         self._op = opener(self.path)
         self._op.createmode = self.createmode
-        self.opener = fncacheopener(self._op)
+        self.fncache = fncache(self._op)
+
+        def fncacheopener(path, mode='r', *args, **kw):
+            if (mode not in ('r', 'rb')
+                and path.startswith('data/')
+                and path not in self.fncache):
+                    self.fncache.add(path)
+            return self._op(hybridencode(path), mode, *args, **kw)
+        self.opener = fncacheopener
 
     def join(self, f):
         return self.pathjoiner(self.path, hybridencode(f))
@@ -265,7 +304,7 @@ class fncachestore(basicstore):
         existing = []
         pjoin = self.pathjoiner
         spath = self.path
-        for f in fncache(self._op):
+        for f in self.fncache:
             ef = hybridencode(f)
             try:
                 st = os.stat(pjoin(spath, ef))
@@ -277,10 +316,7 @@ class fncachestore(basicstore):
         if rewrite:
             # rewrite fncache to remove nonexistent entries
             # (may be caused by rollback / strip)
-            fp = self._op('fncache', mode='wb')
-            for p in existing:
-                fp.write(p + '\n')
-            fp.close()
+            self.fncache.rewrite(existing)
 
     def copylist(self):
         d = _data + ' dh fncache'

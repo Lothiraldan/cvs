@@ -7,6 +7,38 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
+# Modifying this script is tricky because it has many modes:
+#   - serial (default) vs parallel (-jN, N > 1)
+#   - no coverage (default) vs coverage (-c, -C, -s)
+#   - temp install (default) vs specific hg script (--with-hg, --local)
+#   - tests are a mix of shell scripts and Python scripts
+#
+# If you change this script, it is recommended that you ensure you
+# haven't broken it by running it in various modes with a representative
+# sample of test scripts.  For example:
+#
+#  1) serial, no coverage, temp install:
+#      ./run-tests.py test-s*
+#  2) serial, no coverage, local hg:
+#      ./run-tests.py --local test-s*
+#  3) serial, coverage, temp install:
+#      ./run-tests.py -c test-s*
+#  4) serial, coverage, local hg:
+#      ./run-tests.py -c --local test-s*      # unsupported
+#  5) parallel, no coverage, temp install:
+#      ./run-tests.py -j2 test-s*
+#  6) parallel, no coverage, local hg:
+#      ./run-tests.py -j2 --local test-s*
+#  7) parallel, coverage, temp install:
+#      ./run-tests.py -j2 -c test-s*          # currently broken
+#  8) parallel, coverage, local install
+#      ./run-tests.py -j2 -c --local test-s*  # unsupported (and broken)
+#
+# (You could use any subset of the tests: test-s* happens to match
+# enough that it's worth doing parallel runs, few enough that it
+# completes fairly quickly, includes both shell and Python scripts, and
+# includes some scripts that run daemon processes.)
+
 import difflib
 import errno
 import optparse
@@ -34,7 +66,6 @@ SKIPPED_STATUS = 80
 SKIPPED_PREFIX = 'skipped: '
 FAILED_PREFIX  = 'hghave check failed: '
 PYTHON = sys.executable
-hgpkg = None
 
 requiredtools = ["python", "diff", "grep", "unzip", "gunzip", "bunzip2", "sed"]
 
@@ -81,7 +112,11 @@ def parseargs():
     parser.add_option("-n", "--nodiff", action="store_true",
         help="skip showing test changes")
     parser.add_option("--with-hg", type="string",
-        help="test existing install at given location")
+        metavar="HG",
+        help="test using specified hg script rather than a "
+             "temporary installation")
+    parser.add_option("--local", action="store_true",
+        help="shortcut for --with-hg=<testdir>/../hg")
     parser.add_option("--pure", action="store_true",
         help="use pure Python code instead of C extensions")
 
@@ -90,13 +125,40 @@ def parseargs():
     parser.set_defaults(**defaults)
     (options, args) = parser.parse_args()
 
-    global vlog
+    if options.with_hg:
+        if not (os.path.isfile(options.with_hg) and
+                os.access(options.with_hg, os.X_OK)):
+            parser.error('--with-hg must specify an executable hg script')
+        if not os.path.basename(options.with_hg) == 'hg':
+            sys.stderr.write('warning: --with-hg should specify an hg script')
+    if options.local:
+        testdir = os.path.dirname(os.path.realpath(sys.argv[0]))
+        hgbin = os.path.join(os.path.dirname(testdir), 'hg')
+        if not os.access(hgbin, os.X_OK):
+            parser.error('--local specified, but %r not found or not executable'
+                         % hgbin)
+        options.with_hg = hgbin
+
     options.anycoverage = (options.cover or
                            options.cover_stdlib or
                            options.annotate)
 
+    if options.anycoverage and options.with_hg:
+        # I'm not sure if this is a fundamental limitation or just a
+        # bug.  But I don't want to waste people's time and energy doing
+        # test runs that don't give the results they want.
+        parser.error("sorry, coverage options do not work when --with-hg "
+                     "or --local specified")
+
+    global vlog
     if options.verbose:
+        if options.jobs > 1 or options.child is not None:
+            pid = "[%d]" % os.getpid()
+        else:
+            pid = None
         def vlog(*msg):
+            if pid:
+                print pid,
             for m in msg:
                 print m,
             print
@@ -178,8 +240,7 @@ def checktools():
 
 def cleanup(options):
     if not options.keep_tmpdir:
-        if options.verbose:
-            print "# Cleaning up HGTMP", HGTMP
+        vlog("# Cleaning up HGTMP", HGTMP)
         shutil.rmtree(HGTMP, True)
 
 def usecorrectpython():
@@ -200,13 +261,14 @@ def usecorrectpython():
         shutil.copymode(sys.executable, mypython)
 
 def installhg(options):
-    global PYTHON
     vlog("# Performing temporary installation of HG")
     installerrs = os.path.join("tests", "install.err")
     pure = options.pure and "--pure" or ""
 
     # Run installer in hg root
-    os.chdir(os.path.join(os.path.dirname(sys.argv[0]), '..'))
+    script = os.path.realpath(sys.argv[0])
+    hgroot = os.path.dirname(os.path.dirname(script))
+    os.chdir(hgroot)
     cmd = ('%s setup.py %s clean --all'
            ' install --force --prefix="%s" --install-lib="%s"'
            ' --install-scripts="%s" >%s 2>&1'
@@ -223,19 +285,7 @@ def installhg(options):
         sys.exit(1)
     os.chdir(TESTDIR)
 
-    os.environ["PATH"] = "%s%s%s" % (BINDIR, os.pathsep, os.environ["PATH"])
-
-    pydir = os.pathsep.join([PYTHONDIR, TESTDIR])
-    pythonpath = os.environ.get("PYTHONPATH")
-    if pythonpath:
-        pythonpath = pydir + os.pathsep + pythonpath
-    else:
-        pythonpath = pydir
-    os.environ["PYTHONPATH"] = pythonpath
-
     usecorrectpython()
-    global hgpkg
-    hgpkg = _hgpath()
 
     vlog("# Installing dummy diffstat")
     f = open(os.path.join(BINDIR, 'diffstat'), 'w')
@@ -259,42 +309,40 @@ def installhg(options):
         f = open(os.path.join(BINDIR, 'hg'), 'w')
         f.write('#!' + sys.executable + '\n')
         f.write('import sys, os; os.execv(sys.executable, [sys.executable, '
-                '"%s", "-x", "%s"] + sys.argv[1:])\n' %
+                '"%s", "-x", "-p", "%s"] + sys.argv[1:])\n' %
                 (os.path.join(TESTDIR, 'coverage.py'),
                  os.path.join(BINDIR, '_hg.py')))
         f.close()
         os.chmod(os.path.join(BINDIR, 'hg'), 0700)
-        PYTHON = '"%s" "%s" -x' % (sys.executable,
-                                   os.path.join(TESTDIR,'coverage.py'))
-
-def _hgpath():
-    cmd = '%s -c "import mercurial; print mercurial.__path__[0]"'
-    hgpath = os.popen(cmd % PYTHON)
-    path = hgpath.read().strip()
-    hgpath.close()
-    return path
 
 def outputcoverage(options):
-    vlog("# Producing coverage report")
+
+    vlog('# Producing coverage report')
+    os.chdir(PYTHONDIR)
+
+    def covrun(*args):
+        start = sys.executable, os.path.join(TESTDIR, 'coverage.py')
+        cmd = '"%s" "%s" %s' % (start[0], start[1], ' '.join(args))
+        vlog('# Running: %s' % cmd)
+        os.system(cmd)
+
     omit = [BINDIR, TESTDIR, PYTHONDIR]
     if not options.cover_stdlib:
         # Exclude as system paths (ignoring empty strings seen on win)
         omit += [x for x in sys.path if x != '']
     omit = ','.join(omit)
-    os.chdir(PYTHONDIR)
-    cmd = '"%s" "%s" -i -r "--omit=%s"' % (
-        sys.executable, os.path.join(TESTDIR, 'coverage.py'), omit)
-    vlog("# Running: "+cmd)
-    os.system(cmd)
+
+    covrun('-c') # combine from parallel processes
+    for fn in os.listdir(TESTDIR):
+        if fn.startswith('.coverage.'):
+            os.unlink(os.path.join(TESTDIR, fn))
+
+    covrun('-i', '-r', '"--omit=%s"' % omit) # report
     if options.annotate:
         adir = os.path.join(TESTDIR, 'annotated')
         if not os.path.isdir(adir):
             os.mkdir(adir)
-        cmd = '"%s" "%s" -i -a "--directory=%s" "--omit=%s"' % (
-            sys.executable, os.path.join(TESTDIR, 'coverage.py'),
-            adir, omit)
-        vlog("# Running: "+cmd)
-        os.system(cmd)
+        covrun('-i', '-a', '"--directory=%s"' % adir, '"--omit=%s"' % omit)
 
 class Timeout(Exception):
     pass
@@ -360,7 +408,6 @@ def runone(options, test, skips, fails):
     hgrc.write('[defaults]\n')
     hgrc.write('backout = -d "0 0"\n')
     hgrc.write('commit = -d "0 0"\n')
-    hgrc.write('debugrawcommit = -d "0 0"\n')
     hgrc.write('tag = -d "0 0"\n')
     hgrc.close()
 
@@ -489,15 +536,42 @@ def runone(options, test, skips, fails):
         return None
     return ret == 0
 
-def runchildren(options, expecthg, tests):
-    if not options.with_hg:
+_hgpath = None
+
+def _gethgpath():
+    """Return the path to the mercurial package that is actually found by
+    the current Python interpreter."""
+    global _hgpath
+    if _hgpath is not None:
+        return _hgpath
+
+    cmd = '%s -c "import mercurial; print mercurial.__path__[0]"'
+    pipe = os.popen(cmd % PYTHON)
+    try:
+        _hgpath = pipe.read().strip()
+    finally:
+        pipe.close()
+    return _hgpath
+
+def _checkhglib(verb):
+    """Ensure that the 'mercurial' package imported by python is
+    the one we expect it to be.  If not, print a warning to stderr."""
+    expecthg = os.path.join(PYTHONDIR, 'mercurial')
+    actualhg = _gethgpath()
+    if actualhg != expecthg:
+        sys.stderr.write('warning: %s with unexpected mercurial lib: %s\n'
+                         '         (expected %s)\n'
+                         % (verb, actualhg, expecthg))
+
+def runchildren(options, tests):
+    if INST:
         installhg(options)
-        if hgpkg != expecthg:
-            print '# Testing unexpected mercurial: %s' % hgpkg
+        _checkhglib("Testing")
 
     optcopy = dict(options.__dict__)
     optcopy['jobs'] = 1
-    optcopy['with_hg'] = INST
+    if optcopy['with_hg'] is None:
+        optcopy['with_hg'] = os.path.join(BINDIR, "hg")
     opts = []
     for opt, value in optcopy.iteritems():
         name = '--' + opt.replace('_', '-')
@@ -547,28 +621,25 @@ def runchildren(options, expecthg, tests):
     for s in fails:
         print "Failed %s: %s" % (s[0], s[1])
 
-    if hgpkg != expecthg:
-        print '# Tested unexpected mercurial: %s' % hgpkg
+    _checkhglib("Tested")
     print "# Ran %d tests, %d skipped, %d failed." % (
         tested, skipped, failed)
     sys.exit(failures != 0)
 
-def runtests(options, expecthg, tests):
+def runtests(options, tests):
     global DAEMON_PIDS, HGRCPATH
     DAEMON_PIDS = os.environ["DAEMON_PIDS"] = os.path.join(HGTMP, 'daemon.pids')
     HGRCPATH = os.environ["HGRCPATH"] = os.path.join(HGTMP, '.hgrc')
 
     try:
-        if not options.with_hg:
+        if INST:
             installhg(options)
-
-            if hgpkg != expecthg:
-                print '# Testing unexpected mercurial: %s' % hgpkg
+            _checkhglib("Testing")
 
         if options.timeout > 0:
             try:
                 signal.signal(signal.SIGALRM, alarmed)
-                vlog('# Running tests with %d-second timeout' %
+                vlog('# Running each test with %d second timeout' %
                      options.timeout)
             except AttributeError:
                 print 'WARNING: cannot run tests with timeouts'
@@ -625,8 +696,7 @@ def runtests(options, expecthg, tests):
                 print "Skipped %s: %s" % s
             for s in fails:
                 print "Failed %s: %s" % s
-            if hgpkg != expecthg:
-                print '# Tested unexpected mercurial: %s' % hgpkg
+            _checkhglib("Tested")
             print "# Ran %d tests, %d skipped, %d failed." % (
                 tested, skipped, failed)
 
@@ -670,14 +740,41 @@ def main():
     os.environ["HGPORT2"] = str(options.port + 2)
 
     if options.with_hg:
-        INST = options.with_hg
+        INST = None
+        BINDIR = os.path.dirname(os.path.realpath(options.with_hg))
+
+        # This looks redundant with how Python initializes sys.path from
+        # the location of the script being executed.  Needed because the
+        # "hg" specified by --with-hg is not the only Python script
+        # executed in the test suite that needs to import 'mercurial'
+        # ... which means it's not really redundant at all.
+        PYTHONDIR = BINDIR
     else:
         INST = os.path.join(HGTMP, "install")
-    BINDIR = os.environ["BINDIR"] = os.path.join(INST, "bin")
-    PYTHONDIR = os.path.join(INST, "lib", "python")
-    COVERAGE_FILE = os.path.join(TESTDIR, ".coverage")
+        BINDIR = os.environ["BINDIR"] = os.path.join(INST, "bin")
+        PYTHONDIR = os.path.join(INST, "lib", "python")
 
-    expecthg = os.path.join(HGTMP, 'install', 'lib', 'python', 'mercurial')
+    os.environ["BINDIR"] = BINDIR
+    os.environ["PYTHON"] = PYTHON
+
+    if not options.child:
+        path = [BINDIR] + os.environ["PATH"].split(os.pathsep)
+        os.environ["PATH"] = os.pathsep.join(path)
+
+        # Include TESTDIR in PYTHONPATH so that out-of-tree extensions
+        # can run .../tests/run-tests.py test-foo where test-foo
+        # adds an extension to HGRC
+        pypath = [PYTHONDIR, TESTDIR]
+        # We have to augment PYTHONPATH, rather than simply replacing
+        # it, in case external libraries are only available via current
+        # PYTHONPATH.  (In particular, the Subversion bindings on OS X
+        # are in /opt/subversion.)
+        oldpypath = os.environ.get('PYTHONPATH')
+        if oldpypath:
+            pypath.append(oldpypath)
+        os.environ['PYTHONPATH'] = os.pathsep.join(pypath)
+
+    COVERAGE_FILE = os.path.join(TESTDIR, ".coverage")
 
     if len(args) == 0:
         args = os.listdir(".")
@@ -689,15 +786,20 @@ def main():
             ('.' not in test or test.endswith('.py') or
              test.endswith('.bat'))):
             tests.append(test)
+    if not tests:
+        print "# Ran 0 tests, 0 skipped, 0 failed."
+        return
 
     vlog("# Using TESTDIR", TESTDIR)
     vlog("# Using HGTMP", HGTMP)
+    vlog("# Using PATH", os.environ["PATH"])
+    vlog("# Using PYTHONPATH", os.environ["PYTHONPATH"])
 
     try:
         if len(tests) > 1 and options.jobs > 1:
-            runchildren(options, expecthg, tests)
+            runchildren(options, tests)
         else:
-            runtests(options, expecthg, tests)
+            runtests(options, tests)
     finally:
         cleanup(options)
 

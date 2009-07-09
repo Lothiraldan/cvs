@@ -23,7 +23,20 @@ def _string_escape(text):
     text = text.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r')
     return text.replace('\0', '\\0')
 
-class appender:
+def decodeextra(text):
+    extra = {}
+    for l in text.split('\0'):
+        if l:
+            k, v = l.decode('string_escape').split(':', 1)
+            extra[k] = v
+    return extra
+
+def encodeextra(d):
+    # keys must be sorted to produce a deterministic changelog entry
+    items = [_string_escape('%s:%s' % (k, d[k])) for k in sorted(d)]
+    return "\0".join(items)
+
+class appender(object):
     '''the changelog index must be updated last on disk, so we use this class
     to delay writes to it'''
     def __init__(self, fp, buf):
@@ -76,19 +89,20 @@ class appender:
 
 class changelog(revlog.revlog):
     def __init__(self, opener):
-        revlog.revlog.__init__(self, opener, "00changelog.i")
+        self._realopener = opener
+        self._delayed = False
+        revlog.revlog.__init__(self, self._delayopener, "00changelog.i")
 
     def delayupdate(self):
         "delay visibility of index updates to other readers"
-        self._realopener = self.opener
-        self.opener = self._delayopener
+        self._delayed = True
         self._delaycount = len(self)
         self._delaybuf = []
         self._delayname = None
 
     def finalize(self, tr):
         "finalize index updates"
-        self.opener = self._realopener
+        self._delayed = False
         # move redirected index data back into place
         if self._delayname:
             util.rename(self._delayname + ".a", self._delayname)
@@ -103,7 +117,7 @@ class changelog(revlog.revlog):
     def _delayopener(self, name, mode='r'):
         fp = self._realopener(name, mode)
         # only divert the index
-        if not name == self.indexfile:
+        if not self._delayed or not name == self.indexfile:
             return fp
         # if we're doing an initial clone, divert to another file
         if self._delaycount == 0:
@@ -145,19 +159,6 @@ class changelog(revlog.revlog):
             return
         return revlog.revlog.checkinlinesize(self, tr, fp)
 
-    def decode_extra(self, text):
-        extra = {}
-        for l in text.split('\0'):
-            if l:
-                k, v = l.decode('string_escape').split(':', 1)
-                extra[k] = v
-        return extra
-
-    def encode_extra(self, d):
-        # keys must be sorted to produce a deterministic changelog entry
-        items = [_string_escape('%s:%s' % (k, d[k])) for k in sorted(d)]
-        return "\0".join(items)
-
     def read(self, node):
         """
         format used:
@@ -192,19 +193,27 @@ class changelog(revlog.revlog):
         else:
             time, timezone, extra = extra_data
             time, timezone = float(time), int(timezone)
-            extra = self.decode_extra(extra)
+            extra = decodeextra(extra)
         if not extra.get('branch'):
             extra['branch'] = 'default'
         files = l[3:]
         return (manifest, user, (time, timezone), files, desc, extra)
 
-    def add(self, manifest, files, desc, transaction, p1=None, p2=None,
-                  user=None, date=None, extra={}):
-
+    def add(self, manifest, files, desc, transaction, p1, p2,
+                  user, date=None, extra={}):
         user = user.strip()
+        # An empty username or a username with a "\n" will make the
+        # revision text contain two "\n\n" sequences -> corrupt
+        # repository since read cannot unpack the revision.
+        if not user:
+            raise error.RevlogError(_("empty username"))
         if "\n" in user:
             raise error.RevlogError(_("username %s contains a newline")
                                     % repr(user))
+
+        # strip trailing whitespace and leading and trailing empty lines
+        desc = '\n'.join([l.rstrip() for l in desc.splitlines()]).strip('\n')
+
         user, desc = encoding.fromlocal(user), encoding.fromlocal(desc)
 
         if date:
@@ -214,7 +223,7 @@ class changelog(revlog.revlog):
         if extra and extra.get("branch") in ("default", ""):
             del extra["branch"]
         if extra:
-            extra = self.encode_extra(extra)
+            extra = encodeextra(extra)
             parseddate = "%s %s" % (parseddate, extra)
         l = [hex(manifest), user, parseddate] + sorted(files) + ["", desc]
         text = "\n".join(l)

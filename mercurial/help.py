@@ -6,6 +6,93 @@
 # GNU General Public License version 2, incorporated herein by reference.
 
 from i18n import _
+import extensions, util
+
+
+def moduledoc(file):
+    '''return the top-level python documentation for the given file
+
+    Loosely inspired by pydoc.source_synopsis(), but rewritten to handle \'''
+    as well as """ and to return the whole text instead of just the synopsis'''
+    result = []
+
+    line = file.readline()
+    while line[:1] == '#' or not line.strip():
+        line = file.readline()
+        if not line: break
+
+    start = line[:3]
+    if start == '"""' or start == "'''":
+        line = line[3:]
+        while line:
+            if line.rstrip().endswith(start):
+                line = line.split(start)[0]
+                if line:
+                    result.append(line)
+                break
+            elif not line:
+                return None # unmatched delimiter
+            result.append(line)
+            line = file.readline()
+    else:
+        return None
+
+    return ''.join(result)
+
+def listexts(header, exts, maxlength):
+    '''return a text listing of the given extensions'''
+    if not exts:
+        return ''
+    result = '\n%s\n\n' % header
+    for name, desc in sorted(exts.iteritems()):
+        desc = util.wrap(desc, maxlength + 4)
+        result += ' %s   %s\n' % (name.ljust(maxlength), desc)
+    return result
+
+def extshelp():
+    doc = _(r'''
+    Mercurial has the ability to add new features through the use of
+    extensions. Extensions may add new commands, add options to
+    existing commands, change the default behavior of commands, or
+    implement hooks.
+
+    Extensions are not loaded by default for a variety of reasons:
+    they can increase startup overhead; they may be meant for
+    advanced usage only; they may provide potentially dangerous
+    abilities (such as letting you destroy or modify history); they
+    might not be ready for prime time; or they may alter some
+    usual behaviors of stock Mercurial. It is thus up to the user to
+    activate extensions as needed.
+
+    To enable the "foo" extension, either shipped with Mercurial
+    or in the Python search path, create an entry for it in your
+    hgrc, like this:
+
+      [extensions]
+      foo =
+
+    You may also specify the full path to an extension:
+
+      [extensions]
+      myfeature = ~/.hgext/myfeature.py
+
+    To explicitly disable an extension enabled in an hgrc of broader
+    scope, prepend its path with !:
+
+      [extensions]
+      # disabling extension bar residing in /path/to/extension/bar.py
+      hgext.bar = !/path/to/extension/bar.py
+      # ditto, but no path was supplied for extension baz
+      hgext.baz = !
+    ''')
+
+    exts, maxlength = extensions.enabled()
+    doc += listexts(_('enabled extensions:'), exts, maxlength)
+
+    exts, maxlength = extensions.disabled()
+    doc += listexts(_('disabled extensions:'), exts, maxlength)
+
+    return doc
 
 helptable = (
     (["dates"], _("Date Formats"),
@@ -320,7 +407,7 @@ PYTHONPATH::
           the given date/time and the current date/time.
     - basename: Any text. Treats the text as a path, and returns the
           last component of the path after splitting by the path
-          separator (ignoring trailing seprators). For example,
+          separator (ignoring trailing separators). For example,
           "foo/bar/baz" becomes "baz" and "foo/bar//" becomes "bar".
     - stripdir: Treat the text as path and strip a directory level, if
           possible. For example, "foo" and "foo/bar" becomes "foo".
@@ -341,6 +428,7 @@ PYTHONPATH::
     - hgdate: Date. Returns the date as a pair of numbers:
           "1157407993 25200" (Unix timestamp, timezone offset).
     - isodate: Date. Returns the date in ISO 8601 format.
+    - localdate: Date. Converts a date to local date.
     - obfuscate: Any text. Returns the input text rendered as a
           sequence of XML entities.
     - person: Any text. Returns the text before an email address.
@@ -361,17 +449,19 @@ PYTHONPATH::
      _(r'''
     Valid URLs are of the form:
 
-      local/filesystem/path (or file://local/filesystem/path)
-      http://[user[:pass]@]host[:port]/[path]
-      https://[user[:pass]@]host[:port]/[path]
-      ssh://[user[:pass]@]host[:port]/[path]
+      local/filesystem/path[#revision]
+      file://local/filesystem/path[#revision]
+      http://[user[:pass]@]host[:port]/[path][#revision]
+      https://[user[:pass]@]host[:port]/[path][#revision]
+      ssh://[user[:pass]@]host[:port]/[path][#revision]
 
     Paths in the local filesystem can either point to Mercurial
     repositories or to bundle files (as created by 'hg bundle' or
     'hg incoming --bundle').
 
     An optional identifier after # indicates a particular branch, tag,
-    or changeset to use from the remote repository.
+    or changeset to use from the remote repository. See also 'hg help
+    revisions'.
 
     Some features, such as pushing to http:// and https:// URLs are
     only possible if the feature is explicitly enabled on the remote
@@ -417,4 +507,5 @@ PYTHONPATH::
       The push command will look for a path named 'default-push', and
       prefer it over 'default' if both are defined.
     ''')),
+    (["extensions"], _("Using additional features"), extshelp),
 )

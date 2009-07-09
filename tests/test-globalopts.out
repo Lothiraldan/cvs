@@ -58,10 +58,10 @@ summary:     a
 %% earlygetopt with illegal abbreviations
 abort: Option --config may not be abbreviated!
 abort: Option --cwd may not be abbreviated!
-abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
-abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
-abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
-abort: Option -R has to be separated from other options (i.e. not -qR) and --repository may only be abbreviated as --repo!
+abort: Option -R has to be separated from other options (e.g. not -qR) and --repository may only be abbreviated as --repo!
+abort: Option -R has to be separated from other options (e.g. not -qR) and --repository may only be abbreviated as --repo!
+abort: Option -R has to be separated from other options (e.g. not -qR) and --repository may only be abbreviated as --repo!
+abort: Option -R has to be separated from other options (e.g. not -qR) and --repository may only be abbreviated as --repo!
 %% --cwd
 changeset:   0:8580ff50825a
 tag:         tip
@@ -151,8 +151,8 @@ list of commands:
 
  add          add the specified files on the next commit
  addremove    add all new files, delete all missing files
- annotate     show changeset information per file line
- archive      create unversioned archive of a repository revision
+ annotate     show changeset information by line for each file
+ archive      create an unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
  bisect       subdivision search of changesets
  branch       set or show the current branch name
@@ -164,6 +164,7 @@ list of commands:
  copy         mark files as copied for the next commit
  diff         diff repository (or selected files)
  export       dump the header and diffs for one or more changesets
+ forget       forget the specified files on the next commit
  grep         search for a pattern in specified files and revisions
  heads        show current repository heads or show branch heads
  help         show help for a given topic or a help overview
@@ -208,6 +209,7 @@ additional help topics:
  diffs        Diff Formats
  templating   Template Usage
  urls         URL Paths
+ extensions   Using additional features
 
 use "hg -v help" to show aliases and global options
 Mercurial Distributed SCM
@@ -216,8 +218,8 @@ list of commands:
 
  add          add the specified files on the next commit
  addremove    add all new files, delete all missing files
- annotate     show changeset information per file line
- archive      create unversioned archive of a repository revision
+ annotate     show changeset information by line for each file
+ archive      create an unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
  bisect       subdivision search of changesets
  branch       set or show the current branch name
@@ -229,6 +231,7 @@ list of commands:
  copy         mark files as copied for the next commit
  diff         diff repository (or selected files)
  export       dump the header and diffs for one or more changesets
+ forget       forget the specified files on the next commit
  grep         search for a pattern in specified files and revisions
  heads        show current repository heads or show branch heads
  help         show help for a given topic or a help overview
@@ -273,6 +276,7 @@ additional help topics:
  diffs        Diff Formats
  templating   Template Usage
  urls         URL Paths
+ extensions   Using additional features
 
 use "hg -v help" to show aliases and global options
 %% not tested: --debugger

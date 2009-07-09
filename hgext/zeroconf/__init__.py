@@ -5,17 +5,11 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''zeroconf support for mercurial repositories
+'''discover and advertise repositories on the local network
 
 Zeroconf enabled repositories will be announced in a network without
 the need to configure a server or a service. They can be discovered
 without knowing their actual IP address.
-
-To use the zeroconf extension add the following entry to your hgrc
-file:
-
-[extensions]
-hgext.zeroconf =
 
 To allow other people to discover your repository using run "hg serve"
 in your repository.

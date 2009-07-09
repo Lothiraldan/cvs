@@ -5,24 +5,26 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''mercurial bookmarks
+'''track a line of development with movable markers
 
-Mercurial bookmarks are local moveable pointers to changesets. Every
-bookmark points to a changeset identified by its hash. If you commit a
-changeset that is based on a changeset that has a bookmark on it, the
-bookmark is forwarded to the new changeset.
+Bookmarks are local movable markers to changesets. Every bookmark
+points to a changeset identified by its hash. If you commit a
+changeset that is based on a changeset that has a bookmark on it,
+the bookmark shifts to the new changeset.
 
-It is possible to use bookmark names in every revision lookup (e.g. hg
-merge, hg update).
+It is possible to use bookmark names in every revision lookup
+(e.g. hg merge, hg update).
 
-The bookmark extension offers the possiblity to have a more git-like
-experience by adding the following configuration option to your .hgrc:
+By default, when several bookmarks point to the same changeset, they
+will all move forward together. It is possible to obtain a more
+git-like experience by adding the following configuration option to
+your .hgrc:
 
-[bookmarks]
-track.current = True
+  [bookmarks]
+  track.current = True
 
-This will cause bookmarks to track the bookmark that you are currently
-on, and just updates it. This is similar to git's approach of
+This will cause Mercurial to track the bookmark that you are currently
+using, and only update it. This is similar to git's approach to
 branching.
 '''
 
@@ -64,10 +66,14 @@ def write(repo, refs):
         util.copyfile(repo.join('bookmarks'), repo.join('undo.bookmarks'))
     if current(repo) not in refs:
         setcurrent(repo, None)
-    file = repo.opener('bookmarks', 'w+')
-    for refspec, node in refs.iteritems():
-        file.write("%s %s\n" % (hex(node), refspec))
-    file.close()
+    wlock = repo.wlock()
+    try:
+        file = repo.opener('bookmarks', 'w', atomictemp=True)
+        for refspec, node in refs.iteritems():
+            file.write("%s %s\n" % (hex(node), refspec))
+        file.rename()
+    finally:
+        wlock.release()
 
 def current(repo):
     '''Get the current bookmark
@@ -106,23 +112,27 @@ def setcurrent(repo, mark):
         return
     if mark not in refs:
         mark = ''
-    file = repo.opener('bookmarks.current', 'w+')
-    file.write(mark)
-    file.close()
+    wlock = repo.wlock()
+    try:
+        file = repo.opener('bookmarks.current', 'w', atomictemp=True)
+        file.write(mark)
+        file.rename()
+    finally:
+        wlock.release()
     repo._bookmarkcurrent = mark
 
 def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False, rename=None):
-    '''mercurial bookmarks
+    '''track a line of development with movable markers
 
     Bookmarks are pointers to certain commits that move when
-    commiting. Bookmarks are local. They can be renamed, copied and
+    committing. Bookmarks are local. They can be renamed, copied and
     deleted. It is possible to use bookmark names in 'hg merge' and
-    'hg update' to update to a given bookmark.
+    'hg update' to merge and update respectively to a given bookmark.
 
-    You can use 'hg bookmark NAME' to set a bookmark on the current
-    tip with the given name. If you specify a revision using -r REV
-    (where REV may be an existing bookmark), the bookmark is set to
-    that revision.
+    You can use 'hg bookmark NAME' to set a bookmark on the working
+    directory's parent revision with the given name. If you specify
+    a revision using -r REV (where REV may be an existing bookmark),
+    the bookmark is assigned to that revision.
     '''
     hexfn = ui.debugflag and hex or short
     marks = parse(repo)
@@ -143,7 +153,7 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False, rename=No
         return
 
     if delete:
-        if mark == None:
+        if mark is None:
             raise util.Abort(_("bookmark name required"))
         if mark not in marks:
             raise util.Abort(_("a bookmark of this name does not exist"))
@@ -171,7 +181,7 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False, rename=No
         write(repo, marks)
         return
 
-    if mark == None:
+    if mark is None:
         if rev:
             raise util.Abort(_("bookmark name required"))
         if len(marks) == 0:
@@ -242,44 +252,48 @@ def reposetup(ui, repo):
         def commit(self, *k, **kw):
             """Add a revision to the repository and
             move the bookmark"""
-            node  = super(bookmark_repo, self).commit(*k, **kw)
-            if node == None:
-                return None
-            parents = repo.changelog.parents(node)
-            if parents[1] == nullid:
-                parents = (parents[0],)
-            marks = parse(repo)
-            update = False
-            for mark, n in marks.items():
-                if ui.configbool('bookmarks', 'track.current'):
-                    if mark == current(repo) and n in parents:
-                        marks[mark] = node
-                        update = True
-                else:
-                    if n in parents:
-                        marks[mark] = node
-                        update = True
-            if update:
-                write(repo, marks)
-            return node
+            wlock = self.wlock() # do both commit and bookmark with lock held
+            try:
+                node  = super(bookmark_repo, self).commit(*k, **kw)
+                if node is None:
+                    return None
+                parents = self.changelog.parents(node)
+                if parents[1] == nullid:
+                    parents = (parents[0],)
+                marks = parse(self)
+                update = False
+                for mark, n in marks.items():
+                    if ui.configbool('bookmarks', 'track.current'):
+                        if mark == current(self) and n in parents:
+                            marks[mark] = node
+                            update = True
+                    else:
+                        if n in parents:
+                            marks[mark] = node
+                            update = True
+                if update:
+                    write(self, marks)
+                return node
+            finally:
+                wlock.release()
 
         def addchangegroup(self, source, srctype, url, emptyok=False):
-            parents = repo.dirstate.parents()
+            parents = self.dirstate.parents()
 
             result = super(bookmark_repo, self).addchangegroup(
                 source, srctype, url, emptyok)
             if result > 1:
                 # We have more heads than before
                 return result
-            node = repo.changelog.tip()
-            marks = parse(repo)
+            node = self.changelog.tip()
+            marks = parse(self)
             update = False
             for mark, n in marks.items():
                 if n in parents:
                     marks[mark] = node
                     update = True
             if update:
-                write(repo, marks)
+                write(self, marks)
             return result
 
         def tags(self):
@@ -288,7 +302,7 @@ def reposetup(ui, repo):
                 return self.tagscache
 
             tagscache = super(bookmark_repo, self).tags()
-            tagscache.update(parse(repo))
+            tagscache.update(parse(self))
             return tagscache
 
     repo.__class__ = bookmark_repo

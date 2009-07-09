@@ -60,7 +60,9 @@ echo
 echo "# default is internal merge:"
 beforemerge
 echo "# hg merge -r 2"
-PATH=$BINDIR hg merge -r 2
+# override $PATH to ensure hgmerge not visible; use $PYTHON in case we're
+# running from a devel copy, not a temp installation
+PATH=$BINDIR $PYTHON $BINDIR/hg merge -r 2
 aftermerge
 
 echo "# simplest hgrc using false for merge:"
@@ -88,8 +90,7 @@ echo "true.executable=cat" >> .hg/hgrc
 domerge -r 2
 
 echo "# and true.executable set to cat with path works:"
-domerge -r 2 --config merge-tools.true.executable=/bin/cat
-
+domerge -r 2 --config merge-tools.true.executable=cat
 
 echo
 echo Tool selection and merge-patterns
@@ -119,6 +120,20 @@ domerge -r 2 --config ui.merge=internal:local
 
 echo "# ui.merge specifies internal:other:"
 domerge -r 2 --config ui.merge=internal:other
+
+echo "# ui.merge specifies internal:prompt:"
+domerge -r 2 --config ui.merge=internal:prompt
+
+echo "# ui.merge specifies internal:dump:"
+domerge -r 2 --config ui.merge=internal:dump
+echo f.base:
+cat f.base
+echo f.local:
+cat f.local
+echo f.other:
+cat f.other
+rm f.base f.local f.other
+echo
 
 echo "# ui.merge specifies internal:other but is overruled by pattern for false:"
 domerge -r 2 --config ui.merge=internal:other --config merge-patterns.f=false
@@ -168,4 +183,4 @@ echo Merge post-processing
 echo
 
 echo "# cat is a bad merge-tool and doesn't change:"
-domerge -r 2 --config merge-tools.true.checkchanged=1
+domerge -y -r 2 --config merge-tools.true.checkchanged=1

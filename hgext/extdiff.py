@@ -5,17 +5,13 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''
+'''command to allow external programs to compare revisions
+
 The `extdiff' Mercurial extension allows you to use external programs
 to compare revisions, or revision with working directory. The external diff
 programs are called with a configurable set of options and two
 non-option arguments: paths to directories containing snapshots of
 files to compare.
-
-To enable this extension:
-
-  [extensions]
-  hgext.extdiff =
 
 The `extdiff' extension also allows to configure new diff commands, so
 you do not need to type "hg extdiff -p kdiff3" always.
@@ -35,7 +31,7 @@ you do not need to type "hg extdiff -p kdiff3" always.
 
   # add new command called vimdiff, runs gvimdiff with DirDiff plugin
   # (see http://www.vim.org/scripts/script.php?script_id=102)
-  # Non english user, be sure to put "let g:DirDiffDynamicDiffText = 1" in
+  # Non English user, be sure to put "let g:DirDiffDynamicDiffText = 1" in
   # your .vimrc
   vimdiff = gvim -f '+next' '+execute "DirDiff" argv(0) argv(1)'
 

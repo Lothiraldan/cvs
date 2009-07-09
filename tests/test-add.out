@@ -2,6 +2,8 @@ adding a
 ? a
 adding a
 A a
+adding a
+A a
 A a
 ? b
 A a
@@ -26,12 +28,13 @@ a already tracked!
 M a
 ? a.orig
 % issue683
+? a.orig
 R a
 ? a.orig
 M a
 ? a.orig
-c does not exist!
-d does not exist!
+c: No such file or directory
+d: No such file or directory
 M a
 A c
 ? a.orig

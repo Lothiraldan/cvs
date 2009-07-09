@@ -5,29 +5,17 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''browsing the repository in a graphical way
+'''browse the repository in a graphical way
 
 The hgk extension allows browsing the history of a repository in a
 graphical way. It requires Tcl/Tk version 8.4 or later. (Tcl/Tk is not
 distributed with Mercurial.)
 
 hgk consists of two parts: a Tcl script that does the displaying and
-querying of information, and an extension to mercurial named hgk.py,
+querying of information, and an extension to Mercurial named hgk.py,
 which provides hooks for hgk to get information. hgk can be found in
-the contrib directory, and hgk.py can be found in the hgext directory.
-
-To load the hgext.py extension, add it to your .hgrc file (you have to
-use your global $HOME/.hgrc file, not one in a repository). You can
-specify an absolute path:
-
-  [extensions]
-  hgk=/usr/local/lib/hgk.py
-
-Mercurial can also scan the default python library path for a file
-named 'hgk.py' if you set hgk empty:
-
-  [extensions]
-  hgk=
+the contrib directory, and the extension is shipped in the hgext
+repository, and needs to be enabled.
 
 The hg view command will launch the hgk Tcl script. For this command
 to work, hgk must be in your search path. Alternately, you can specify
@@ -96,7 +84,7 @@ def difftree(ui, repo, node1=None, node2=None, *files, **opts):
             chunks = patch.diff(repo, node1, node2, match=m,
                                 opts=patch.diffopts(ui, {'git': True}))
             for chunk in chunks:
-                repo.ui.write(chunk)
+                ui.write(chunk)
         else:
             __difftree(repo, node1, node2, files=files)
         if not opts['stdin']:
@@ -188,7 +176,7 @@ def revtree(ui, args, repo, full="tree", maxnr=0, parents=False):
             else:
                 i -= chunk
 
-            for x in xrange(0, chunk):
+            for x in xrange(chunk):
                 if i + x >= count:
                     l[chunk - x:] = [0] * (chunk - x)
                     break
@@ -221,27 +209,26 @@ def revtree(ui, args, repo, full="tree", maxnr=0, parents=False):
 
     # figure out which commits they are asking for and which ones they
     # want us to stop on
-    for i in xrange(len(args)):
-        if args[i].startswith('^'):
-            s = repo.lookup(args[i][1:])
+    for i, arg in enumerate(args):
+        if arg.startswith('^'):
+            s = repo.lookup(arg[1:])
             stop_sha1.append(s)
             want_sha1.append(s)
-        elif args[i] != 'HEAD':
-            want_sha1.append(repo.lookup(args[i]))
+        elif arg != 'HEAD':
+            want_sha1.append(repo.lookup(arg))
 
     # calculate the graph for the supplied commits
-    for i in xrange(len(want_sha1)):
-        reachable.append({});
-        n = want_sha1[i];
+    for i, n in enumerate(want_sha1):
+        reachable.append(set());
         visit = [n];
-        reachable[i][n] = 1
+        reachable[i].add(n)
         while visit:
             n = visit.pop(0)
             if n in stop_sha1:
                 continue
             for p in repo.changelog.parents(n):
                 if p not in reachable[i]:
-                    reachable[i][p] = 1
+                    reachable[i].add(p)
                     visit.append(p)
                 if p in stop_sha1:
                     continue
@@ -344,7 +331,7 @@ cmdtable = {
     "debug-config":
         (config, [], _('hg debug-config')),
     "debug-merge-base":
-        (base, [], _('hg debug-merge-base node node')),
+        (base, [], _('hg debug-merge-base REV REV')),
     "debug-rev-parse":
         (revparse,
          [('', 'default', '', _('ignored'))],
@@ -355,5 +342,5 @@ cmdtable = {
           ('t', 'topo-order', None, _('topo-order')),
           ('p', 'parents', None, _('parents')),
           ('n', 'max-count', 0, _('max-count'))],
-         _('hg debug-rev-list [options] revs')),
+         _('hg debug-rev-list [OPTION]... REV...')),
 }

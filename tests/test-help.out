@@ -3,11 +3,12 @@ Mercurial Distributed SCM
 basic commands:
 
  add        add the specified files on the next commit
- annotate   show changeset information per file line
+ annotate   show changeset information by line for each file
  clone      make a copy of an existing repository
  commit     commit the specified files or all outstanding changes
  diff       diff repository (or selected files)
  export     dump the header and diffs for one or more changesets
+ forget     forget the specified files on the next commit
  init       create a new repository in the given directory
  log        show revision history of entire repository or files
  merge      merge working directory with another revision
@@ -21,11 +22,12 @@ basic commands:
 
 use "hg help" for the full list of commands or "hg -v" for details
  add        add the specified files on the next commit
- annotate   show changeset information per file line
+ annotate   show changeset information by line for each file
  clone      make a copy of an existing repository
  commit     commit the specified files or all outstanding changes
  diff       diff repository (or selected files)
  export     dump the header and diffs for one or more changesets
+ forget     forget the specified files on the next commit
  init       create a new repository in the given directory
  log        show revision history of entire repository or files
  merge      merge working directory with another revision
@@ -42,8 +44,8 @@ list of commands:
 
  add          add the specified files on the next commit
  addremove    add all new files, delete all missing files
- annotate     show changeset information per file line
- archive      create unversioned archive of a repository revision
+ annotate     show changeset information by line for each file
+ archive      create an unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
  bisect       subdivision search of changesets
  branch       set or show the current branch name
@@ -55,6 +57,7 @@ list of commands:
  copy         mark files as copied for the next commit
  diff         diff repository (or selected files)
  export       dump the header and diffs for one or more changesets
+ forget       forget the specified files on the next commit
  grep         search for a pattern in specified files and revisions
  heads        show current repository heads or show branch heads
  help         show help for a given topic or a help overview
@@ -99,12 +102,13 @@ additional help topics:
  diffs        Diff Formats
  templating   Template Usage
  urls         URL Paths
+ extensions   Using additional features
 
 use "hg -v help" to show aliases and global options
  add          add the specified files on the next commit
  addremove    add all new files, delete all missing files
- annotate     show changeset information per file line
- archive      create unversioned archive of a repository revision
+ annotate     show changeset information by line for each file
+ archive      create an unversioned archive of a repository revision
  backout      reverse effect of earlier changeset
  bisect       subdivision search of changesets
  branch       set or show the current branch name
@@ -116,6 +120,7 @@ use "hg -v help" to show aliases and global options
  copy         mark files as copied for the next commit
  diff         diff repository (or selected files)
  export       dump the header and diffs for one or more changesets
+ forget       forget the specified files on the next commit
  grep         search for a pattern in specified files and revisions
  heads        show current repository heads or show branch heads
  help         show help for a given topic or a help overview
@@ -160,6 +165,7 @@ additional help topics:
  diffs        Diff Formats
  templating   Template Usage
  urls         URL Paths
+ extensions   Using additional features
 hg add [OPTION]... [FILE]...
 
 add the specified files on the next commit
@@ -168,7 +174,7 @@ add the specified files on the next commit
     repository.
 
     The files will be added to the repository at the next commit. To
-    undo an add before that, see hg revert.
+    undo an add before that, see hg forget.
 
     If no names are given, add all files to the repository.
 
@@ -188,7 +194,7 @@ add the specified files on the next commit
     repository.
 
     The files will be added to the repository at the next commit. To
-    undo an add before that, see hg revert.
+    undo an add before that, see hg forget.
 
     If no names are given, add all files to the repository.
 
@@ -248,10 +254,10 @@ show changed files in the working directory
 
     Show status of files in the repository. If names are given, only
     files that match are shown. Files that are clean or ignored or
-    source of a copy/move operation, are not listed unless -c/--clean,
-    -i/--ignored, -C/--copies or -A/--all is given. Unless options
-    described with "show only ..." are given, the options -mardu are
-    used.
+    the source of a copy/move operation, are not listed unless
+    -c/--clean, -i/--ignored, -C/--copies or -A/--all are given.
+    Unless options described with "show only ..." are given, the
+    options -mardu are used.
 
     Option -q/--quiet hides untracked (unknown and ignored) files
     unless explicitly requested with -u/--unknown or -i/--ignored.
@@ -262,7 +268,8 @@ show changed files in the working directory
     to one merge parent.
 
     If one revision is given, it is used as the base revision.
-    If two revisions are given, the difference between them is shown.
+    If two revisions are given, the differences between them are
+    shown.
 
     The codes used to show the status of files are:
     M = modified
@@ -272,7 +279,7 @@ show changed files in the working directory
     ! = missing (deleted by non-hg command, but still tracked)
     ? = not tracked
     I = ignored
-      = the previous added file was copied from here
+      = origin of the previous file listed as A (added)
 
 options:
 
@@ -301,11 +308,12 @@ Mercurial Distributed SCM
 basic commands:
 
  add        add the specified files on the next commit
- annotate   show changeset information per file line
+ annotate   show changeset information by line for each file
  clone      make a copy of an existing repository
  commit     commit the specified files or all outstanding changes
  diff       diff repository (or selected files)
  export     dump the header and diffs for one or more changesets
+ forget     forget the specified files on the next commit
  init       create a new repository in the given directory
  log        show revision history of entire repository or files
  merge      merge working directory with another revision
@@ -324,11 +332,12 @@ Mercurial Distributed SCM
 basic commands:
 
  add        add the specified files on the next commit
- annotate   show changeset information per file line
+ annotate   show changeset information by line for each file
  clone      make a copy of an existing repository
  commit     commit the specified files or all outstanding changes
  diff       diff repository (or selected files)
  export     dump the header and diffs for one or more changesets
+ forget     forget the specified files on the next commit
  init       create a new repository in the given directory
  log        show revision history of entire repository or files
  merge      merge working directory with another revision

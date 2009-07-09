@@ -1,14 +1,10 @@
 # Copyright (C) 2006 - Marco Barisione <marco@barisione.org>
 #
-# This is a small extension for Mercurial (http://www.selenic.com/mercurial)
+# This is a small extension for Mercurial (http://mercurial.selenic.com/)
 # that removes files not known to mercurial
 #
 # This program was inspired by the "cvspurge" script contained in CVS utilities
 # (http://www.red-bean.com/cvsutils/).
-#
-# To enable the "purge" extension put these lines in your ~/.hgrc:
-#  [extensions]
-#  hgext.purge =
 #
 # For help on the usage of "hg purge" use:
 #  hg help purge
@@ -27,6 +23,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
+'''command to delete untracked files from the working directory'''
+
 from mercurial import util, commands, cmdutil
 from mercurial.i18n import _
 import os, stat
@@ -40,7 +38,7 @@ def purge(ui, repo, *dirs, **opts):
     This means that purge will delete:
      - Unknown files: files marked with "?" by "hg status"
      - Empty directories: in fact Mercurial ignores directories unless
-       they contain files under source control managment
+       they contain files under source control management
     But it will leave untouched:
      - Modified and unmodified tracked files
      - Ignored files (unless --all is specified)
@@ -102,7 +100,7 @@ cmdtable = {
         (purge,
          [('a', 'abort-on-err', None, _('abort if an error occurs')),
           ('',  'all', None, _('purge ignored files too')),
-          ('p', 'print', None, _('print the file names instead of deleting them')),
+          ('p', 'print', None, _('print filenames instead of deleting them')),
           ('0', 'print0', None, _('end filenames with NUL, for use with xargs'
                                   ' (implies -p/--print)')),
          ] + commands.walkopts,

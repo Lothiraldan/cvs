@@ -8,11 +8,19 @@
 from i18n import _
 import osutil, error
 import errno, msvcrt, os, re, sys
-nulldev = 'NUL:'
 
+nulldev = 'NUL:'
 umask = 002
 
-class winstdout:
+# wrap osutil.posixfile to provide friendlier exceptions
+def posixfile(name, mode='r', buffering=-1):
+    try:
+        return osutil.posixfile(name, mode, buffering)
+    except WindowsError, err:
+        raise IOError(err.errno, err.strerror)
+posixfile.__doc__ = osutil.posixfile.__doc__
+
+class winstdout(object):
     '''stdout on windows misbehaves if sent through a pipe'''
 
     def __init__(self, fp):
@@ -60,7 +68,7 @@ def _is_win_9x():
         return 'command' in os.environ.get('comspec', '')
 
 def openhardlinks():
-    return not _is_win_9x and "win32api" in locals()
+    return not _is_win_9x() and "win32api" in globals()
 
 def system_rcpath():
     try:
@@ -83,7 +91,7 @@ def user_rcpath():
     return path
 
 def parse_patch_output(output_line):
-    """parses the output produced by patch and returns the file name"""
+    """parses the output produced by patch and returns the filename"""
     pf = output_line[14:]
     if pf[0] == '`':
         pf = pf[1:-1] # Remove the quotes
@@ -156,7 +164,7 @@ def explain_exit(code):
 
 # if you change this stub into a real check, please try to implement the
 # username and groupname functions above, too.
-def isowner(fp, st=None):
+def isowner(st):
     return True
 
 def find_exe(command):
@@ -240,23 +248,37 @@ def groupname(gid=None):
     If gid is None, return the name of the current group."""
     return None
 
+def _removedirs(name):
+    """special version of os.removedirs that does not remove symlinked
+    directories or junction points if they actually contain files"""
+    if osutil.listdir(name):
+        return
+    os.rmdir(name)
+    head, tail = os.path.split(name)
+    if not tail:
+        head, tail = os.path.split(head)
+    while head and tail:
+        try:
+            if osutil.listdir(name):
+                return
+            os.rmdir(head)
+        except:
+            break
+        head, tail = os.path.split(head)
+
+def unlink(f):
+    """unlink and remove the directory if it is empty"""
+    os.unlink(f)
+    # try removing directories that might now be empty
+    try:
+        _removedirs(os.path.dirname(f))
+    except OSError:
+        pass
+
 try:
     # override functions with win32 versions if possible
     from win32 import *
-    if not _is_win_9x():
-        posixfile = posixfile_nt
-        try:
-            # fast, buffered POSIX-like file support
-            from osutil import posixfile as _posixfile
-            def posixfile(name, mode='r', buffering=-1):
-                # wrap osutil.posixfile to provide friendlier exceptions
-                try:
-                    return _posixfile(name, mode, buffering)
-                except WindowsError, err:
-                    raise WinIOError(err)
-            posixfile.__doc__ = _posixfile.__doc__
-        except ImportError:
-            # slow, unbuffered POSIX-like file support
-            posixfile = posixfile_nt
 except ImportError:
-    posixfile = file
+    pass
+
+expandglobs = True

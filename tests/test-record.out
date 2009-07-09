@@ -27,10 +27,8 @@ interactively select changes to commit
 
 options:
 
- -A --addremove     mark new/missing files as added/removed before
-                    committing
-    --close-branch  mark a branch as closed, hiding it from the branch
-                    list
+ -A --addremove     mark new/missing files as added/removed before committing
+    --close-branch  mark a branch as closed, hiding it from the branch list
  -I --include       include names matching the given patterns
  -X --exclude       exclude names matching the given patterns
  -m --message       use <text> as commit message
@@ -53,9 +51,7 @@ date:        Thu Jan 01 00:00:00 1970 +0000
 % select files but no hunks
 diff --git a/empty-rw b/empty-rw
 new file mode 100644
-examine changes to 'empty-rw'? [Ynsfdaq?]  transaction abort!
-rollback completed
-abort: empty commit message
+examine changes to 'empty-rw'? [Ynsfdaq?]  abort: empty commit message
 
 changeset:   -1:000000000000
 tag:         tip
@@ -573,4 +569,28 @@ new mode 100644
  a
  b
 +c
+
+% with win32ext
+diff --git a/subdir/f1 b/subdir/f1
+1 hunks, 1 lines changed
+examine changes to 'subdir/f1'? [Ynsfdaq?]  @@ -3,3 +3,4 @@
+ a
+ b
+ c
++d
+record this change to 'subdir/f1'? [Ynsfdaq?]  
+changeset:   25:49b3838dc9e7
+tag:         tip
+user:        test
+date:        Thu Jan 01 00:00:23 1970 +0000
+summary:     w1
+
+diff -r 8fd83ff53ce6 -r 49b3838dc9e7 subdir/f1
+--- a/subdir/f1	Thu Jan 01 00:00:22 1970 +0000
++++ b/subdir/f1	Thu Jan 01 00:00:23 1970 +0000
+@@ -3,3 +3,4 @@
+ a
+ b
+ c
++d
 

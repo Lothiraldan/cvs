@@ -1,16 +1,16 @@
-# GnuPG signing extension for Mercurial
-#
 # Copyright 2005, 2006 Benoit Boissinot <benoit.boissinot@ens-lyon.org>
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
+'''commands to sign and verify changesets'''
+
 import os, tempfile, binascii
-from mercurial import util, commands
+from mercurial import util, commands, match
 from mercurial import node as hgnode
 from mercurial.i18n import _
 
-class gpg:
+class gpg(object):
     def __init__(self, path, key=None):
         self.path = path
         self.key = (key and " --local-user \"%s\"" % key) or ""
@@ -255,7 +255,8 @@ def sign(ui, repo, *revs, **opts):
                              % hgnode.short(n)
                              for n in nodes])
     try:
-        repo.commit([".hgsigs"], message, opts['user'], opts['date'])
+        m = match.exact(repo.root, '', ['.hgsigs'])
+        repo.commit(message, opts['user'], opts['date'], match=m)
     except ValueError, inst:
         raise util.Abort(str(inst))
 

@@ -1,7 +1,7 @@
 # Copyright (C) 2007-8 Brendan Cully <brendan@kublai.com>
 # Published under the GNU GPL
 
-"""CIA notification
+"""hooks for integrating with the CIA.vc notification service
 
 This is meant to be run as a changegroup or incoming hook.
 To configure it, set the following options in your hgrc:
@@ -16,7 +16,7 @@ project = foo
 # Append a diffstat to the log message (optional)
 #diffstat = False
 # Template to use for log messages (optional)
-#template = {desc}\n{baseurl}/rev/{node}-- {diffstat}
+#template = {desc}\\n{baseurl}/rev/{node}-- {diffstat}
 # Style to use (optional)
 #style = foo
 # The URL of the CIA notification service (optional)
@@ -99,7 +99,7 @@ class ciamsg(object):
         return '\n'.join(msg)
 
     def diffstat(self):
-        class patchbuf:
+        class patchbuf(object):
             def __init__(self):
                 self.lines = []
                 # diffstat is stupid

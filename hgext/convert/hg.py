@@ -12,13 +12,13 @@
 #   those older versions, then converted, may thus have different
 #   hashes for changesets that are otherwise identical.
 #
-# * By default, the source revision is stored in the converted
-#   revision.  This will cause the converted revision to have a
-#   different identity than the source.  To avoid this, use the
-#   following option: "--config convert.hg.saverev=false"
+# * Using "--config convert.hg.saverev=true" will make the source
+#   identifier to be stored in the converted revision. This will cause
+#   the converted revision to have a different identity than the
+#   source.
 
 
-import os, time
+import os, time, cStringIO
 from mercurial.i18n import _
 from mercurial.node import bin, hex, nullid
 from mercurial import hg, util, context, error
@@ -112,13 +112,27 @@ class mercurial_sink(converter_sink):
                 self.repo.pull(prepo, [prepo.lookup(h) for h in heads])
             self.before()
 
-    def putcommit(self, files, copies, parents, commit, source):
+    def _rewritetags(self, source, revmap, data):
+        fp = cStringIO.StringIO()
+        for line in data.splitlines():
+            s = line.split(' ', 1)
+            if len(s) != 2:
+                continue
+            revid = revmap.get(source.lookuprev(s[0]))
+            if not revid:
+                continue
+            fp.write('%s %s\n' % (revid, s[1]))
+        return fp.getvalue()
+
+    def putcommit(self, files, copies, parents, commit, source, revmap):
 
         files = dict(files)
         def getfilectx(repo, memctx, f):
             v = files[f]
             data = source.getfile(f, v)
             e = source.getmode(f, v)
+            if f == '.hgtags':
+                data = self._rewritetags(source, revmap, data)
             return context.memfilectx(f, data, 'l' in e, 'x' in e, copies.get(f))
 
         pl = []
@@ -131,8 +145,8 @@ class mercurial_sink(converter_sink):
             m1node = self.repo.changelog.read(bin(parents[0]))[0]
             parent = parents[0]
 
-        if len(parents) < 2: parents.append("0" * 40)
-        if len(parents) < 2: parents.append("0" * 40)
+        if len(parents) < 2: parents.append(nullid)
+        if len(parents) < 2: parents.append(nullid)
         p2 = parents.pop(0)
 
         text = commit.desc
@@ -155,6 +169,7 @@ class mercurial_sink(converter_sink):
             man = self.repo.manifest
             mnode = self.repo.changelog.read(bin(p2))[0]
             if not man.cmp(m1node, man.revision(mnode)):
+                self.ui.status(_("filtering out empty revision\n"))
                 self.repo.rollback()
                 return parent
         return p2
@@ -195,7 +210,7 @@ class mercurial_source(converter_source):
     def __init__(self, ui, path, rev=None):
         converter_source.__init__(self, ui, path, rev)
         self.ignoreerrors = ui.configbool('convert', 'hg.ignoreerrors', False)
-        self.ignored = {}
+        self.ignored = set()
         self.saverev = ui.configbool('convert', 'hg.saverev', False)
         try:
             self.repo = hg.repository(self.ui, path)
@@ -288,7 +303,7 @@ class mercurial_source(converter_source):
             except error.LookupError, e:
                 if not self.ignoreerrors:
                     raise
-                self.ignored[name] = 1
+                self.ignored.add(name)
                 self.ui.warn(_('ignoring: %s\n') % e)
         return copies
 
@@ -301,7 +316,8 @@ class mercurial_source(converter_source):
             crev = None
         return commit(author=ctx.user(), date=util.datestr(ctx.date()),
                       desc=ctx.description(), rev=crev, parents=parents,
-                      branch=ctx.branch(), extra=ctx.extra())
+                      branch=ctx.branch(), extra=ctx.extra(),
+                      sortkey=ctx.rev())
 
     def gettags(self):
         tags = [t for t in self.repo.tagslist() if t[0] != 'tip']
@@ -336,3 +352,12 @@ class mercurial_source(converter_source):
 
     def after(self):
         self.ui.debug(_('run hg source post-conversion action\n'))
+
+    def hasnativeorder(self):
+        return True
+
+    def lookuprev(self, rev):
+        try:
+            return hex(self.repo.lookup(rev))
+        except error.RepoError:
+            return None

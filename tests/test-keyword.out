@@ -1,5 +1,5 @@
 % help
-keyword extension - keyword expansion in local repositories
+keyword extension - expand keywords in tracked files
 
 This extension expands RCS/CVS-like or self-customized $Keywords$ in
 tracked text files selected by your configuration.
@@ -31,7 +31,7 @@ replaced with customized keywords and templates. Again, run "hg
 kwdemo" to control the results of your config changes.
 
 Before changing/disabling active keywords, run "hg kwshrink" to avoid
-the risk of inadvertedly storing expanded keywords in the change
+the risk of inadvertently storing expanded keywords in the change
 history.
 
 To force expansion after enabling it, or a configuration change, run
@@ -49,15 +49,15 @@ like CVS' $Log$, are not supported. A keyword template map
 list of commands:
 
  kwdemo     print [keywordmaps] configuration and an expansion example
- kwexpand   expand keywords in working directory
- kwfiles    print files currently configured for keyword expansion
- kwshrink   revert expanded keywords in working directory
+ kwexpand   expand keywords in the working directory
+ kwfiles    show files configured for keyword expansion
+ kwshrink   revert expanded keywords in the working directory
 
 enabled extensions:
 
- keyword   keyword expansion in local repositories
- mq        patch management and development
- notify    hook extension to email notifications on commits/pushes
+ keyword   expand keywords in tracked files
+ mq        manage a stack of patches
+ notify    hooks for sending email notifications at commit/push time
 
 use "hg -v help keyword" to show aliases and global options
 % hg kwdemo
@@ -112,10 +112,6 @@ A a
 A b
 % default keyword expansion including commit hook
 % interrupted commit should not change state or run commit hook
-a
-b
-transaction abort!
-rollback completed
 abort: empty commit message
 % status
 A a
@@ -257,7 +253,7 @@ rolling back last transaction
 % status
 A c
 % update -C
-0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 % custom keyword expansion
 % try with kwdemo
 [extensions]
@@ -281,17 +277,17 @@ xxx $
 ignore $Id$
 a
 % interrupted commit should not change state
-transaction abort!
-rollback completed
 abort: empty commit message
 % status
 M a
+? c
 ? log
 % commit
 a
 overwriting a expanding keywords
 committed changeset 2:bb948857c743469b22bbf51f7ec8112279ca5d83
 % status
+? c
 % verify
 checking changesets
 checking manifests
@@ -319,10 +315,12 @@ a
 % remove
 committed changeset 3:d14c712653769de926994cf7fbb06c8fbd68f012
 % status
+? c
 % rollback
 rolling back last transaction
 % status
 R a
+? c
 % revert a
 % cat a
 expand $Id: a bb948857c743 Thu, 01 Jan 1970 00:00:02 +0000 user $

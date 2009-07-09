@@ -7,23 +7,21 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
-#
-# The `interhg' Mercurial extension allows you to change changelog and
-# summary text just like InterWiki way.
-#
-# To enable this extension:
-#
-#   [extensions]
-#   interhg =
-#
-# These are some example patterns (link to bug tracking, etc.)
-#
-#   [interhg]
-#   issues = s!issue(\d+)!<a href="http://bts/issue\1">issue\1<\/a>!
-#   bugzilla = s!((?:bug|b=|(?=#?\d{4,}))(?:\s*#?)(\d+))!<a..=\2">\1</a>!i
-#   boldify = s/(^|\s)#(\d+)\b/ <b>#\2<\/b>/
-#
-# Add any number of names and patterns to match
+
+'''expand expressions into changelog and summaries
+
+This extension allows the use of a special syntax in summaries,
+which will be automatically expanded into links or any other
+arbitrary expression, much like InterWiki does.
+
+A few example patterns (link to bug tracking, etc.) that may
+be used in your hgrc:
+
+  [interhg]
+  issues = s!issue(\\d+)!<a href="http://bts/issue\\1">issue\\1</a>!
+  bugzilla = s!((?:bug|b=|(?=#?\\d{4,}))(?:\\s*#?)(\\d+))!<a..=\\2">\\1</a>!i
+  boldify = s!(^|\\s)#(\\d+)\\b! <b>#\\2</b>!
+'''
 
 import re
 from mercurial.hgweb import hgweb_mod

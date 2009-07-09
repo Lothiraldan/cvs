@@ -1,5 +1,5 @@
 % help
-mq extension - patch management and development
+mq extension - manage a stack of patches
 
 This extension lets you work with a stack of patches in a Mercurial
 repository. It manages two stacks of patches - all known patches, and
@@ -53,7 +53,7 @@ list of commands:
 
 enabled extensions:
 
- mq   patch management and development
+ mq   manage a stack of patches
 
 use "hg -v help mq" to show aliases and global options
 adding a
@@ -242,7 +242,7 @@ added 1 changesets with 1 changes to 1 files
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 abort: local changes found
 % --force strip with local changes
-0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+0 files updated, 0 files merged, 1 files removed, 0 files unresolved
 saving bundle to 
 % cd b; hg qrefresh
 adding a
@@ -326,7 +326,7 @@ adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
 patch queue now empty
-(working directory not at tip)
+(working directory not at a head)
 applying bar
 now at: bar
 diff --git a/bar b/bar
@@ -360,7 +360,7 @@ adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
 patch queue now empty
-(working directory not at tip)
+(working directory not at a head)
 applying bar
 now at: bar
 diff --git a/foo b/bleh

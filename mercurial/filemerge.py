@@ -7,7 +7,7 @@
 
 from node import short
 from i18n import _
-import util, simplemerge
+import util, simplemerge, match
 import os, tempfile, re, filecmp
 
 def _toolstr(ui, tool, part, default=""):
@@ -16,8 +16,11 @@ def _toolstr(ui, tool, part, default=""):
 def _toolbool(ui, tool, part, default=False):
     return ui.configbool("merge-tools", tool + "." + part, default)
 
+_internal = ['internal:' + s
+             for s in 'fail local other merge prompt dump'.split()]
+
 def _findtool(ui, tool):
-    if tool in ("internal:fail", "internal:local", "internal:other"):
+    if tool in _internal:
         return tool
     k = _toolstr(ui, tool, "regkey")
     if k:
@@ -55,7 +58,7 @@ def _picktool(repo, ui, path, binary, symlink):
 
     # then patterns
     for pat, tool in ui.configitems("merge-patterns"):
-        mf = util.matcher(repo.root, "", [pat], [], [])[1]
+        mf = match.match(repo.root, '', [pat])
         if mf(path) and check(tool, pat, symlink, False):
                 toolpath = _findtool(ui, tool)
                 return (tool, '"' + toolpath + '"')
@@ -140,7 +143,7 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
     ui.debug(_("picked tool '%s' for %s (binary %s symlink %s)\n") %
                (tool, fd, binary, symlink))
 
-    if not tool:
+    if not tool or tool == 'internal:prompt':
         tool = "internal:local"
         if ui.prompt(_(" no tool found to merge %s\n"
                        "keep (l)ocal or take (o)ther?") % fd,
@@ -163,11 +166,11 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
     util.copyfile(a, back)
 
     if orig != fco.path():
-        repo.ui.status(_("merging %s and %s to %s\n") % (orig, fco.path(), fd))
+        ui.status(_("merging %s and %s to %s\n") % (orig, fco.path(), fd))
     else:
-        repo.ui.status(_("merging %s\n") % fd)
+        ui.status(_("merging %s\n") % fd)
 
-    repo.ui.debug(_("my %s other %s ancestor %s\n") % (fcd, fco, fca))
+    ui.debug(_("my %s other %s ancestor %s\n") % (fcd, fco, fca))
 
     # do we attempt to simplemerge first?
     if _toolbool(ui, tool, "premerge", not (binary or symlink)):
@@ -189,6 +192,12 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
 
     if tool == "internal:merge":
         r = simplemerge.simplemerge(ui, a, b, c, label=['local', 'other'])
+    elif tool == 'internal:dump':
+        a = repo.wjoin(fd)
+        util.copyfile(a, a + ".local")
+        repo.wwrite(fd + ".other", fco.data(), fco.flags())
+        repo.wwrite(fd + ".base", fca.data(), fca.flags())
+        return 1 # unresolved
     else:
         args = _toolstr(ui, tool, "args", '$local $base $other')
         if "$output" in args:
@@ -213,7 +222,7 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
         _matcheol(repo.wjoin(fd), back)
 
     if r:
-        repo.ui.warn(_("merging %s failed!\n") % fd)
+        ui.warn(_("merging %s failed!\n") % fd)
     else:
         os.unlink(back)
 

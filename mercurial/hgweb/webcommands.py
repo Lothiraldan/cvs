@@ -12,15 +12,15 @@ from mercurial.node import short, hex
 from mercurial.util import binary
 from common import paritygen, staticfile, get_contact, ErrorResponse
 from common import HTTP_OK, HTTP_FORBIDDEN, HTTP_NOT_FOUND
-from mercurial import graphmod, util
+from mercurial import graphmod
 
 # __all__ is populated with the allowed commands. Be sure to add to it if
 # you're adding a new command, or the new command won't work.
 
 __all__ = [
    'log', 'rawfile', 'file', 'changelog', 'shortlog', 'changeset', 'rev',
-   'manifest', 'tags', 'summary', 'filediff', 'diff', 'annotate', 'filelog',
-   'archive', 'static', 'graph',
+   'manifest', 'tags', 'branches', 'summary', 'filediff', 'diff', 'annotate',
+   'filelog', 'archive', 'static', 'graph',
 ]
 
 def log(web, req, tmpl):
@@ -358,6 +358,35 @@ def tags(web, req, tmpl):
                 entriesnotip=lambda **x: entries(True,0, **x),
                 latestentry=lambda **x: entries(True,1, **x))
 
+def branches(web, req, tmpl):
+    b = web.repo.branchtags()
+    tips = (web.repo[n] for t, n in web.repo.branchtags().iteritems())
+    heads = web.repo.heads()
+    parity = paritygen(web.stripecount)
+    sortkey = lambda ctx: ('close' not in ctx.extra(), ctx.rev())
+
+    def entries(limit, **map):
+        count = 0
+        for ctx in sorted(tips, key=sortkey, reverse=True):
+            if limit > 0 and count >= limit:
+                return
+            count += 1
+            if ctx.node() not in heads:
+                status = 'inactive'
+            elif not web.repo.branchheads(ctx.branch()):
+                status = 'closed'
+            else:
+                status = 'open'
+            yield {'parity': parity.next(),
+                   'branch': ctx.branch(),
+                   'status': status,
+                   'node': ctx.hex(),
+                   'date': ctx.date()}
+
+    return tmpl('branches', node=hex(web.repo.changelog.tip()),
+                entries=lambda **x: entries(0, **x),
+                latestentry=lambda **x: entries(1, **x))
+
 def summary(web, req, tmpl):
     i = web.repo.tagslist()
     i.reverse()
@@ -639,10 +668,13 @@ def graph(web, req, tmpl):
     count = len(web.repo)
     changenav = webutil.revnavgen(rev, revcount, count, web.repo.changectx)
 
-    tree = list(graphmod.graph(web.repo, rev, downrev))
+    dag = graphmod.revisions(web.repo, rev, downrev)
+    tree = list(graphmod.colored(dag))
     canvasheight = (len(tree) + 1) * bg_height - 27;
     data = []
-    for (ctx, vtx, edges) in tree:
+    for (id, type, ctx, vtx, edges) in tree:
+        if type != graphmod.CHANGESET:
+            continue
         node = short(ctx.node())
         age = templatefilters.age(ctx.date())
         desc = templatefilters.firstline(ctx.description())

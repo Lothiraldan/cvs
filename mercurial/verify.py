@@ -21,7 +21,7 @@ def _verify(repo):
     filelinkrevs = {}
     filenodes = {}
     revisions = 0
-    badrevs = {}
+    badrevs = set()
     errors = [0]
     warnings = [0]
     ui = repo.ui
@@ -33,7 +33,7 @@ def _verify(repo):
 
     def err(linkrev, msg, filename=None):
         if linkrev != None:
-            badrevs[linkrev] = True
+            badrevs.add(linkrev)
         else:
             linkrev = '?'
         msg = "%s: %s" % (linkrev, msg)
@@ -128,6 +128,8 @@ def _verify(repo):
         lr = checkentry(mf, i, n, seen, mflinkrevs.get(n, []), "manifest")
         if n in mflinkrevs:
             del mflinkrevs[n]
+        else:
+            err(lr, _("%s not in changesets") % short(n), "manifest")
 
         try:
             for f, fn in mf.readdelta(n).iteritems():
@@ -164,12 +166,12 @@ def _verify(repo):
 
     ui.status(_("checking files\n"))
 
-    storefiles = {}
+    storefiles = set()
     for f, f2, size in repo.store.datafiles():
         if not f:
             err(None, _("cannot decode filename '%s'") % f2)
         elif size > 0:
-            storefiles[f] = True
+            storefiles.add(f)
 
     files = sorted(set(filenodes) | set(filelinkrevs))
     for f in files:
@@ -192,7 +194,7 @@ def _verify(repo):
 
         for ff in fl.files():
             try:
-                del storefiles[ff]
+                storefiles.remove(ff)
             except KeyError:
                 err(lr, _("missing revlog!"), ff)
 
@@ -227,7 +229,8 @@ def _verify(repo):
                         err(lr, _("empty or missing copy source revlog %s:%s")
                             % (rp[0], short(rp[1])), f)
                     elif rp[1] == nullid:
-                        warn(_("warning: %s@%s: copy source revision is nullid %s:%s")
+                        ui.note(_("warning: %s@%s: copy source"
+                                  " revision is nullid %s:%s\n")
                             % (f, lr, rp[0], short(rp[1])))
                     else:
                         fl2.rev(rp[1])

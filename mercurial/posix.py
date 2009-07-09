@@ -13,6 +13,7 @@ posixfile = file
 nulldev = '/dev/null'
 normpath = os.path.normpath
 samestat = os.path.samestat
+expandglobs = False
 
 umask = os.umask(0)
 os.umask(umask)
@@ -45,7 +46,7 @@ def user_rcpath():
     return [os.path.expanduser('~/.hgrc')]
 
 def parse_patch_output(output_line):
-    """parses the output produced by patch and returns the file name"""
+    """parses the output produced by patch and returns the filename"""
     pf = output_line[14:]
     if os.sys.platform == 'OpenVMS':
         if pf[0] == '`':
@@ -138,13 +139,8 @@ def explain_exit(code):
         return _("stopped by signal %d") % val, val
     raise ValueError(_("invalid exit code"))
 
-def isowner(fp, st=None):
-    """Return True if the file object f belongs to the current user.
-
-    The return value of a util.fstat(f) may be passed as the st argument.
-    """
-    if st is None:
-        st = fstat(fp)
+def isowner(st):
+    """Return True if the stat object st is from the current user."""
     return st.st_uid == os.getuid()
 
 def find_exe(command):

@@ -9,23 +9,23 @@
 # GNU General Public License version 2, incorporated herein by reference.
 #
 
-"""allow to use MBCS path with problematic encoding.
+'''allow the use of MBCS paths with problematic encodings
 
 Some MBCS encodings are not good for some path operations (i.e.
 splitting path, case conversion, etc.) with its encoded bytes. We call
 such a encoding (i.e. shift_jis and big5) as "problematic encoding".
 This extension can be used to fix the issue with those encodings by
-wrapping some functions to convert to unicode string before path
+wrapping some functions to convert to Unicode string before path
 operation.
 
-This extension is usefull for:
+This extension is useful for:
  * Japanese Windows users using shift_jis encoding.
  * Chinese Windows users using big5 encoding.
  * All users who use a repository with one of problematic encodings on
    case-insensitive file system.
 
 This extension is not needed for:
- * Any user who use only ascii chars in path.
+ * Any user who use only ASCII chars in path.
  * Any user who do not use any of problematic encodings.
 
 Note that there are some limitations on using this extension:
@@ -33,16 +33,10 @@ Note that there are some limitations on using this extension:
  * You should set same encoding for the repository by locale or
    HGENCODING.
 
-To use this extension, enable the extension in .hg/hgrc or ~/.hgrc:
-
-  [extensions]
-  hgext.win32mbcs =
-
-Path encoding conversion are done between unicode and
-encoding.encoding which is decided by mercurial from current locale
+Path encoding conversion are done between Unicode and
+encoding.encoding which is decided by Mercurial from current locale
 setting or HGENCODING.
-
-"""
+'''
 
 import os
 from mercurial.i18n import _
@@ -88,7 +82,7 @@ def wrapname(name):
     idx = name.rfind('.')
     module = name[:idx]
     name = name[idx+1:]
-    module = eval(module)
+    module = globals()[module]
     func = getattr(module, name)
     def f(*args):
         return wrapper(func, args)
@@ -109,7 +103,7 @@ funcs = '''os.path.join os.path.split os.path.splitext
 problematic_encodings = '''big5 big5-tw csbig5 big5hkscs big5-hkscs
  hkscs cp932 932 ms932 mskanji ms-kanji shift_jis csshiftjis shiftjis
  sjis s_jis shift_jis_2004 shiftjis2004 sjis_2004 sjis2004
- shift_jisx0213 shiftjisx0213 sjisx0213 s_jisx0213'''
+ shift_jisx0213 shiftjisx0213 sjisx0213 s_jisx0213 950 cp950 ms950 '''
 
 def reposetup(ui, repo):
     # TODO: decide use of config section for this extension

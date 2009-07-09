@@ -1,13 +1,23 @@
 created new head
-resolving manifests
- overwrite None partial False
- ancestor 310fd17130da local 2092631ce82b+ remote 7731dad1c2b9
+changeset:   0:310fd17130da
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     add foo
+
+changeset:   1:7731dad1c2b9
+user:        test
+date:        Mon Jan 12 13:46:40 1970 +0000
+summary:     cp foo bar; change both
+
   searching for copies back to rev 1
   unmatched files in other:
    bar
   all copies found (* = to merge, ! = divergent):
    bar -> foo *
   checking for directory renames
+resolving manifests
+ overwrite None partial False
+ ancestor 310fd17130da local 2092631ce82b+ remote 7731dad1c2b9
  foo: versions differ -> m
  foo: remote copied to bar -> m
 preserving foo for resolve of bar

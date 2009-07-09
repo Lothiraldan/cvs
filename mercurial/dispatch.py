@@ -143,7 +143,7 @@ def _runcatch(ui, args):
     except:
         ui.warn(_("** unknown exception encountered, details follow\n"))
         ui.warn(_("** report bug details to "
-                 "http://www.selenic.com/mercurial/bts\n"))
+                 "http://mercurial.selenic.com/bts/\n"))
         ui.warn(_("** or mercurial@selenic.com\n"))
         ui.warn(_("** Mercurial Distributed SCM (version %s)\n")
                % util.version())
@@ -161,6 +161,73 @@ def _findrepo(p):
 
     return p
 
+def aliasargs(fn):
+    if hasattr(fn, 'args'):
+        return fn.args
+    return []
+
+class cmdalias(object):
+    def __init__(self, name, definition, cmdtable):
+        self.name = name
+        self.definition = definition
+        self.args = []
+        self.opts = []
+        self.help = ''
+        self.norepo = True
+
+        try:
+            cmdutil.findcmd(self.name, cmdtable, True)
+            self.shadows = True
+        except error.UnknownCommand:
+            self.shadows = False
+
+        if not self.definition:
+            def fn(ui, *args):
+                ui.warn(_("no definition for alias '%s'\n") % self.name)
+                return 1
+            self.fn = fn
+
+            return
+
+        args = shlex.split(self.definition)
+        cmd = args.pop(0)
+        opts = []
+        help = ''
+
+        try:
+            self.fn, self.opts, self.help = cmdutil.findcmd(cmd, cmdtable, False)[1]
+            self.args = aliasargs(self.fn) + args
+            if cmd not in commands.norepo.split(' '):
+                self.norepo = False
+        except error.UnknownCommand:
+            def fn(ui, *args):
+                ui.warn(_("alias '%s' resolves to unknown command '%s'\n") \
+                            % (self.name, cmd))
+                return 1
+            self.fn = fn
+        except error.AmbiguousCommand:
+            def fn(ui, *args):
+                ui.warn(_("alias '%s' resolves to ambiguous command '%s'\n") \
+                            % (self.name, cmd))
+                return 1
+            self.fn = fn
+
+    def __call__(self, ui, *args, **opts):
+        if self.shadows:
+            ui.debug(_("alias '%s' shadows command\n") % self.name)
+
+        return self.fn(ui, *args, **opts)
+
+def addaliases(ui, cmdtable):
+    # aliases are processed after extensions have been loaded, so they
+    # may use extension commands. Aliases can also use other alias definitions,
+    # but only if they have been defined prior to the current definition.
+    for alias, definition in ui.configitems('alias'):
+        aliasdef = cmdalias(alias, definition, cmdtable)
+        cmdtable[alias] = (aliasdef, aliasdef.opts, aliasdef.help)
+        if aliasdef.norepo:
+            commands.norepo += ' %s' % alias
+
 def _parse(ui, args):
     options = {}
     cmdoptions = {}
@@ -175,6 +242,7 @@ def _parse(ui, args):
         aliases, i = cmdutil.findcmd(cmd, commands.table,
                                      ui.config("ui", "strict"))
         cmd = aliases[0]
+        args = aliasargs(i[0]) + args
         defaults = ui.config("defaults", cmd)
         if defaults:
             args = shlex.split(defaults) + args
@@ -301,6 +369,9 @@ def _dispatch(ui, args):
                     % (name, " ".join(overrides)))
         commands.table.update(cmdtable)
         _loaded.add(name)
+
+    addaliases(lui, commands.table)
+
     # check for fallback encoding
     fallback = lui.config('ui', 'fallbackencoding')
     if fallback:
@@ -315,7 +386,7 @@ def _dispatch(ui, args):
         raise util.Abort(_("Option --cwd may not be abbreviated!"))
     if options["repository"]:
         raise util.Abort(_(
-            "Option -R has to be separated from other options (i.e. not -qR) "
+            "Option -R has to be separated from other options (e.g. not -qR) "
             "and --repository may only be abbreviated as --repo!"))
 
     if options["encoding"]:

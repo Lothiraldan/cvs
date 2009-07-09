@@ -6,7 +6,7 @@
 # GNU General Public License version 2, incorporated herein by reference.
 
 from i18n import _
-import errno, getpass, os, re, socket, sys, tempfile, traceback
+import errno, getpass, os, socket, sys, tempfile, traceback
 import config, util, error
 
 _booleans = {'1': True, 'yes': True, 'true': True, 'on': True,
@@ -20,8 +20,8 @@ class ui(object):
         self._ocfg = config.config() # overlay
         self._tcfg = config.config() # trusted
         self._ucfg = config.config() # untrusted
-        self._trustusers = {}
-        self._trustgroups = {}
+        self._trustusers = set()
+        self._trustgroups = set()
 
         if src:
             self._tcfg = src._tcfg.copy()
@@ -40,7 +40,7 @@ class ui(object):
 
     def _is_trusted(self, fp, f):
         st = util.fstat(fp)
-        if util.isowner(fp, st):
+        if util.isowner(st):
             return True
 
         tusers, tgroups = self._trustusers, self._trustgroups
@@ -58,7 +58,7 @@ class ui(object):
         return False
 
     def readconfig(self, filename, root=None, trust=False,
-                   sections=None):
+                   sections=None, remap=None):
         try:
             fp = open(filename)
         except IOError:
@@ -70,7 +70,7 @@ class ui(object):
         trusted = sections or trust or self._is_trusted(fp, filename)
 
         try:
-            cfg.read(filename, fp, sections=sections)
+            cfg.read(filename, fp, sections=sections, remap=remap)
         except error.ConfigError, inst:
             if trusted:
                 raise
@@ -104,10 +104,8 @@ class ui(object):
         self._traceback = self.configbool('ui', 'traceback', False)
 
         # update trust information
-        for user in self.configlist('trusted', 'users'):
-            self._trustusers[user] = 1
-        for group in self.configlist('trusted', 'groups'):
-            self._trustgroups[group] = 1
+        self._trustusers.update(self.configlist('trusted', 'users'))
+        self._trustgroups.update(self.configlist('trusted', 'groups'))
 
     def setconfig(self, section, name, value):
         for cfg in (self._ocfg, self._tcfg, self._ucfg):
@@ -131,7 +129,7 @@ class ui(object):
 
     def configbool(self, section, name, default=False, untrusted=False):
         v = self.config(section, name, None, untrusted)
-        if v == None:
+        if v is None:
             return default
         if v.lower() not in _booleans:
             raise error.ConfigError(_("%s.%s not a boolean ('%s')")
@@ -201,7 +199,7 @@ class ui(object):
     def _path(self, loc):
         p = self.config('paths', loc)
         if p and '%%' in p:
-            ui.warn('(deprecated \'\%\%\' in path %s=%s from %s)\n' %
+            self.warn('(deprecated \'%%\' in path %s=%s from %s)\n' %
                     (loc, p, self.configsource('paths', loc)))
             p = p.replace('%%', '%')
         return p
@@ -248,7 +246,10 @@ class ui(object):
         except: pass
 
     def interactive(self):
-        return self.configbool("ui", "interactive") or sys.stdin.isatty()
+        i = self.configbool("ui", "interactive", None)
+        if i is None:
+            return sys.stdin.isatty()
+        return i
 
     def _readline(self, prompt=''):
         if sys.stdin.isatty():
@@ -276,7 +277,7 @@ class ui(object):
         insensitive. If ui is not interactive, the default is returned.
         """
         if not self.interactive():
-            self.note(msg, ' ', default, "\n")
+            self.write(msg, ' ', default, "\n")
             return default
         while True:
             try:
@@ -324,7 +325,6 @@ class ui(object):
             f = open(name)
             t = f.read()
             f.close()
-            t = re.sub("(?m)^HG:.*\n", "", t)
         finally:
             os.unlink(name)
 

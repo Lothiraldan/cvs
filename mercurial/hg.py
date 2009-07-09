@@ -81,6 +81,67 @@ def localpath(path):
         return path[5:]
     return path
 
+def share(ui, source, dest=None, update=True):
+    '''create a shared repository'''
+
+    if not islocal(source):
+        raise util.Abort(_('can only share local repositories'))
+
+    if not dest:
+        dest = os.path.basename(source)
+
+    if isinstance(source, str):
+        origsource = ui.expandpath(source)
+        source, rev, checkout = parseurl(origsource, '')
+        srcrepo = repository(ui, source)
+    else:
+        srcrepo = source
+        origsource = source = srcrepo.url()
+        checkout = None
+
+    sharedpath = srcrepo.sharedpath # if our source is already sharing
+
+    root = os.path.realpath(dest)
+    roothg = os.path.join(root, '.hg')
+
+    if os.path.exists(roothg):
+        raise util.Abort(_('destination already exists'))
+
+    if not os.path.isdir(root):
+        os.mkdir(root)
+    os.mkdir(roothg)
+
+    requirements = ''
+    try:
+        requirements = srcrepo.opener('requires').read()
+    except IOError, inst:
+        if inst.errno != errno.ENOENT:
+            raise
+
+    requirements += 'shared\n'
+    file(os.path.join(roothg, 'requires'), 'w').write(requirements)
+    file(os.path.join(roothg, 'sharedpath'), 'w').write(sharedpath)
+
+    default = srcrepo.ui.config('paths', 'default')
+    if default:
+        f = file(os.path.join(roothg, 'hgrc'), 'w')
+        f.write('[paths]\ndefault = %s\n' % default)
+        f.close()
+
+    r = repository(ui, root)
+
+    if update:
+        r.ui.status(_("updating working directory\n"))
+        if update is not True:
+            checkout = update
+        for test in (checkout, 'default', 'tip'):
+            try:
+                uprev = r.lookup(test)
+                break
+            except:
+                continue
+        _update(r, uprev)
+
 def clone(ui, source, dest=None, pull=False, rev=None, update=True,
           stream=False):
     """Make a copy of an existing repository.
@@ -165,11 +226,12 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                 # can end up with extra data in the cloned revlogs that's
                 # not pointed to by changesets, thus causing verify to
                 # fail
-                src_lock = src_repo.lock()
+                src_lock = src_repo.lock(wait=False)
             except error.LockError:
                 copy = False
 
         if copy:
+            src_repo.hook('preoutgoing', throw=True, source='clone')
             hgdir = os.path.realpath(os.path.join(dest, ".hg"))
             if not os.path.exists(dest):
                 os.mkdir(dest)
@@ -201,7 +263,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
             # we need to re-init the repo after manually copying the data
             # into it
             dest_repo = repository(ui, dest)
-
+            src_repo.hook('outgoing', source='clone', node='0'*40)
         else:
             try:
                 dest_repo = repository(ui, dest, create=True)
@@ -219,7 +281,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                                        "lookup and so doesn't support clone by "
                                        "revision"))
                 revs = [src_repo.lookup(r) for r in rev]
-
+                checkout = revs[0]
             if dest_repo.local():
                 dest_repo.clone(src_repo, heads=revs, stream=stream)
             elif src_repo.local():
@@ -235,6 +297,8 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
             fp.write("[paths]\n")
             fp.write("default = %s\n" % abspath)
             fp.close()
+
+            dest_repo.ui.setconfig('paths', 'default', abspath)
 
             if update:
                 dest_repo.ui.status(_("updating working directory\n"))

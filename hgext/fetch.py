@@ -5,11 +5,11 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
 
-'''pulling, updating and merging in one command'''
+'''pull, update and merge in one command'''
 
 from mercurial.i18n import _
 from mercurial.node import nullid, short
-from mercurial import commands, cmdutil, hg, util, url
+from mercurial import commands, cmdutil, hg, util, url, error
 from mercurial.lock import release
 
 def fetch(ui, repo, source='default', **opts):
@@ -67,11 +67,12 @@ def fetch(ui, repo, source='default', **opts):
                   url.hidepassword(ui.expandpath(source)))
         revs = None
         if opts['rev']:
-            if not other.local():
-                raise util.Abort(_("fetch -r doesn't work for remote "
-                                   "repositories yet"))
-            else:
+            try:
                 revs = [other.lookup(rev) for rev in opts['rev']]
+            except error.CapabilityError:
+                err = _("Other repository doesn't support revision lookup, "
+                        "so a rev cannot be specified.")
+                raise util.Abort(err)
 
         # Are there any changes at all?
         modheads = repo.pull(other, heads=revs)
@@ -120,14 +121,14 @@ def fetch(ui, repo, source='default', **opts):
             err = hg.merge(repo, secondparent, remind=False)
 
         if not err:
-            mod, add, rem = repo.status()[:3]
             message = (cmdutil.logmessage(opts) or
                        (_('Automated merge with %s') %
                         url.removeauth(other.url())))
-            force_editor = opts.get('force_editor') or opts.get('edit')
-            n = repo.commit(mod + add + rem, message,
-                            opts['user'], opts['date'], force=True,
-                            force_editor=force_editor)
+            editor = cmdutil.commiteditor
+            if opts.get('force_editor') or opts.get('edit'):
+                editor = cmdutil.commitforceeditor
+            n = repo.commit(message, opts['user'], opts['date'],
+                            force=True, editor=editor)
             ui.status(_('new changeset %d:%s merges remote changes '
                         'with local\n') % (repo.changelog.rev(n),
                                            short(n)))
