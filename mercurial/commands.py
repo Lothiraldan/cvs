@@ -246,7 +246,8 @@ def backout(ui, repo, node=None, rev=None, **opts):
     commit_opts = opts.copy()
     commit_opts['addremove'] = False
     if not commit_opts['message'] and not commit_opts['logfile']:
-        commit_opts['message'] = _("Backed out changeset %s") % (short(node))
+        # we don't translate commit messages
+        commit_opts['message'] = "Backed out changeset %s" % (short(node))
         commit_opts['force_editor'] = True
     commit(ui, repo, **commit_opts)
     def nice(node):
@@ -1380,6 +1381,8 @@ def heads(ui, repo, *branchrevs, **opts):
     closed = opts.get('closed')
     hideinactive, _heads = opts.get('active'), None
     if not branchrevs:
+        if closed:
+            raise error.Abort(_('you must specify a branch to use --closed'))
         # Assume we're looking repo-wide heads if no revs were specified.
         heads = repo.heads(start)
     else:
@@ -1493,7 +1496,10 @@ def help_(ui, name=None, with_version=False):
             f = f.lstrip("^")
             if not ui.debugflag and f.startswith("debug"):
                 continue
-            doc = gettext(e[0].__doc__)
+            doc = e[0].__doc__
+            if doc and 'DEPRECATED' in doc and not ui.verbose:
+                continue
+            doc = gettext(doc)
             if not doc:
                 doc = _("(no help text available)")
             h[f] = doc.splitlines(0)[0].rstrip()
@@ -2911,7 +2917,8 @@ def tag(ui, repo, name1, *names, **opts):
                     raise util.Abort(_('tag \'%s\' is not a local tag') % n)
         rev_ = nullid
         if not message:
-            message = _('Removed tag %s') % ', '.join(names)
+            # we don't translate commit messages
+            message = 'Removed tag %s' % ', '.join(names)
     elif not opts.get('force'):
         for n in names:
             if n in repo.tags():
@@ -2923,7 +2930,8 @@ def tag(ui, repo, name1, *names, **opts):
     r = repo[rev_].node()
 
     if not message:
-        message = (_('Added tag %s for changeset %s') %
+        # we don't translate commit messages
+        message = ('Added tag %s for changeset %s' %
                    (', '.join(names), short(r)))
 
     date = opts.get('date')
@@ -3042,7 +3050,7 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
             raise util.Abort(_("you can't specify a revision and a date"))
         rev = cmdutil.finddate(ui, repo, date)
 
-    if clean:
+    if clean or check:
         return hg.clean(repo, rev)
     else:
         return hg.update(repo, rev)
@@ -3204,7 +3212,7 @@ table = {
          [('a', 'active', False,
            _('show only branches that have unmerged heads')),
           ('c', 'closed', False,
-           _('show normal and closed heads'))],
+           _('show normal and closed branches'))],
          _('[-a]')),
     "bundle":
         (bundle,
@@ -3321,9 +3329,9 @@ table = {
         (heads,
          [('r', 'rev', '', _('show only heads which are descendants of REV')),
           ('a', 'active', False,
-           _('show only the active heads from open branches')),
+           _('show only the active branch heads from open branches')),
           ('c', 'closed', False,
-           _('show normal and closed heads')),
+           _('show normal and closed branch heads')),
          ] + templateopts,
          _('[-r STARTREV] [REV]...')),
     "help": (help_, [], _('[TOPIC]')),

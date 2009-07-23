@@ -62,7 +62,7 @@ def has_function(cc, funcname):
             devnull = open('/dev/null', 'w')
             oldstderr = os.dup(sys.stderr.fileno())
             os.dup2(devnull.fileno(), sys.stderr.fileno())
-            objects = cc.compile([fname])
+            objects = cc.compile([fname], output_dir=tmpdir)
             cc.link_executable(objects, os.path.join(tmpdir, "a.out"))
         except:
             return False
@@ -248,6 +248,8 @@ if sys.platform == 'linux2' and os.uname()[2] > '2.6':
 datafiles = []
 for root in ('templates', 'i18n'):
     for dir, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if not x.startswith('.')]
+        files = [x for x in files if not x.startswith('.')]
         datafiles.append((os.path.join('mercurial', dir),
                           [os.path.join(dir, file_) for file_ in files]))
 
