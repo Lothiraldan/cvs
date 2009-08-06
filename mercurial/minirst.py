@@ -22,6 +22,8 @@ It only supports a small subset of reStructuredText:
 
 - lists (items must start with '-')
 
+- field lists (colons cannot be escaped)
+
 - literal blocks
 
 - option lists (supports only long options without arguments)
@@ -145,7 +147,7 @@ def findbulletlists(blocks):
             for line in blocks[i]['lines']:
                 if line.startswith('- '):
                     items.append(dict(type='bullet', lines=[],
-                                      indent=blocks[i]['indent'] + 2))
+                                      indent=blocks[i]['indent']))
                     line = line[2:]
                 items[-1]['lines'].append(line)
             blocks[i:i+1] = items
@@ -184,6 +186,43 @@ def findoptionlists(blocks):
                 options[-1]['lines'].append(line)
             blocks[i:i+1] = options
             i += len(options) - 1
+        i += 1
+    return blocks
+
+
+_fieldre = re.compile(r':(?![: ])([^:]*)(?<! ):( +)(.*)')
+def findfieldlists(blocks):
+    """Finds fields lists.
+
+    The blocks must have a 'type' field, i.e., they should have been
+    run through findliteralblocks first.
+    """
+    i = 0
+    while i < len(blocks):
+        # Searching for a paragraph that looks like this:
+        #
+        #
+        # +--------------------+----------------------+
+        # | ":" field name ":" | field body           |
+        # +-------+------------+                      |
+        #         | (body elements)+                  |
+        #         +-----------------------------------+
+        if (blocks[i]['type'] == 'paragraph' and
+            _fieldre.match(blocks[i]['lines'][0])):
+            indent = blocks[i]['indent']
+            fields = []
+            for line in blocks[i]['lines']:
+                m = _fieldre.match(line)
+                if m:
+                    key, spaces, rest = m.groups()
+                    width = 2 + len(key) + len(spaces)
+                    fields.append(dict(type='field', lines=[],
+                                       indent=indent, width=width))
+                    # Turn ":foo: bar" into "foo   bar".
+                    line = '%s  %s%s' % (key, spaces, rest)
+                fields[-1]['lines'].append(line)
+            blocks[i:i+1] = fields
+            i += len(fields) - 1
         i += 1
     return blocks
 
@@ -230,7 +269,7 @@ def addmargins(blocks):
     i = 1
     while i < len(blocks):
         if (blocks[i]['type'] == blocks[i-1]['type'] and
-            blocks[i]['type'] in ('bullet', 'option', 'definition')):
+            blocks[i]['type'] in ('bullet', 'option', 'field', 'definition')):
             i += 1
         else:
             blocks.insert(i, dict(lines=[''], indent=0, type='margin'))
@@ -243,7 +282,10 @@ def formatblock(block, width):
     indent = ' ' * block['indent']
     if block['type'] == 'margin':
         return ''
-    elif block['type'] in ('literal', 'section'):
+    elif block['type'] == 'literal':
+        indent += '  '
+        return indent + ('\n' + indent).join(block['lines'])
+    elif block['type'] == 'section':
         return indent + ('\n' + indent).join(block['lines'])
     elif block['type'] == 'definition':
         term = indent + block['lines'][0]
@@ -256,9 +298,9 @@ def formatblock(block, width):
         initindent = subindent = indent
         text = ' '.join(map(str.strip, block['lines']))
         if block['type'] == 'bullet':
-            initindent = indent[:-2] + '- '
-            subindent = indent
-        elif block['type'] == 'option':
+            initindent = indent + '- '
+            subindent = indent + '  '
+        elif block['type'] in ('option', 'field'):
             subindent = indent + block['width'] * ' '
 
         return textwrap.fill(text, width=width,
@@ -273,6 +315,7 @@ def format(text, width):
     blocks = findsections(blocks)
     blocks = findbulletlists(blocks)
     blocks = findoptionlists(blocks)
+    blocks = findfieldlists(blocks)
     blocks = finddefinitionlists(blocks)
     blocks = addmargins(blocks)
     return '\n'.join(formatblock(b, width) for b in blocks)
@@ -294,6 +337,7 @@ if __name__ == "__main__":
     blocks = debug(findsections, blocks)
     blocks = debug(findbulletlists, blocks)
     blocks = debug(findoptionlists, blocks)
+    blocks = debug(findfieldlists, blocks)
     blocks = debug(finddefinitionlists, blocks)
     blocks = debug(addmargins, blocks)
     print '\n'.join(formatblock(b, 30) for b in blocks)

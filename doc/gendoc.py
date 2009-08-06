@@ -5,7 +5,7 @@ sys.path.insert(0, "..")
 sys.path.append(os.path.join('..', 'mercurial', 'pure'))
 from mercurial import demandimport; demandimport.enable()
 from mercurial.commands import table, globalopts
-from mercurial.i18n import gettext, _
+from mercurial.i18n import _
 from mercurial.help import helptable
 
 def get_desc(docstr):
@@ -54,18 +54,18 @@ def get_cmd(cmd):
     return d
 
 def show_doc(ui):
-    def bold(s, text=""):
-        ui.write("%s\n%s\n%s\n" % (s, "="*len(s), text))
-    def underlined(s, text=""):
-        ui.write("%s\n%s\n%s\n" % (s, "-"*len(s), text))
+    def section(s):
+        ui.write("%s\n%s\n\n" % (s, "-" * len(s)))
+    def subsection(s):
+        ui.write("%s\n%s\n\n" % (s, '"' * len(s)))
 
     # print options
-    underlined(_("OPTIONS"))
+    section(_("OPTIONS"))
     for optstr, desc in get_opts(globalopts):
         ui.write("%s\n    %s\n\n" % (optstr, desc))
 
     # print cmds
-    underlined(_("COMMANDS"))
+    section(_("COMMANDS"))
     h = {}
     for c, attr in table.items():
         f = c.split("|")[0]
@@ -101,12 +101,13 @@ def show_doc(ui):
             ui.write(_("    aliases: %s\n\n") % " ".join(d['aliases']))
 
     # print topics
-    for names, section, doc in helptable:
-        underlined(gettext(section).upper())
+    for names, sec, doc in helptable:
+        for name in names:
+            ui.write(".. _%s:\n" % name)
+        ui.write("\n")
+        section(sec.upper())
         if callable(doc):
             doc = doc()
-        else:
-            doc = gettext(doc)
         ui.write(doc)
         ui.write("\n")
 

@@ -7,10 +7,11 @@
 
 '''hooks for sending email notifications at commit/push time
 
-Subscriptions can be managed through a hgrc file. Default mode is to print
-messages to stdout, for testing and configuring.
+Subscriptions can be managed through a hgrc file. Default mode is to
+print messages to stdout, for testing and configuring.
 
-To use, configure the notify extension and enable it in hgrc like this::
+To use, configure the notify extension and enable it in hgrc like
+this::
 
   [extensions]
   hgext.notify =
@@ -47,8 +48,9 @@ Optional configuration items::
   [web]
   baseurl = http://hgserver/... # root of hg web site for browsing commits
 
-The notify config file has same format as a regular hgrc file. It has two
-sections so you can express subscriptions in whatever way is handier for you.
+The notify config file has same format as a regular hgrc file. It has
+two sections so you can express subscriptions in whatever way is
+handier for you.
 
 ::
 
@@ -62,13 +64,13 @@ sections so you can express subscriptions in whatever way is handier for you.
 
 Glob patterns are matched against path to repository root.
 
-If you like, you can put notify config file in repository that users can push
-changes to, they can manage their own subscriptions.
+If you like, you can put notify config file in repository that users
+can push changes to, they can manage their own subscriptions.
 '''
 
 from mercurial.i18n import _
 from mercurial import patch, cmdutil, templater, util, mail
-import email.Parser, fnmatch, socket, time
+import email.Parser, email.Errors, fnmatch, socket, time
 
 # template for single changeset can include email headers.
 single_template = '''
@@ -178,20 +180,25 @@ class notifier(object):
         '''send message.'''
 
         p = email.Parser.Parser()
-        msg = p.parsestr(data)
+        try:
+            msg = p.parsestr(data)
+        except email.Errors.MessageParseError, inst:
+            raise util.Abort(inst)
 
         # store sender and subject
         sender, subject = msg['From'], msg['Subject']
         del msg['From'], msg['Subject']
-        # store remaining headers
-        headers = msg.items()
-        # create fresh mime message from msg body
-        text = msg.get_payload()
-        # for notification prefer readability over data precision
-        msg = mail.mimeencode(self.ui, text, self.charsets, self.test)
-        # reinstate custom headers
-        for k, v in headers:
-            msg[k] = v
+
+        if not msg.is_multipart():
+            # create fresh mime message from scratch
+            # (multipart templates must take care of this themselves)
+            headers = msg.items()
+            payload = msg.get_payload()
+            # for notification prefer readability over data precision
+            msg = mail.mimeencode(self.ui, payload, self.charsets, self.test)
+            # reinstate custom headers
+            for k, v in headers:
+                msg[k] = v
 
         msg['Date'] = util.datestr(format="%a, %d %b %Y %H:%M:%S %1%2")
 
