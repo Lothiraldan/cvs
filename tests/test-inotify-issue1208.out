@@ -1,0 +1,6 @@
+% fail
+abort: could not start server: File exists
+abort: could not start server: File exists
+% inserve
+% status
+? hg.pid
