@@ -143,14 +143,27 @@ class patchheader(object):
         if not self.updateheader(['From: ', '# User '], user):
             try:
                 patchheaderat = self.comments.index('# HG changeset patch')
-                self.comments.insert(patchheaderat + 1,'# User ' + user)
+                self.comments.insert(patchheaderat + 1, '# User ' + user)
             except ValueError:
-                self.comments = ['From: ' + user, ''] + self.comments
+                if self._hasheader(['Date: ']):
+                    self.comments = ['From: ' + user] + self.comments
+                else:
+                    tmp = ['# HG changeset patch', '# User ' + user, '']
+                    self.comments = tmp + self.comments
         self.user = user
 
     def setdate(self, date):
-        if self.updateheader(['# Date '], date):
-            self.date = date
+        if not self.updateheader(['Date: ', '# Date '], date):
+            try:
+                patchheaderat = self.comments.index('# HG changeset patch')
+                self.comments.insert(patchheaderat + 1, '# Date ' + date)
+            except ValueError:
+                if self._hasheader(['From: ']):
+                    self.comments = ['Date: ' + date] + self.comments
+                else:
+                    tmp = ['# HG changeset patch', '# Date ' + date, '']
+                    self.comments = tmp + self.comments
+        self.date = date
 
     def setmessage(self, message):
         if self.comments:
@@ -169,6 +182,14 @@ class patchheader(object):
                     res = True
                     break
         return res
+
+    def _hasheader(self, prefixes):
+        '''Check if a header starts with any of the given prefixes.'''
+        for prefix in prefixes:
+            for comment in self.comments:
+                if comment.startswith(prefix):
+                    return True
+        return False
 
     def __str__(self):
         if not self.comments:
@@ -2585,10 +2606,10 @@ cmdtable = {
          [('e', 'edit', None, _('edit commit message')),
           ('g', 'git', None, _('use git extended diff format')),
           ('s', 'short', None, _('refresh only files already in the patch and specified files')),
-          ('U', 'currentuser', None, _('add/update "From: <current user>" in patch')),
-          ('u', 'user', '', _('add/update "From: <given user>" in patch')),
-          ('D', 'currentdate', None, _('update "Date: <current date>" in patch (if present)')),
-          ('d', 'date', '', _('update "Date: <given date>" in patch (if present)'))
+          ('U', 'currentuser', None, _('add/update author field in patch with current user')),
+          ('u', 'user', '', _('add/update author field in patch with given user')),
+          ('D', 'currentdate', None, _('add/update date field in patch with current date')),
+          ('d', 'date', '', _('add/update date field in patch with given date'))
           ] + commands.walkopts + commands.commitopts,
          _('hg qrefresh [-I] [-X] [-e] [-m TEXT] [-l FILE] [-s] [FILE]...')),
     'qrename|qmv':
