@@ -5,8 +5,7 @@ PREFIX=/usr/local
 MANDIR=$(PREFIX)/share/man
 INSTALL=install -c -m 644
 PYTHON=python
-RST2HTML=rst2html
-RST2MAN=rst2man
+RST2HTML=$(shell which rst2html 2> /dev/null || which rst2html.py)
 
 all: man html
 
@@ -21,17 +20,13 @@ hg.1.gendoc.txt: gendoc.py ../mercurial/commands.py ../mercurial/help.py
 	${PYTHON} gendoc.py > $@
 
 %: %.txt common.txt
-	# add newline after all literal blocks and fix backslash escape
-	$(RST2MAN) $*.txt \
-	  | sed -e 's/^\.fi$$/.fi\n/' \
-	  | sed -e 's/\\fB\\\\fP/\\fB\\e\\fP/' \
-	  > $*
+	$(PYTHON) rst2man.py --strip-elements-with-class htmlonly $*.txt > $*
 
 %.html: %.txt common.txt
 	$(RST2HTML) $*.txt > $*.html
 
 MANIFEST: man html
-	# tracked files are already in the main MANIFEST
+# tracked files are already in the main MANIFEST
 	$(RM) $@
 	for i in $(MAN) $(HTML) hg.1.gendoc.txt; do \
 	  echo "doc/$$i" >> $@ ; \
