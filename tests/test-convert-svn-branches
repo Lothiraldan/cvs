@@ -1,0 +1,30 @@
+#!/bin/sh
+
+"$TESTDIR/hghave" svn svn-bindings || exit 80
+
+fix_path()
+{
+    tr '\\' /
+}
+
+echo "[extensions]" >> $HGRCPATH
+echo "convert = " >> $HGRCPATH
+echo "hgext.graphlog =" >> $HGRCPATH
+
+svnadmin create svn-repo
+cat "$TESTDIR/svn/branches.svndump" | svnadmin load svn-repo > /dev/null
+
+echo % convert trunk and branches
+cat >branchmap <<EOF
+old3 newbranch
+EOF
+hg convert --branchmap=branchmap --datesort -r 10 svn-repo A-hg
+
+echo % convert again
+hg convert --branchmap=branchmap --datesort svn-repo A-hg
+
+cd A-hg
+hg glog --template 'branch={branches} {rev} {desc|firstline} files: {files}\n'
+hg branches | sed 's/:.*/:/'
+hg tags -q
+cd ..
