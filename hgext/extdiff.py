@@ -7,14 +7,14 @@
 
 '''command to allow external programs to compare revisions
 
-The `extdiff' Mercurial extension allows you to use external programs
-to compare revisions, or revision with working directory. The external diff
-programs are called with a configurable set of options and two
+The extdiff Mercurial extension allows you to use external programs
+to compare revisions, or revision with working directory. The external
+diff programs are called with a configurable set of options and two
 non-option arguments: paths to directories containing snapshots of
 files to compare.
 
-The `extdiff' extension also allows to configure new diff commands, so
-you do not need to type "hg extdiff -p kdiff3" always.
+The extdiff extension also allows to configure new diff commands, so
+you do not need to type "hg extdiff -p kdiff3" always. ::
 
   [extdiff]
   # add new command that runs GNU diff(1) in 'context diff' mode
@@ -30,13 +30,13 @@ you do not need to type "hg extdiff -p kdiff3" always.
   meld =
 
   # add new command called vimdiff, runs gvimdiff with DirDiff plugin
-  # (see http://www.vim.org/scripts/script.php?script_id=102)
-  # Non English user, be sure to put "let g:DirDiffDynamicDiffText = 1" in
+  # (see http://www.vim.org/scripts/script.php?script_id=102) Non
+  # English user, be sure to put "let g:DirDiffDynamicDiffText = 1" in
   # your .vimrc
   vimdiff = gvim -f '+next' '+execute "DirDiff" argv(0) argv(1)'
 
 You can use -I/-X and list of file or directory names like normal "hg
-diff" command. The `extdiff' extension makes snapshots of only needed
+diff" command. The extdiff extension makes snapshots of only needed
 files, so running the external diff program will actually be pretty
 fast (at least faster than having to compare the entire tree).
 '''
@@ -211,18 +211,17 @@ def uisetup(ui):
             '''use closure to save diff command to use'''
             def mydiff(ui, repo, *pats, **opts):
                 return dodiff(ui, repo, path, diffopts, pats, opts)
-            mydiff.__doc__ = '''use %(path)s to diff repository (or selected files)
+            mydiff.__doc__ = _('''\
+use %(path)s to diff repository (or selected files)
 
-            Show differences between revisions for the specified
-            files, using the %(path)s program.
+    Show differences between revisions for the specified files, using the
+    %(path)s program.
 
-            When two revision arguments are given, then changes are
-            shown between those revisions. If only one revision is
-            specified then that revision is compared to the working
-            directory, and, when no revisions are specified, the
-            working directory files are compared to its parent.''' % {
-                'path': util.uirepr(path),
-                }
+    When two revision arguments are given, then changes are shown between
+    those revisions. If only one revision is specified then that revision is
+    compared to the working directory, and, when no revisions are specified,
+    the working directory files are compared to its parent.\
+''') % dict(path=util.uirepr(path))
             return mydiff
         cmdtable[cmd] = (save(cmd, path, diffopts),
                          cmdtable['extdiff'][1][1:],

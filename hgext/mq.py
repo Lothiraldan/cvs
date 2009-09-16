@@ -14,19 +14,18 @@ applied patches (subset of known patches).
 Known patches are represented as patch files in the .hg/patches
 directory. Applied patches are both patch files and changesets.
 
-Common tasks (use "hg help command" for more details):
+Common tasks (use "hg help command" for more details)::
 
-prepare repository to work with patches   qinit
-create new patch                          qnew
-import existing patch                     qimport
+  prepare repository to work with patches   qinit
+  create new patch                          qnew
+  import existing patch                     qimport
 
-print patch series                        qseries
-print applied patches                     qapplied
-print name of top applied patch           qtop
+  print patch series                        qseries
+  print applied patches                     qapplied
 
-add known patch to applied stack          qpush
-remove patch from applied stack           qpop
-refresh contents of top applied patch     qrefresh
+  add known patch to applied stack          qpush
+  remove patch from applied stack           qpop
+  refresh contents of top applied patch     qrefresh
 '''
 
 from mercurial.i18n import _
@@ -143,14 +142,27 @@ class patchheader(object):
         if not self.updateheader(['From: ', '# User '], user):
             try:
                 patchheaderat = self.comments.index('# HG changeset patch')
-                self.comments.insert(patchheaderat + 1,'# User ' + user)
+                self.comments.insert(patchheaderat + 1, '# User ' + user)
             except ValueError:
-                self.comments = ['From: ' + user, ''] + self.comments
+                if self._hasheader(['Date: ']):
+                    self.comments = ['From: ' + user] + self.comments
+                else:
+                    tmp = ['# HG changeset patch', '# User ' + user, '']
+                    self.comments = tmp + self.comments
         self.user = user
 
     def setdate(self, date):
-        if self.updateheader(['# Date '], date):
-            self.date = date
+        if not self.updateheader(['Date: ', '# Date '], date):
+            try:
+                patchheaderat = self.comments.index('# HG changeset patch')
+                self.comments.insert(patchheaderat + 1, '# Date ' + date)
+            except ValueError:
+                if self._hasheader(['From: ']):
+                    self.comments = ['Date: ' + date] + self.comments
+                else:
+                    tmp = ['# HG changeset patch', '# Date ' + date, '']
+                    self.comments = tmp + self.comments
+        self.date = date
 
     def setmessage(self, message):
         if self.comments:
@@ -169,6 +181,14 @@ class patchheader(object):
                     res = True
                     break
         return res
+
+    def _hasheader(self, prefixes):
+        '''Check if a header starts with any of the given prefixes.'''
+        for prefix in prefixes:
+            for comment in self.comments:
+                if comment.startswith(prefix):
+                    return True
+        return False
 
     def __str__(self):
         if not self.comments:
@@ -556,7 +576,7 @@ class queue(object):
             if not pushable:
                 self.explain_pushable(patchname, all_patches=True)
                 continue
-            self.ui.warn(_("applying %s\n") % patchname)
+            self.ui.status(_("applying %s\n") % patchname)
             pf = os.path.join(patchdir, patchname)
 
             try:
@@ -1081,6 +1101,8 @@ class queue(object):
                     except: pass
                     repo.dirstate.forget(f)
                 repo.dirstate.setparents(qp, nullid)
+            for patch in reversed(self.applied[start:end]):
+                self.ui.status(_("popping %s\n") % patch.name)
             del self.applied[start:end]
             self.strip(repo, rev, update=False, backup='strip')
             if len(self.applied):
@@ -1344,19 +1366,24 @@ class queue(object):
 
     def qseries(self, repo, missing=None, start=0, length=None, status=None,
                 summary=False):
-        def displayname(patchname):
+        def displayname(pfx, patchname):
             if summary:
                 ph = patchheader(self.join(patchname))
                 msg = ph.message
                 msg = msg and ': ' + msg[0] or ': '
             else:
                 msg = ''
-            return '%s%s' % (patchname, msg)
+            msg = "%s%s%s" % (pfx, patchname, msg)
+            if self.ui.interactive():
+                msg = util.ellipsis(msg, util.termwidth())
+            self.ui.write(msg + '\n')
 
         applied = set([p.name for p in self.applied])
         if length is None:
             length = len(self.series) - start
         if not missing:
+            if self.ui.verbose:
+                idxwidth = len(str(start+length - 1))
             for i in xrange(start, start+length):
                 patch = self.series[i]
                 if patch in applied:
@@ -1367,10 +1394,10 @@ class queue(object):
                     stat = 'G'
                 pfx = ''
                 if self.ui.verbose:
-                    pfx = '%d %s ' % (i, stat)
+                    pfx = '%*d %s ' % (idxwidth, i, stat)
                 elif status and status != stat:
                     continue
-                self.ui.write('%s%s\n' % (pfx, displayname(patch)))
+                displayname(pfx, patch)
         else:
             msng_list = []
             for root, dirs, files in os.walk(self.path):
@@ -1384,7 +1411,7 @@ class queue(object):
                         msng_list.append(fl)
             for x in sorted(msng_list):
                 pfx = self.ui.verbose and ('D ') or ''
-                self.ui.write("%s%s\n" % (pfx, displayname(x)))
+                displayname(pfx, x)
 
     def issaveline(self, l):
         if l.name == '.hg.patches.save.line':
@@ -1537,7 +1564,7 @@ class queue(object):
                 raise util.Abort(_('option "-r" not valid when importing '
                                    'files'))
             rev = cmdutil.revrange(repo, rev)
-            rev.sort(lambda x, y: cmp(y, x))
+            rev.sort(reverse=True)
         if (len(files) > 1 or len(rev) > 1) and patchname:
             raise util.Abort(_('option "-n" not valid when importing multiple '
                                'patches'))
@@ -1654,17 +1681,35 @@ def delete(ui, repo, *patches, **opts):
 
 def applied(ui, repo, patch=None, **opts):
     """print the patches already applied"""
+
     q = repo.mq
+    l = len(q.applied)
+
     if patch:
         if patch not in q.series:
             raise util.Abort(_("patch %s is not in series file") % patch)
         end = q.series.index(patch) + 1
     else:
         end = q.series_end(True)
-    return q.qseries(repo, length=end, status='A', summary=opts.get('summary'))
+
+    if opts.get('last') and not end:
+        ui.write(_("no patches applied\n"))
+        return 1
+    elif opts.get('last') and end == 1:
+        ui.write(_("only one patch applied\n"))
+        return 1
+    elif opts.get('last'):
+        start = end - 2
+        end = 1
+    else:
+        start = 0
+
+    return q.qseries(repo, length=end, start=start, status='A',
+                     summary=opts.get('summary'))
 
 def unapplied(ui, repo, patch=None, **opts):
     """print the patches not yet applied"""
+
     q = repo.mq
     if patch:
         if patch not in q.series:
@@ -1672,7 +1717,14 @@ def unapplied(ui, repo, patch=None, **opts):
         start = q.series.index(patch) + 1
     else:
         start = q.series_end(True)
-    q.qseries(repo, start=start, status='U', summary=opts.get('summary'))
+
+    if start == len(q.series) and opts.get('first'):
+        ui.write(_("all patches applied\n"))
+        return 1
+
+    length = opts.get('first') and 1 or None
+    return q.qseries(repo, start=start, length=length, status='U',
+                     summary=opts.get('summary'))
 
 def qimport(ui, repo, *filename, **opts):
     """import a patch
@@ -1847,7 +1899,7 @@ def prev(ui, repo, **opts):
                      summary=opts.get('summary'))
 
 def setupheaderopts(ui, opts):
-    def do(opt,val):
+    def do(opt, val):
         if not opts[opt] and opts['current' + opt]:
             opts[opt] = val
     do('user', ui.username())
@@ -2330,7 +2382,7 @@ def select(ui, repo, *args, **opts):
         if ui.verbose:
             guards['NONE'] = noguards
         guards = guards.items()
-        guards.sort(lambda a, b: cmp(a[0][1:], b[0][1:]))
+        guards.sort(key=lambda x: x[0][1:])
         if guards:
             ui.note(_('guards in series file:\n'))
             for guard, count in guards:
@@ -2423,34 +2475,33 @@ def reposetup(ui, repo):
                 raise util.Abort(_('source has mq patches applied'))
             return super(mqrepo, self).push(remote, force, revs)
 
-        def tags(self):
-            if self.tagscache:
-                return self.tagscache
-
-            tagscache = super(mqrepo, self).tags()
+        def _findtags(self):
+            '''augment tags from base class with patch tags'''
+            result = super(mqrepo, self)._findtags()
 
             q = self.mq
             if not q.applied:
-                return tagscache
+                return result
 
             mqtags = [(bin(patch.rev), patch.name) for patch in q.applied]
 
             if mqtags[-1][0] not in self.changelog.nodemap:
                 self.ui.warn(_('mq status file refers to unknown node %s\n')
                              % short(mqtags[-1][0]))
-                return tagscache
+                return result
 
             mqtags.append((mqtags[-1][0], 'qtip'))
             mqtags.append((mqtags[0][0], 'qbase'))
             mqtags.append((self.changelog.parents(mqtags[0][0])[0], 'qparent'))
+            tags = result[0]
             for patch in mqtags:
-                if patch[1] in tagscache:
+                if patch[1] in tags:
                     self.ui.warn(_('Tag %s overrides mq patch of the same name\n')
                                  % patch[1])
                 else:
-                    tagscache[patch[1]] = patch[0]
+                    tags[patch[1]] = patch[0]
 
-            return tagscache
+            return result
 
         def _branchtags(self, partial, lrev):
             q = self.mq
@@ -2495,7 +2546,10 @@ def uisetup(ui):
 seriesopts = [('s', 'summary', None, _('print first line of patch header'))]
 
 cmdtable = {
-    "qapplied": (applied, [] + seriesopts, _('hg qapplied [-s] [PATCH]')),
+    "qapplied":
+        (applied,
+         [('1', 'last', None, _('show only the last patch'))] + seriesopts,
+         _('hg qapplied [-1] [-s] [PATCH]')),
     "qclone":
         (clone,
          [('', 'pull', None, _('use pull protocol to copy metadata')),
@@ -2579,10 +2633,10 @@ cmdtable = {
          [('e', 'edit', None, _('edit commit message')),
           ('g', 'git', None, _('use git extended diff format')),
           ('s', 'short', None, _('refresh only files already in the patch and specified files')),
-          ('U', 'currentuser', None, _('add/update "From: <current user>" in patch')),
-          ('u', 'user', '', _('add/update "From: <given user>" in patch')),
-          ('D', 'currentdate', None, _('update "Date: <current date>" in patch (if present)')),
-          ('d', 'date', '', _('update "Date: <given date>" in patch (if present)'))
+          ('U', 'currentuser', None, _('add/update author field in patch with current user')),
+          ('u', 'user', '', _('add/update author field in patch with given user')),
+          ('D', 'currentdate', None, _('add/update date field in patch with current date')),
+          ('d', 'date', '', _('add/update date field in patch with given date'))
           ] + commands.walkopts + commands.commitopts,
          _('hg qrefresh [-I] [-X] [-e] [-m TEXT] [-l FILE] [-s] [FILE]...')),
     'qrename|qmv':
@@ -2618,7 +2672,10 @@ cmdtable = {
           ('n', 'nobackup', None, _('no backups'))],
          _('hg strip [-f] [-b] [-n] REV')),
     "qtop": (top, [] + seriesopts, _('hg qtop [-s]')),
-    "qunapplied": (unapplied, [] + seriesopts, _('hg qunapplied [-s] [PATCH]')),
+    "qunapplied":
+        (unapplied,
+         [('1', 'first', None, _('show only the first patch'))] + seriesopts,
+         _('hg qunapplied [-1] [-s] [PATCH]')),
     "qfinish":
         (finish,
          [('a', 'applied', None, _('finish all applied changesets'))],

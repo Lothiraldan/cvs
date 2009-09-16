@@ -13,6 +13,7 @@ import lock, transaction, store, encoding
 import util, extensions, hook, error
 import match as match_
 import merge as merge_
+import tags as tags_
 from lock import release
 import weakref, stat, errno, os, time, inspect
 propertycache = util.propertycache
@@ -89,8 +90,14 @@ class localrepository(repo.repository):
         self.sjoin = self.store.join
         self.opener.createmode = self.store.createmode
 
-        self.tagscache = None
-        self._tagstypecache = None
+        # These two define the set of tags for this repository.  _tags
+        # maps tag name to node; _tagtypes maps tag name to 'global' or
+        # 'local'.  (Global tags are defined by .hgtags across all
+        # heads, and local tags are defined in .hg/localtags.)  They
+        # constitute the in-memory cache of tags.
+        self._tags = None
+        self._tagtypes = None
+
         self.branchcache = None
         self._ubranchcache = None  # UTF-8 version of branchcache
         self._branchcachetip = None
@@ -160,8 +167,8 @@ class localrepository(repo.repository):
                 fp.write('\n')
             for name in names:
                 m = munge and munge(name) or name
-                if self._tagstypecache and name in self._tagstypecache:
-                    old = self.tagscache.get(name, nullid)
+                if self._tagtypes and name in self._tagtypes:
+                    old = self._tags.get(name, nullid)
                     fp.write('%s %s\n' % (hex(old), m))
                 fp.write('%s %s\n' % (hex(node), m))
             fp.close()
@@ -233,100 +240,43 @@ class localrepository(repo.repository):
 
     def tags(self):
         '''return a mapping of tag to node'''
-        if self.tagscache:
-            return self.tagscache
+        if self._tags is None:
+            (self._tags, self._tagtypes) = self._findtags()
 
-        globaltags = {}
+        return self._tags
+
+    def _findtags(self):
+        '''Do the hard work of finding tags.  Return a pair of dicts
+        (tags, tagtypes) where tags maps tag name to node, and tagtypes
+        maps tag name to a string like \'global\' or \'local\'.
+        Subclasses or extensions are free to add their own tags, but
+        should be aware that the returned dicts will be retained for the
+        duration of the localrepo object.'''
+
+        # XXX what tagtype should subclasses/extensions use?  Currently
+        # mq and bookmarks add tags, but do not set the tagtype at all.
+        # Should each extension invent its own tag type?  Should there
+        # be one tagtype for all such "virtual" tags?  Or is the status
+        # quo fine?
+
+        alltags = {}                    # map tag name to (node, hist)
         tagtypes = {}
 
-        def readtags(lines, fn, tagtype):
-            filetags = {}
-            count = 0
+        tags_.findglobaltags(self.ui, self, alltags, tagtypes)
+        tags_.readlocaltags(self.ui, self, alltags, tagtypes)
 
-            def warn(msg):
-                self.ui.warn(_("%s, line %s: %s\n") % (fn, count, msg))
-
-            for l in lines:
-                count += 1
-                if not l:
-                    continue
-                s = l.split(" ", 1)
-                if len(s) != 2:
-                    warn(_("cannot parse entry"))
-                    continue
-                node, key = s
-                key = encoding.tolocal(key.strip()) # stored in UTF-8
-                try:
-                    bin_n = bin(node)
-                except TypeError:
-                    warn(_("node '%s' is not well formed") % node)
-                    continue
-                if bin_n not in self.changelog.nodemap:
-                    # silently ignore as pull -r might cause this
-                    continue
-
-                h = []
-                if key in filetags:
-                    n, h = filetags[key]
-                    h.append(n)
-                filetags[key] = (bin_n, h)
-
-            for k, nh in filetags.iteritems():
-                if k not in globaltags:
-                    globaltags[k] = nh
-                    tagtypes[k] = tagtype
-                    continue
-
-                # we prefer the global tag if:
-                #  it supercedes us OR
-                #  mutual supercedes and it has a higher rank
-                # otherwise we win because we're tip-most
-                an, ah = nh
-                bn, bh = globaltags[k]
-                if (bn != an and an in bh and
-                    (bn not in ah or len(bh) > len(ah))):
-                    an = bn
-                ah.extend([n for n in bh if n not in ah])
-                globaltags[k] = an, ah
-                tagtypes[k] = tagtype
-
-        seen = set()
-        f = None
-        ctxs = []
-        for node in self.heads():
-            try:
-                fnode = self[node].filenode('.hgtags')
-            except error.LookupError:
-                continue
-            if fnode not in seen:
-                seen.add(fnode)
-                if not f:
-                    f = self.filectx('.hgtags', fileid=fnode)
-                else:
-                    f = f.filectx(fnode)
-                ctxs.append(f)
-
-        # read the tags file from each head, ending with the tip
-        for f in reversed(ctxs):
-            readtags(f.data().splitlines(), f, "global")
-
-        try:
-            data = encoding.fromlocal(self.opener("localtags").read())
-            # localtags are stored in the local character set
-            # while the internal tag table is stored in UTF-8
-            readtags(data.splitlines(), "localtags", "local")
-        except IOError:
-            pass
-
-        self.tagscache = {}
-        self._tagstypecache = {}
-        for k, nh in globaltags.iteritems():
-            n = nh[0]
-            if n != nullid:
-                self.tagscache[k] = n
-            self._tagstypecache[k] = tagtypes[k]
-        self.tagscache['tip'] = self.changelog.tip()
-        return self.tagscache
+        # Build the return dicts.  Have to re-encode tag names because
+        # the tags module always uses UTF-8 (in order not to lose info
+        # writing to the cache), but the rest of Mercurial wants them in
+        # local encoding.
+        tags = {}
+        for (name, (node, hist)) in alltags.iteritems():
+            if node != nullid:
+                tags[encoding.tolocal(name)] = node
+        tags['tip'] = self.changelog.tip()
+        tagtypes = dict([(encoding.tolocal(name), value)
+                         for (name, value) in tagtypes.iteritems()])
+        return (tags, tagtypes)
 
     def tagtype(self, tagname):
         '''
@@ -339,7 +289,7 @@ class localrepository(repo.repository):
 
         self.tags()
 
-        return self._tagstypecache.get(tagname)
+        return self._tagtypes.get(tagname)
 
     def tagslist(self):
         '''return a list of tags ordered by revision'''
@@ -668,6 +618,7 @@ class localrepository(repo.repository):
                                  % encoding.tolocal(self.dirstate.branch()))
                 self.invalidate()
                 self.dirstate.invalidate()
+                self.destroyed()
             else:
                 self.ui.warn(_("no rollback information available\n"))
         finally:
@@ -677,8 +628,8 @@ class localrepository(repo.repository):
         for a in "changelog manifest".split():
             if a in self.__dict__:
                 delattr(self, a)
-        self.tagscache = None
-        self._tagstypecache = None
+        self._tags = None
+        self._tagtypes = None
         self.nodetagscache = None
         self.branchcache = None
         self._ubranchcache = None
@@ -700,6 +651,9 @@ class localrepository(repo.repository):
         return l
 
     def lock(self, wait=True):
+        '''Lock the repository store (.hg/store) and return a weak reference
+        to the lock. Use this before modifying the store (e.g. committing or
+        stripping). If you are opening a transaction, get a lock as well.)'''
         l = self._lockref and self._lockref()
         if l is not None and l.held:
             l.lock()
@@ -711,6 +665,9 @@ class localrepository(repo.repository):
         return l
 
     def wlock(self, wait=True):
+        '''Lock the non-store parts of the repository (everything under
+        .hg except .hg/store) and return a weak reference to the lock.
+        Use this before modifying files in .hg.'''
         l = self._wlockref and self._wlockref()
         if l is not None and l.held:
             l.lock()
@@ -965,6 +922,25 @@ class localrepository(repo.repository):
         finally:
             del tr
             lock.release()
+
+    def destroyed(self):
+        '''Inform the repository that nodes have been destroyed.
+        Intended for use by strip and rollback, so there's a common
+        place for anything that has to be done after destroying history.'''
+        # XXX it might be nice if we could take the list of destroyed
+        # nodes, but I don't see an easy way for rollback() to do that
+
+        # Ensure the persistent tag cache is updated.  Doing it now
+        # means that the tag cache only has to worry about destroyed
+        # heads immediately after a strip/rollback.  That in turn
+        # guarantees that "cachetip == currenttip" (comparing both rev
+        # and node) always means no nodes have been added or destroyed.
+
+        # XXX this is suboptimal when qrefresh'ing: we strip the current
+        # head, refresh the tag cache, then immediately add a new head.
+        # But I think doing it this way is necessary for the "instant
+        # tag cache retrieval" case to work.
+        tags_.findglobaltags(self.ui, self, {}, {})
 
     def walk(self, match, node=None):
         '''
@@ -1481,6 +1457,12 @@ class localrepository(repo.repository):
         return self.push_addchangegroup(remote, force, revs)
 
     def prepush(self, remote, force, revs):
+        '''Analyze the local and remote repositories and determine which
+        changesets need to be pushed to the remote.  Return a tuple
+        (changegroup, remoteheads).  changegroup is a readable file-like
+        object whose read() returns successive changegroup chunks ready to
+        be sent over the wire.  remoteheads is the list of remote heads.
+        '''
         common = {}
         remote_heads = remote.heads()
         inc = self.findincoming(remote, common, remote_heads, force=force)
@@ -1625,9 +1607,10 @@ class localrepository(repo.repository):
                 self.ui.debug("%s\n" % hex(node))
 
     def changegroupsubset(self, bases, heads, source, extranodes=None):
-        """This function generates a changegroup consisting of all the nodes
-        that are descendents of any of the bases, and ancestors of any of
-        the heads.
+        """Compute a changegroup consisting of all the nodes that are
+        descendents of any of the bases and ancestors of any of the heads.
+        Return a chunkbuffer object whose read() method will return
+        successive changegroup chunks.
 
         It is fairly complex as determining which filenodes and which
         manifest nodes need to be included for the changeset to be complete
@@ -1708,24 +1691,13 @@ class localrepository(repo.repository):
         def identity(x):
             return x
 
-        # A function generating function.  Sets up an environment for the
-        # inner function.
-        def cmp_by_rev_func(revlog):
-            # Compare two nodes by their revision number in the environment's
-            # revision history.  Since the revision number both represents the
-            # most efficient order to read the nodes in, and represents a
-            # topological sorting of the nodes, this function is often useful.
-            def cmp_by_rev(a, b):
-                return cmp(revlog.rev(a), revlog.rev(b))
-            return cmp_by_rev
-
         # If we determine that a particular file or manifest node must be a
         # node that the recipient of the changegroup will already have, we can
         # also assume the recipient will have all the parents.  This function
         # prunes them from the set of missing nodes.
         def prune_parents(revlog, hasset, msngset):
             haslst = list(hasset)
-            haslst.sort(cmp_by_rev_func(revlog))
+            haslst.sort(key=revlog.rev)
             for node in haslst:
                 parentlst = [p for p in revlog.parents(node) if p != nullid]
                 while parentlst:
@@ -1875,7 +1847,7 @@ class localrepository(repo.repository):
             add_extra_nodes(1, msng_mnfst_set)
             msng_mnfst_lst = msng_mnfst_set.keys()
             # Sort the manifestnodes by revision number.
-            msng_mnfst_lst.sort(cmp_by_rev_func(mnfst))
+            msng_mnfst_lst.sort(key=mnfst.rev)
             # Create a generator for the manifestnodes that calls our lookup
             # and data collection functions back.
             group = mnfst.group(msng_mnfst_lst, lookup_manifest_link,
@@ -1913,7 +1885,7 @@ class localrepository(repo.repository):
                     yield changegroup.chunkheader(len(fname))
                     yield fname
                     # Sort the filenodes by their revision #
-                    msng_filenode_lst.sort(cmp_by_rev_func(filerevlog))
+                    msng_filenode_lst.sort(key=filerevlog.rev)
                     # Create a group generator and only pass in a changenode
                     # lookup function as we need to collect no information
                     # from filenodes.
@@ -1937,8 +1909,9 @@ class localrepository(repo.repository):
         return self.changegroupsubset(basenodes, self.heads(), source)
 
     def _changegroup(self, common, source):
-        """Generate a changegroup of all nodes that we have that a recipient
-        doesn't.
+        """Compute the changegroup of all nodes that we have that a recipient
+        doesn't.  Return a chunkbuffer object whose read() method will return
+        successive changegroup chunks.
 
         This is much easier than the previous function as we can assume that
         the recipient has any changenode we aren't sending them.
@@ -1972,6 +1945,7 @@ class localrepository(repo.repository):
             return lookuprevlink
 
         def gengroup():
+            '''yield a sequence of changegroup chunks (strings)'''
             # construct a list of all changed files
             changedfiles = set()
 

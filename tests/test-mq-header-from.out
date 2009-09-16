@@ -32,7 +32,8 @@ diff -r ... 2
 1: [mq]: 2.patch - test
 0: [mq]: 1.patch - mary
 ==== qref -u
-From: jane
+# HG changeset patch
+# User jane
 
 
 diff -r ... 2
@@ -117,7 +118,8 @@ diff -r ... 4
 1: [mq]: 2.patch - jane
 0: [mq]: 1.patch - mary
 ==== qref -u
-From: jane
+# HG changeset patch
+# User jane
 
 Four
 
@@ -131,6 +133,7 @@ diff -r ... 4
 1: [mq]: 2.patch - jane
 0: [mq]: 1.patch - mary
 ==== qnew with HG header
+popping 5.patch
 now at: 4.patch
 now at: 5.patch
 # HG changeset patch
@@ -184,6 +187,11 @@ diff -r ... 5
 1: [mq]: 2.patch - jane
 0: [mq]: 1.patch - mary
 ==== qpop -a / qpush -a
+popping 5.patch
+popping 4.patch
+popping 3.patch
+popping 2.patch
+popping 1.patch
 patch queue now empty
 applying 1.patch
 applying 2.patch

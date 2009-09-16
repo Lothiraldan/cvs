@@ -19,6 +19,7 @@ First line of commit message.
 More text in commit message.
 
 
+popping email
 patch queue now empty
 % import URL
 adding url.diff to series file
@@ -28,12 +29,14 @@ abort: patch "url.diff" already exists
 applying url.diff
 now at: url.diff
 foo
+popping url.diff
 patch queue now empty
 % qimport -f
 adding url.diff to series file
 applying url.diff
 now at: url.diff
 foo2
+popping url.diff
 patch queue now empty
 % build diff with CRLF
 adding b

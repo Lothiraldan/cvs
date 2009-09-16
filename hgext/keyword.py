@@ -1,6 +1,6 @@
 # keyword.py - $Keyword$ expansion for Mercurial
 #
-# Copyright 2007, 2008 Christian Ebert <blacktrash@gmx.net>
+# Copyright 2007-2009 Christian Ebert <blacktrash@gmx.net>
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2, incorporated herein by reference.
@@ -38,20 +38,22 @@ current user or for archive distribution.
 Configuration is done in the [keyword] and [keywordmaps] sections of
 hgrc files.
 
-Example:
+Example::
 
     [keyword]
     # expand keywords in every python file except those matching "x*"
     **.py =
     x*    = ignore
 
-Note: the more specific you are in your filename patterns
-      the less you lose speed in huge repositories.
+NOTE: the more specific you are in your filename patterns the less you
+lose speed in huge repositories.
 
 For [keywordmaps] template mapping and expansion demonstration and
-control run "hg kwdemo".
+control run "hg kwdemo". See "hg help templates" for a list of
+available templates and filters.
 
-An additional date template filter {date|utcdate} is provided.
+An additional date template filter {date|utcdate} is provided. It
+returns a date like "2006/09/18 15:13:13".
 
 The default template mappings (view with "hg kwdemo -d") can be
 replaced with customized keywords and templates. Again, run "hg
@@ -70,17 +72,17 @@ the files in question to update keyword expansions after all changes
 have been checked in.
 
 Expansions spanning more than one line and incremental expansions,
-like CVS' $Log$, are not supported. A keyword template map
-"Log = {desc}" expands to the first line of the changeset description.
+like CVS' $Log$, are not supported. A keyword template map "Log =
+{desc}" expands to the first line of the changeset description.
 '''
 
 from mercurial import commands, cmdutil, dispatch, filelog, revlog, extensions
 from mercurial import patch, localrepo, templater, templatefilters, util, match
 from mercurial.hgweb import webcommands
 from mercurial.lock import release
-from mercurial.node import nullid, hex
+from mercurial.node import nullid
 from mercurial.i18n import _
-import re, shutil, tempfile, time
+import re, shutil, tempfile
 
 commands.optionalrepo += ' kwdemo'
 
@@ -93,9 +95,8 @@ nokwcommands = ('add addremove annotate bundle copy export grep incoming init'
 # not when reading filelog, and unexpand when reading from working dir
 restricted = 'merge record resolve qfold qimport qnew qpush qrefresh qrecord'
 
-def utcdate(date):
-    '''Returns hgdate in cvs-like UTC format.'''
-    return time.strftime('%Y/%m/%d %H:%M:%S', time.gmtime(date[0]))
+# provide cvs-like UTC date filter
+utcdate = lambda x: util.datestr(x, '%Y/%m/%d %H:%M:%S')
 
 # make keyword tools accessible
 kwtools = {'templater': None, 'hgcmd': '', 'inc': [], 'exc': ['.hg*']}
@@ -125,9 +126,8 @@ class kwtemplater(object):
 
         kwmaps = self.ui.configitems('keywordmaps')
         if kwmaps: # override default templates
-            kwmaps = [(k, templater.parsestring(v, False))
-                      for (k, v) in kwmaps]
-            self.templates = dict(kwmaps)
+            self.templates = dict((k, templater.parsestring(v, False))
+                                  for k, v in kwmaps)
         escaped = map(re.escape, self.templates.keys())
         kwpat = r'\$(%s)(: [^$\n\r]*? )??\$' % '|'.join(escaped)
         self.re_kw = re.compile(kwpat)
@@ -277,10 +277,12 @@ def demo(ui, repo, *args, **opts):
     Show current, custom, or default keyword template maps and their
     expansions.
 
-    Extend current configuration by specifying maps as arguments and
-    optionally by reading from an additional hgrc file.
+    Extend the current configuration by specifying maps as arguments
+    and using -f/--rcfile to source an external hgrc file.
 
-    Override current keyword template maps with "default" option.
+    Use -d/--default to disable current configuration.
+
+    See "hg help templates" for information on templates and filters.
     '''
     def demoitems(section, items):
         ui.write('[%s]\n' % section)
@@ -288,40 +290,47 @@ def demo(ui, repo, *args, **opts):
             ui.write('%s = %s\n' % (k, v))
 
     msg = 'hg keyword config and expansion example'
-    kwstatus = 'current'
     fn = 'demo.txt'
     branchname = 'demobranch'
     tmpdir = tempfile.mkdtemp('', 'kwdemo.')
     ui.note(_('creating temporary repository at %s\n') % tmpdir)
     repo = localrepo.localrepository(ui, tmpdir, True)
     ui.setconfig('keyword', fn, '')
+
+    uikwmaps = ui.configitems('keywordmaps')
     if args or opts.get('rcfile'):
-        kwstatus = 'custom'
-    if opts.get('rcfile'):
-        ui.readconfig(opts.get('rcfile'))
-    if opts.get('default'):
-        kwstatus = 'default'
+        ui.status(_('\n\tconfiguration using custom keyword template maps\n'))
+        if uikwmaps:
+            ui.status(_('\textending current template maps\n'))
+        if opts.get('default') or not uikwmaps:
+            ui.status(_('\toverriding default template maps\n'))
+        if opts.get('rcfile'):
+            ui.readconfig(opts.get('rcfile'))
+        if args:
+            # simulate hgrc parsing
+            rcmaps = ['[keywordmaps]\n'] + [a + '\n' for a in args]
+            fp = repo.opener('hgrc', 'w')
+            fp.writelines(rcmaps)
+            fp.close()
+            ui.readconfig(repo.join('hgrc'))
+        kwmaps = dict(ui.configitems('keywordmaps'))
+    elif opts.get('default'):
+        ui.status(_('\n\tconfiguration using default keyword template maps\n'))
         kwmaps = kwtemplater.templates
-        if ui.configitems('keywordmaps'):
-            # override maps from optional rcfile
+        if uikwmaps:
+            ui.status(_('\tdisabling current template maps\n'))
             for k, v in kwmaps.iteritems():
                 ui.setconfig('keywordmaps', k, v)
-    elif args:
-        # simulate hgrc parsing
-        rcmaps = ['[keywordmaps]\n'] + [a + '\n' for a in args]
-        fp = repo.opener('hgrc', 'w')
-        fp.writelines(rcmaps)
-        fp.close()
-        ui.readconfig(repo.join('hgrc'))
-    if not opts.get('default'):
-        kwmaps = dict(ui.configitems('keywordmaps')) or kwtemplater.templates
+    else:
+        ui.status(_('\n\tconfiguration using current keyword template maps\n'))
+        kwmaps = dict(uikwmaps) or kwtemplater.templates
+
     uisetup(ui)
     reposetup(ui, repo)
     for k, v in ui.configitems('extensions'):
         if k.endswith('keyword'):
             extension = '%s = %s' % (k, v)
             break
-    ui.status(_('\n\tconfig using %s keyword template maps\n') % kwstatus)
     ui.write('[extensions]\n%s\n' % extension)
     demoitems('keyword', ui.configitems('keyword'))
     demoitems('keywordmaps', kwmaps.iteritems())
@@ -329,7 +338,7 @@ def demo(ui, repo, *args, **opts):
     repo.wopener(fn, 'w').write(keywords)
     repo.add([fn])
     path = repo.wjoin(fn)
-    ui.note(_('\n%s keywords written to %s:\n') % (kwstatus, path))
+    ui.note(_('\nkeywords written to %s:\n') % path)
     ui.note(keywords)
     ui.note('\nhg -R "%s" branch "%s"\n' % (tmpdir, branchname))
     # silence branch command if not verbose
@@ -343,8 +352,7 @@ def demo(ui, repo, *args, **opts):
     ui.note(_('unhooked all commit hooks\n'))
     ui.note('hg -R "%s" ci -m "%s"\n' % (tmpdir, msg))
     repo.commit(text=msg)
-    fmt = ui.verbose and ' in %s' % path or ''
-    ui.status(_('\n\t%s keywords expanded%s\n') % (kwstatus, fmt))
+    ui.status(_('\n\tkeywords expanded\n'))
     ui.write(repo.wread(fn))
     ui.debug(_('\nremoving temporary repository %s\n') % tmpdir)
     shutil.rmtree(tmpdir, ignore_errors=True)
@@ -366,8 +374,8 @@ def files(ui, repo, *pats, **opts):
     [keyword] configuration patterns.
 
     Useful to prevent inadvertent keyword expansion and to speed up
-    execution by including only files that are actual candidates
-    for expansion.
+    execution by including only files that are actual candidates for
+    expansion.
 
     See "hg help keyword" on how to construct patterns both for
     inclusion and exclusion of files.
@@ -375,11 +383,12 @@ def files(ui, repo, *pats, **opts):
     Use -u/--untracked to list untracked files as well.
 
     With -a/--all and -v/--verbose the codes used to show the status
-    of files are:
-    K = keyword expansion candidate
-    k = keyword expansion candidate (untracked)
-    I = ignored
-    i = ignored (untracked)
+    of files are::
+
+      K = keyword expansion candidate
+      k = keyword expansion candidate (untracked)
+      I = ignored
+      i = ignored (untracked)
     '''
     kwt = kwtools['templater']
     status = _status(ui, repo, kwt, opts.get('untracked'), *pats, **opts)
@@ -496,7 +505,8 @@ def reposetup(ui, repo):
                 release(lock, wlock)
 
     # monkeypatches
-    def kwpatchfile_init(orig, self, ui, fname, opener, missing=False, eol=None):
+    def kwpatchfile_init(orig, self, ui, fname, opener,
+                         missing=False, eol=None):
         '''Monkeypatch/wrap patch.patchfile.__init__ to avoid
         rejects or conflicts due to expanded keywords in working dir.'''
         orig(self, ui, fname, opener, missing, eol)

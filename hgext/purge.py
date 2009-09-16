@@ -3,8 +3,8 @@
 # This is a small extension for Mercurial (http://mercurial.selenic.com/)
 # that removes files not known to mercurial
 #
-# This program was inspired by the "cvspurge" script contained in CVS utilities
-# (http://www.red-bean.com/cvsutils/).
+# This program was inspired by the "cvspurge" script contained in CVS
+# utilities (http://www.red-bean.com/cvsutils/).
 #
 # For help on the usage of "hg purge" use:
 #  hg help purge
@@ -36,13 +36,16 @@ def purge(ui, repo, *dirs, **opts):
     and uncommitted changes in an otherwise-clean source tree.
 
     This means that purge will delete:
-     - Unknown files: files marked with "?" by "hg status"
-     - Empty directories: in fact Mercurial ignores directories unless
-       they contain files under source control management
+
+    - Unknown files: files marked with "?" by "hg status"
+    - Empty directories: in fact Mercurial ignores directories unless
+      they contain files under source control management
+
     But it will leave untouched:
-     - Modified and unmodified tracked files
-     - Ignored files (unless --all is specified)
-     - New files added to the repository (with "hg add")
+
+    - Modified and unmodified tracked files
+    - Ignored files (unless --all is specified)
+    - New files added to the repository (with "hg add")
 
     If directories are given on the command line, only files in these
     directories are considered.
