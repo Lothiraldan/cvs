@@ -879,7 +879,7 @@ class revlog(object):
         if len(id) < 40:
             try:
                 # hex(node)[:...]
-                l = len(id) / 2  # grab an even number of digits
+                l = len(id) // 2  # grab an even number of digits
                 bin_id = bin(id[:l*2])
                 nl = [n for n in self.nodemap if n[:l] == bin_id]
                 nl = [n for n in nl if hex(n).startswith(id)]
@@ -973,7 +973,7 @@ class revlog(object):
         if node == nullid:
             return ""
         if self._cache and self._cache[0] == node:
-            return str(self._cache[2])
+            return self._cache[2]
 
         # look up what we need to read
         text = None
@@ -988,7 +988,7 @@ class revlog(object):
         # do we have useful data cached?
         if self._cache and self._cache[1] >= base and self._cache[1] < rev:
             base = self._cache[1]
-            text = str(self._cache[2])
+            text = self._cache[2]
 
         self._loadindex(base, rev + 1)
         self._chunkraw(base, rev)
@@ -1111,7 +1111,8 @@ class revlog(object):
             ifh.write(data[1])
             self.checkinlinesize(transaction, ifh)
 
-        self._cache = (node, curr, text)
+        if type(text) == str: # only accept immutable objects
+            self._cache = (node, curr, text)
         return node
 
     def ancestor(self, a, b):
@@ -1127,7 +1128,8 @@ class revlog(object):
         return self.node(c)
 
     def group(self, nodelist, lookup, infocollect=None):
-        """calculate a delta group
+        """Calculate a delta group, yielding a sequence of changegroup chunks
+        (strings).
 
         Given a list of changeset revs, return a set of deltas and
         metadata corresponding to nodes. the first delta is
@@ -1354,7 +1356,7 @@ class revlog(object):
             f.seek(0, 2)
             actual = f.tell()
             s = self._io.size
-            i = max(0, actual / s)
+            i = max(0, actual // s)
             di = actual - (i * s)
             if self._inline:
                 databytes = 0

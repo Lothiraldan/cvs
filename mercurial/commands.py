@@ -8,12 +8,13 @@
 from node import hex, nullid, nullrev, short
 from lock import release
 from i18n import _, gettext
-import os, re, sys, subprocess, difflib, time
+import os, re, sys, subprocess, difflib, time, tempfile
 import hg, util, revlog, bundlerepo, extensions, copies, context, error
-import patch, help, mdiff, tempfile, url, encoding
+import patch, help, mdiff, url, encoding
 import archival, changegroup, cmdutil, sshserver, hbisect
 from hgweb import server
 import merge as merge_
+import minirst
 
 # Commands start here, listed alphabetically
 
@@ -57,11 +58,11 @@ def addremove(ui, repo, *pats, **opts):
     commit.
 
     Use the -s/--similarity option to detect renamed files. With a
-    parameter > 0, this compares every removed file with every added
-    file and records those similar enough as renames. This option
-    takes a percentage between 0 (disabled) and 100 (files must be
-    identical) as its parameter. Detecting renamed files this way can
-    be expensive.
+    parameter greater than 0, this compares every removed file with
+    every added file and records those similar enough as renames. This
+    option takes a percentage between 0 (disabled) and 100 (files must
+    be identical) as its parameter. Detecting renamed files this way
+    can be expensive.
     """
     try:
         sim = float(opts.get('similarity') or 0)
@@ -141,14 +142,14 @@ def archive(ui, repo, dest, **opts):
     directory; use -r/--rev to specify a different revision.
 
     To specify the type of archive to create, use -t/--type. Valid
-    types are:
+    types are::
 
-    "files" (default): a directory full of files
-    "tar": tar archive, uncompressed
-    "tbz2": tar archive, compressed using bzip2
-    "tgz": tar archive, compressed using gzip
-    "uzip": zip archive, uncompressed
-    "zip": zip archive, compressed using deflate
+      "files" (default): a directory full of files
+      "tar": tar archive, uncompressed
+      "tbz2": tar archive, compressed using bzip2
+      "tgz": tar archive, compressed using gzip
+      "uzip": zip archive, uncompressed
+      "zip": zip archive, compressed using deflate
 
     The exact name of the destination archive or directory is given
     using a format string; see 'hg help export' for details.
@@ -247,7 +248,7 @@ def backout(ui, repo, node=None, rev=None, **opts):
     commit_opts['addremove'] = False
     if not commit_opts['message'] and not commit_opts['logfile']:
         # we don't translate commit messages
-        commit_opts['message'] = "Backed out changeset %s" % (short(node))
+        commit_opts['message'] = "Backed out changeset %s" % short(node)
         commit_opts['force_editor'] = True
     commit(ui, repo, **commit_opts)
     def nice(node):
@@ -397,8 +398,8 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
         while size <= changesets:
             tests, size = tests + 1, size * 2
         rev = repo.changelog.rev(node)
-        ui.write(_("Testing changeset %s:%s "
-                   "(%s changesets remaining, ~%s tests)\n")
+        ui.write(_("Testing changeset %d:%s "
+                   "(%d changesets remaining, ~%d tests)\n")
                  % (rev, short(node), changesets, tests))
         if not noupdate:
             cmdutil.bail_if_changed(repo)
@@ -564,11 +565,11 @@ def cat(ui, repo, file1, *pats, **opts):
 
     Output may be to a file, in which case the name of the file is
     given using a format string. The formatting rules are the same as
-    for the export command, with the following additions:
+    for the export command, with the following additions::
 
-    %s   basename of file being printed
-    %d   dirname of file being printed, or '.' if in repository root
-    %p   root-relative path name of file being printed
+      %s   basename of file being printed
+      %d   dirname of file being printed, or '.' if in repository root
+      %p   root-relative path name of file being printed
     """
     ctx = repo[opts.get('rev')]
     err = 1
@@ -617,7 +618,7 @@ def clone(ui, source, dest=None, **opts):
     avoid hardlinking.
 
     In some cases, you can clone repositories and checked out files
-    using full hardlinks with
+    using full hardlinks with ::
 
       $ cp -al REPO REPOCLONE
 
@@ -627,7 +628,6 @@ def clone(ui, source, dest=None, **opts):
     breaks hardlinks (Emacs and most Linux Kernel tools do so). Also,
     this is not compatible with certain extensions that place their
     metadata under the .hg directory, such as mq.
-
     """
     hg.clone(cmdutil.remoteui(ui, opts), source, dest,
              pull=opts.get('pull'),
@@ -680,9 +680,9 @@ def commit(ui, repo, *pats, **opts):
         ui.status(_('created new head\n'))
 
     if ui.debugflag:
-        ui.write(_('committed changeset %d:%s\n') % (rev,hex(node)))
+        ui.write(_('committed changeset %d:%s\n') % (rev, hex(node)))
     elif ui.verbose:
-        ui.write(_('committed changeset %d:%s\n') % (rev,short(node)))
+        ui.write(_('committed changeset %d:%s\n') % (rev, short(node)))
 
 def copy(ui, repo, *pats, **opts):
     """mark files as copied for the next commit
@@ -751,7 +751,7 @@ def debugcomplete(ui, cmd='', **opts):
     ui.write("%s\n" % "\n".join(sorted(cmdlist)))
 
 def debugfsinfo(ui, path = "."):
-    file('.debugfsinfo', 'w').write('')
+    open('.debugfsinfo', 'w').write('')
     ui.write('exec: %s\n' % (util.checkexec(path) and 'yes' or 'no'))
     ui.write('symlink: %s\n' % (util.checklink(path) and 'yes' or 'no'))
     ui.write('case-sensitive: %s\n' % (util.checkcase('.debugfsinfo')
@@ -984,7 +984,7 @@ def debuginstall(ui):
         if list(files) != [os.path.basename(fa)]:
             ui.write(_(" unexpected patch output!\n"))
             patchproblems += 1
-        a = file(fa).read()
+        a = open(fa).read()
         if a != b:
             ui.write(_(" patch test failed!\n"))
             patchproblems += 1
@@ -1116,16 +1116,16 @@ def export(ui, repo, *changesets, **opts):
     first parent only.
 
     Output may be to a file, in which case the name of the file is
-    given using a format string. The formatting rules are as follows:
+    given using a format string. The formatting rules are as follows::
 
-    %%   literal "%" character
-    %H   changeset hash (40 bytes of hexadecimal)
-    %N   number of patches being generated
-    %R   changeset revision number
-    %b   basename of the exporting repository
-    %h   short-form changeset hash (12 bytes of hexadecimal)
-    %n   zero-padded sequence number, starting at 1
-    %r   zero-padded changeset revision number
+      %%   literal "%" character
+      %H   changeset hash (40 bytes of hexadecimal)
+      %N   number of patches being generated
+      %R   changeset revision number
+      %b   basename of the exporting repository
+      %h   short-form changeset hash (12 bytes of hexadecimal)
+      %n   zero-padded sequence number, starting at 1
+      %r   zero-padded changeset revision number
 
     Without the -a/--text option, export will avoid generating diffs
     of files it detects as binary. With -a, export will generate a
@@ -1275,9 +1275,9 @@ def grep(ui, repo, pattern, *pats, **opts):
             if opts.get('all'):
                 cols.append(change)
             if opts.get('user'):
-                cols.append(ui.shortuser(get(r)[1]))
+                cols.append(ui.shortuser(get(r).user()))
             if opts.get('date'):
-                cols.append(datefunc(get(r)[2]))
+                cols.append(datefunc(get(r).date()))
             if opts.get('files_with_matches'):
                 c = (fn, r)
                 if c in filerevmatches:
@@ -1291,7 +1291,7 @@ def grep(ui, repo, pattern, *pats, **opts):
 
     skip = {}
     revfiles = {}
-    get = util.cachefunc(lambda r: repo[r].changeset())
+    get = util.cachefunc(lambda r: repo[r])
     changeiter, matchfn = cmdutil.walkchangerevs(ui, repo, pats, get, opts)
     found = False
     follow = opts.get('follow')
@@ -1300,7 +1300,7 @@ def grep(ui, repo, pattern, *pats, **opts):
             matches.clear()
             revfiles.clear()
         elif st == 'add':
-            ctx = repo[rev]
+            ctx = get(rev)
             pctx = ctx.parents()[0]
             parent = pctx.rev()
             matches.setdefault(rev, {})
@@ -1323,18 +1323,18 @@ def grep(ui, repo, pattern, *pats, **opts):
                     continue
                 files.append(fn)
 
-                if not matches[rev].has_key(fn):
+                if fn not in matches[rev]:
                     grepbody(fn, rev, flog.read(fnode))
 
                 pfn = copy or fn
-                if not matches[parent].has_key(pfn):
+                if pfn not in matches[parent]:
                     try:
                         fnode = pctx.filenode(pfn)
                         grepbody(pfn, parent, flog.read(fnode))
                     except error.LookupError:
                         pass
         elif st == 'iter':
-            parent = repo[rev].parents()[0].rev()
+            parent = get(rev).parents()[0].rev()
             for fn in sorted(revfiles.get(rev, [])):
                 states = matches[rev][fn]
                 copy = copies.get(rev, {}).get(fn)
@@ -1423,6 +1423,7 @@ def help_(ui, name=None, with_version=False):
     Given a topic, extension, or command name, print help for that
     topic."""
     option_lists = []
+    textwidth = util.termwidth() - 2
 
     def addglobalopts(aliases):
         if ui.verbose:
@@ -1449,7 +1450,10 @@ def help_(ui, name=None, with_version=False):
         try:
             aliases, i = cmdutil.findcmd(name, table, False)
         except error.AmbiguousCommand, inst:
-            select = lambda c: c.lstrip('^').startswith(inst.args[0])
+            # py3k fix: except vars can't be used outside the scope of the
+            # except block, nor can be used inside a lambda. python issue4617
+            prefix = inst.args[0]
+            select = lambda c: c.lstrip('^').startswith(prefix)
             helplist(_('list of commands:\n\n'), select)
             return
 
@@ -1471,8 +1475,8 @@ def help_(ui, name=None, with_version=False):
         if not doc:
             doc = _("(no help text available)")
         if ui.quiet:
-            doc = doc.splitlines(0)[0]
-        ui.write("\n%s\n" % doc.rstrip())
+            doc = doc.splitlines()[0]
+        ui.write("\n%s\n" % minirst.format(doc, textwidth))
 
         if not ui.quiet:
             # options
@@ -1502,7 +1506,7 @@ def help_(ui, name=None, with_version=False):
             doc = gettext(doc)
             if not doc:
                 doc = _("(no help text available)")
-            h[f] = doc.splitlines(0)[0].rstrip()
+            h[f] = doc.splitlines()[0].rstrip()
             cmds[f] = c.lstrip("^")
 
         if not h:
@@ -1521,7 +1525,9 @@ def help_(ui, name=None, with_version=False):
 
         if name != 'shortlist':
             exts, maxlength = extensions.enabled()
-            ui.write(help.listexts(_('enabled extensions:'), exts, maxlength))
+            text = help.listexts(_('enabled extensions:'), exts, maxlength)
+            if text:
+                ui.write("\n%s\n" % minirst.format(text, textwidth))
 
         if not ui.quiet:
             addglobalopts(True)
@@ -1539,8 +1545,8 @@ def help_(ui, name=None, with_version=False):
         if hasattr(doc, '__call__'):
             doc = doc()
 
-        ui.write("%s\n" % header)
-        ui.write("%s\n" % doc.rstrip())
+        ui.write("%s\n\n" % header)
+        ui.write("%s\n" % minirst.format(doc, textwidth))
 
     def helpext(name):
         try:
@@ -1549,12 +1555,14 @@ def help_(ui, name=None, with_version=False):
             raise error.UnknownCommand(name)
 
         doc = gettext(mod.__doc__) or _('no help text available')
-        doc = doc.splitlines(0)
-        ui.write(_('%s extension - %s\n') % (name.split('.')[-1], doc[0]))
-        for d in doc[1:]:
-            ui.write(d, '\n')
-
-        ui.status('\n')
+        if '\n' not in doc:
+            head, tail = doc, ""
+        else:
+            head, tail = doc.split('\n', 1)
+        ui.write(_('%s extension - %s\n\n') % (name.split('.')[-1], head))
+        if tail:
+            ui.write(minirst.format(tail, textwidth))
+            ui.status('\n\n')
 
         try:
             ct = mod.cmdtable
@@ -1974,7 +1982,7 @@ def log(ui, repo, *pats, **opts):
     will appear in files:.
     """
 
-    get = util.cachefunc(lambda r: repo[r].changeset())
+    get = util.cachefunc(lambda r: repo[r])
     changeiter, matchfn = cmdutil.walkchangerevs(ui, repo, pats, get, opts)
 
     limit = cmdutil.loglimit(opts)
@@ -2032,40 +2040,37 @@ def log(ui, repo, *pats, **opts):
             if opts.get('only_merges') and len(parents) != 2:
                 continue
 
-            if only_branches:
-                revbranch = get(rev)[5]['branch']
-                if revbranch not in only_branches:
-                    continue
+            ctx = get(rev)
+            if only_branches and ctx.branch() not in only_branches:
+                continue
 
-            if df:
-                changes = get(rev)
-                if not df(changes[2][0]):
-                    continue
+            if df and not df(ctx.date()[0]):
+                continue
 
             if opts.get('keyword'):
-                changes = get(rev)
                 miss = 0
                 for k in [kw.lower() for kw in opts['keyword']]:
-                    if not (k in changes[1].lower() or
-                            k in changes[4].lower() or
-                            k in " ".join(changes[3]).lower()):
+                    if not (k in ctx.user().lower() or
+                            k in ctx.description().lower() or
+                            k in " ".join(ctx.files()).lower()):
                         miss = 1
                         break
                 if miss:
                     continue
 
             if opts['user']:
-                changes = get(rev)
-                if not [k for k in opts['user'] if k in changes[1]]:
+                if not [k for k in opts['user'] if k in ctx.user()]:
                     continue
 
             copies = []
             if opts.get('copies') and rev:
-                for fn in get(rev)[3]:
+                for fn in ctx.files():
                     rename = getrenamed(fn, rev)
                     if rename:
                         copies.append((fn, rename[0]))
-            displayer.show(context.changectx(repo, rev), copies=copies)
+
+            displayer.show(ctx, copies=copies)
+
         elif st == 'iter':
             if count == limit: break
             if displayer.flush(rev):
@@ -2360,15 +2365,15 @@ def remove(ui, repo, *pats, **opts):
 
     The following table details the behavior of remove for different
     file states (columns) and option combinations (rows). The file
-    states are Added [A], Clean [C], Modified [M] and Missing [!]
-    (as reported by hg status). The actions are Warn, Remove (from
-    branch) and Delete (from disk).
+    states are Added [A], Clean [C], Modified [M] and Missing [!] (as
+    reported by hg status). The actions are Warn, Remove (from branch)
+    and Delete (from disk)::
 
-           A  C  M  !
-    none   W  RD W  R
-    -f     R  RD RD R
-    -A     W  W  W  R
-    -Af    R  R  R  R
+             A  C  M  !
+      none   W  RD W  R
+      -f     R  RD RD R
+      -A     W  W  W  R
+      -Af    R  R  R  R
 
     This command schedules the files to be removed at the next commit.
     To undo a remove before that, see hg revert.
@@ -2443,9 +2448,10 @@ def resolve(ui, repo, *pats, **opts):
     indicating whether or not files are resolved. All files must be
     marked as resolved before a commit is permitted.
 
-    The codes used to show the status of files are:
-    U = unresolved
-    R = resolved
+    The codes used to show the status of files are::
+
+      U = unresolved
+      R = resolved
     """
 
     all, mark, unmark, show = [opts.get(o) for o in 'all mark unmark list'.split()]
@@ -2711,7 +2717,7 @@ def rollback(ui, repo):
     Transactions are used to encapsulate the effects of all commands
     that create new changesets or propagate existing changesets into a
     repository. For example, the following commands are transactional,
-    and their effects can be rolled back:
+    and their effects can be rolled back::
 
       commit
       import
@@ -2822,15 +2828,16 @@ def status(ui, repo, *pats, **opts):
     If two revisions are given, the differences between them are
     shown.
 
-    The codes used to show the status of files are:
-    M = modified
-    A = added
-    R = removed
-    C = clean
-    ! = missing (deleted by non-hg command, but still tracked)
-    ? = not tracked
-    I = ignored
-      = origin of the previous file listed as A (added)
+    The codes used to show the status of files are::
+
+      M = modified
+      A = added
+      R = removed
+      C = clean
+      ! = missing (deleted by non-hg command, but still tracked)
+      ? = not tracked
+      I = ignored
+        = origin of the previous file listed as A (added)
     """
 
     node1, node2 = cmdutil.revpair(repo, opts.get('rev'))

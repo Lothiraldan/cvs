@@ -291,25 +291,28 @@ def filterpatch(ui, chunks):
                     _('Record &all changes to all remaining files'),
                     _('&Quit, recording no changes'),
                     _('&?'))
-            r = (ui.prompt("%s %s " % (query, resps), choices)
-                 or _('y')).lower()
-            if r == _('?'):
+            r = ui.promptchoice("%s %s " % (query, resps), choices)
+            if r == 7: # ?
                 doc = gettext(record.__doc__)
                 c = doc.find(_('y - record this change'))
                 for l in doc[c:].splitlines():
                     if l: ui.write(l.strip(), '\n')
                 continue
-            elif r == _('s'):
-                r = resp_file[0] = 'n'
-            elif r == _('f'):
-                r = resp_file[0] = 'y'
-            elif r == _('d'):
-                r = resp_all[0] = 'n'
-            elif r == _('a'):
-                r = resp_all[0] = 'y'
-            elif r == _('q'):
+            elif r == 0: # yes
+                ret = 'y'
+            elif r == 1: # no
+                ret = 'n'
+            elif r == 2: # Skip
+                ret = resp_file[0] = 'n'
+            elif r == 3: # file (Record remaining)
+                ret = resp_file[0] = 'y'
+            elif r == 4: # done, skip remaining
+                ret = resp_all[0] = 'n'
+            elif r == 5: # all
+                ret = resp_all[0] = 'y'
+            elif r == 6: # quit
                 raise util.Abort(_('user quit'))
-            return r
+            return ret
     pos, total = 0, len(chunks) - 1
     while chunks:
         chunk = chunks.pop()
@@ -362,19 +365,19 @@ def record(ui, repo, *pats, **opts):
     You will be prompted for whether to record changes to each
     modified file, and for files with multiple changes, for each
     change to use. For each query, the following responses are
-    possible:
+    possible::
 
-    y - record this change
-    n - skip this change
+      y - record this change
+      n - skip this change
 
-    s - skip remaining changes to this file
-    f - record remaining changes to this file
+      s - skip remaining changes to this file
+      f - record remaining changes to this file
 
-    d - done, skip remaining changes and files
-    a - record all changes to all remaining files
-    q - quit, recording no changes
+      d - done, skip remaining changes and files
+      a - record all changes to all remaining files
+      q - quit, recording no changes
 
-    ? - display help'''
+      ? - display help'''
 
     def record_committer(ui, repo, pats, opts):
         commands.commit(ui, repo, *pats, **opts)
@@ -409,7 +412,7 @@ def dorecord(ui, repo, committer, *pats, **opts):
     def recordfunc(ui, repo, message, match, opts):
         """This is generic record driver.
 
-        It's job is to interactively filter local changes, and accordingly
+        Its job is to interactively filter local changes, and accordingly
         prepare working dir into a state, where the job can be delegated to
         non-interactive commit command such as 'commit' or 'qrefresh'.
 

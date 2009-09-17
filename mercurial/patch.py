@@ -9,7 +9,7 @@
 from i18n import _
 from node import hex, nullid, short
 import base85, cmdutil, mdiff, util, diffhelpers, copies
-import cStringIO, email.Parser, os, re, math
+import cStringIO, email.Parser, os, re
 import sys, tempfile, zlib
 
 gitre = re.compile('diff --git a/(.*) b/(.*)')
@@ -188,7 +188,7 @@ def readgitpatch(lr):
             if m:
                 if gp:
                     gitpatches.append(gp)
-                src, dst = m.group(1, 2)
+                dst = m.group(2)
                 gp = patchmeta(dst)
                 gp.lineno = lineno
         elif gp:
@@ -326,10 +326,6 @@ class patchfile(object):
         # looks through the hash and finds candidate lines.  The
         # result is a list of line numbers sorted based on distance
         # from linenum
-        def sorter(a, b):
-            vala = abs(a - linenum)
-            valb = abs(b - linenum)
-            return cmp(vala, valb)
 
         try:
             cand = self.hash[l]
@@ -338,7 +334,7 @@ class patchfile(object):
 
         if len(cand) > 1:
             # resort our list of potentials forward then back.
-            cand.sort(sorter)
+            cand.sort(key=lambda x: abs(x - linenum))
         return cand
 
     def hashlines(self):
@@ -382,15 +378,13 @@ class patchfile(object):
         self.write()
         self.write_rej()
 
-    def apply(self, h, reverse):
+    def apply(self, h):
         if not h.complete():
             raise PatchError(_("bad hunk #%d %s (%d %d %d %d)") %
                             (h.number, h.desc, len(h.a), h.lena, len(h.b),
                             h.lenb))
 
         self.hunks += 1
-        if reverse:
-            h.reverse()
 
         if self.missing:
             self.rej.append(h)
@@ -604,31 +598,6 @@ class hunk(object):
                                              self.startb, self.lenb)
         self.hunk[0] = self.desc
 
-    def reverse(self):
-        self.create, self.remove = self.remove, self.create
-        origlena = self.lena
-        origstarta = self.starta
-        self.lena = self.lenb
-        self.starta = self.startb
-        self.lenb = origlena
-        self.startb = origstarta
-        self.a = []
-        self.b = []
-        # self.hunk[0] is the @@ description
-        for x in xrange(1, len(self.hunk)):
-            o = self.hunk[x]
-            if o.startswith('-'):
-                n = '+' + o[1:]
-                self.b.append(o[1:])
-            elif o.startswith('+'):
-                n = '-' + o[1:]
-                self.a.append(n)
-            else:
-                n = o
-                self.b.append(o[1:])
-                self.a.append(o)
-            self.hunk[x] = o
-
     def fix_newline(self):
         diffhelpers.fix_newline(self.hunk, self.a, self.b)
 
@@ -766,7 +735,7 @@ def parsefilename(str):
             return s
     return s[:i]
 
-def selectfile(afile_orig, bfile_orig, hunk, strip, reverse):
+def selectfile(afile_orig, bfile_orig, hunk, strip):
     def pathstrip(path, count=1):
         pathlen = len(path)
         i = 0
@@ -794,9 +763,18 @@ def selectfile(afile_orig, bfile_orig, hunk, strip, reverse):
     else:
         goodb = not nullb and os.path.exists(bfile)
     createfunc = hunk.createfile
-    if reverse:
-        createfunc = hunk.rmfile
     missing = not goodb and not gooda and not createfunc()
+
+    # some diff programs apparently produce create patches where the
+    # afile is not /dev/null, but rather the same name as the bfile
+    if missing and afile == bfile:
+        # this isn't very pretty
+        hunk.create = True
+        if createfunc():
+            missing = False
+        else:
+            hunk.create = False
+
     # If afile is "a/b/foo" and bfile is "a/b/foo.orig" we assume the
     # diff is between a file and its backup. In this case, the original
     # file should be patched (see original mpatch code).
@@ -970,8 +948,7 @@ def iterhunks(ui, fp, sourcefile=None, textmode=False):
     if hunknum == 0 and dopatch and not gitworkdone:
         raise NoHunks
 
-def applydiff(ui, fp, changed, strip=1, sourcefile=None, reverse=False,
-              eol=None):
+def applydiff(ui, fp, changed, strip=1, sourcefile=None, eol=None):
     """
     Reads a patch from fp and tries to apply it.
 
@@ -1001,7 +978,7 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, reverse=False,
             if not current_file:
                 continue
             current_hunk = values
-            ret = current_file.apply(current_hunk, reverse)
+            ret = current_file.apply(current_hunk)
             if ret >= 0:
                 changed.setdefault(current_file.fname, None)
                 if ret > 0:
@@ -1014,7 +991,7 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, reverse=False,
                     current_file = patchfile(ui, sourcefile, opener, eol=eol)
                 else:
                     current_file, missing = selectfile(afile, bfile, first_hunk,
-                                            strip, reverse)
+                                            strip)
                     current_file = patchfile(ui, current_file, opener, missing, eol)
             except PatchError, err:
                 ui.warn(str(err) + '\n')
@@ -1140,7 +1117,7 @@ def internalpatch(patchobj, ui, strip, cwd, files={}, eolmode='strict'):
         raise util.Abort(_('Unsupported line endings type: %s') % eolmode)
 
     try:
-        fp = file(patchobj, 'rb')
+        fp = open(patchobj, 'rb')
     except TypeError:
         fp = patchobj
     if cwd:
@@ -1422,23 +1399,26 @@ def diffstat(lines, width=80):
         maxtotal = max(maxtotal, adds+removes)
 
     countwidth = len(str(maxtotal))
-    graphwidth = width - countwidth - maxname
+    graphwidth = width - countwidth - maxname - 6
     if graphwidth < 10:
         graphwidth = 10
 
-    factor = max(int(math.ceil(float(maxtotal) / graphwidth)), 1)
+    def scale(i):
+        if maxtotal <= graphwidth:
+            return i
+        # If diffstat runs out of room it doesn't print anything,
+        # which isn't very useful, so always print at least one + or -
+        # if there were at least some changes.
+        return max(i * graphwidth // maxtotal, int(bool(i)))
 
     for filename, adds, removes in stats:
-        # If diffstat runs out of room it doesn't print anything, which
-        # isn't very useful, so always print at least one + or - if there
-        # were at least some changes
-        pluses = '+' * max(adds/factor, int(bool(adds)))
-        minuses = '-' * max(removes/factor, int(bool(removes)))
+        pluses = '+' * scale(adds)
+        minuses = '-' * scale(removes)
         output.append(' %-*s |  %*.d %s%s\n' % (maxname, filename, countwidth,
                                                 adds+removes, pluses, minuses))
 
     if stats:
-        output.append(' %d files changed, %d insertions(+), %d deletions(-)\n'
+        output.append(_(' %d files changed, %d insertions(+), %d deletions(-)\n')
                       % (len(stats), totaladds, totalremoves))
 
     return ''.join(output)

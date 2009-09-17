@@ -266,9 +266,7 @@ def pathto(root, n1, n2):
 
 def canonpath(root, cwd, myname):
     """return the canonical path of myname, given cwd and root"""
-    if root == os.sep:
-        rootsep = os.sep
-    elif endswithsep(root):
+    if endswithsep(root):
         rootsep = root
     else:
         rootsep = root + os.sep
@@ -663,8 +661,9 @@ def fspath(name, root):
         contents = _fspathcache[dir]
 
         lpart = part.lower()
+        lenp = len(part)
         for n in contents:
-            if n.lower() == lpart:
+            if lenp == len(n) and n.lower() == lpart:
                 result.append(n)
                 break
         else:
@@ -842,11 +841,9 @@ class opener(object):
             self.audit_path = always
         self.createmode = None
 
-    def __getattr__(self, name):
-        if name == '_can_symlink':
-            self._can_symlink = checklink(self.base)
-            return self._can_symlink
-        raise AttributeError(name)
+    @propertycache
+    def _can_symlink(self):
+        return checklink(self.base)
 
     def _fixfilemode(self, name):
         if self.createmode is None:
@@ -969,8 +966,8 @@ def datestr(date=None, format='%a %b %d %H:%M:%S %Y %1%2'):
     t, tz = date or makedate()
     if "%1" in format or "%2" in format:
         sign = (tz > 0) and "-" or "+"
-        minutes = abs(tz) / 60
-        format = format.replace("%1", "%c%02d" % (sign, minutes / 60))
+        minutes = abs(tz) // 60
+        format = format.replace("%1", "%c%02d" % (sign, minutes // 60))
         format = format.replace("%2", "%02d" % (minutes % 60))
     s = time.strftime(format, time.gmtime(float(t) - tz))
     return s
@@ -1274,7 +1271,12 @@ def termwidth():
         pass
     return 80
 
-def wrap(line, hangindent, width=78):
+def wrap(line, hangindent, width=None):
+    if width is None:
+        width = termwidth() - 2
+    if width <= hangindent:
+        # adjust for weird terminal size
+        width = max(78, hangindent + 1)
     padding = '\n' + ' ' * hangindent
     return padding.join(textwrap.wrap(line, width=width - hangindent))
 

@@ -19,19 +19,20 @@ repository, and needs to be enabled.
 
 The hg view command will launch the hgk Tcl script. For this command
 to work, hgk must be in your search path. Alternately, you can specify
-the path to hgk in your .hgrc file:
+the path to hgk in your .hgrc file::
 
   [hgk]
   path=/location/of/hgk
 
 hgk can make use of the extdiff extension to visualize revisions.
-Assuming you had already configured extdiff vdiff command, just add:
+Assuming you had already configured extdiff vdiff command, just add::
 
   [hgk]
   vdiff=vdiff
 
 Revisions context menu will now display additional entries to fire
-vdiff on hovered and selected revisions.'''
+vdiff on hovered and selected revisions.
+'''
 
 import os
 from mercurial import commands, util, patch, revlog, cmdutil
