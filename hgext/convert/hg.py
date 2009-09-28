@@ -55,12 +55,12 @@ class mercurial_sink(converter_sink):
         self.filemapmode = False
 
     def before(self):
-        self.ui.debug(_('run hg sink pre-conversion action\n'))
+        self.ui.debug('run hg sink pre-conversion action\n')
         self.wlock = self.repo.wlock()
         self.lock = self.repo.lock()
 
     def after(self):
-        self.ui.debug(_('run hg sink post-conversion action\n'))
+        self.ui.debug('run hg sink post-conversion action\n')
         self.lock.release()
         self.wlock.release()
 
@@ -189,7 +189,7 @@ class mercurial_sink(converter_sink):
 
         newlines = sorted([("%s %s\n" % (tags[tag], tag)) for tag in tags])
         if newlines == oldlines:
-            return None
+            return None, None
         data = "".join(newlines)
         def getfilectx(repo, memctx, f):
             return context.memfilectx(f, data, False, False, None)
@@ -201,7 +201,7 @@ class mercurial_sink(converter_sink):
                              [".hgtags"], getfilectx, "convert-repo", date,
                              extra)
         self.repo.commitctx(ctx)
-        return hex(self.repo.changelog.tip())
+        return hex(self.repo.changelog.tip()), hex(tagparent)
 
     def setfilemapmode(self, active):
         self.filemapmode = active
@@ -348,10 +348,10 @@ class mercurial_source(converter_source):
         self.convertfp.flush()
 
     def before(self):
-        self.ui.debug(_('run hg source pre-conversion action\n'))
+        self.ui.debug('run hg source pre-conversion action\n')
 
     def after(self):
-        self.ui.debug(_('run hg source post-conversion action\n'))
+        self.ui.debug('run hg source post-conversion action\n')
 
     def hasnativeorder(self):
         return True

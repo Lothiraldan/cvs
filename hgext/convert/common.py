@@ -203,6 +203,8 @@ class converter_sink(object):
         """Put tags into sink.
 
         tags: {tagname: sink_rev_id, ...} where tagname is an UTF-8 string.
+        Return a pair (tag_revision, tag_parent_revision), or (None, None)
+        if nothing was changed.
         """
         raise NotImplementedError()
 
@@ -264,7 +266,7 @@ class commandline(object):
 
     def _run(self, cmd, *args, **kwargs):
         cmdline = self._cmdline(cmd, *args, **kwargs)
-        self.ui.debug(_('running: %s\n') % (cmdline,))
+        self.ui.debug('running: %s\n' % (cmdline,))
         self.prerun()
         try:
             return util.popen(cmdline)

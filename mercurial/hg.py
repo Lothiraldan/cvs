@@ -137,10 +137,12 @@ def share(ui, source, dest=None, update=True):
         if update is not True:
             checkout = update
         for test in (checkout, 'default', 'tip'):
+            if test is None:
+                continue
             try:
                 uprev = r.lookup(test)
                 break
-            except LookupError:
+            except error.RepoLookupError:
                 continue
         _update(r, uprev)
 
@@ -309,10 +311,12 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                 if update is not True:
                     checkout = update
                 for test in (checkout, 'default', 'tip'):
+                    if test is None:
+                        continue
                     try:
                         uprev = dest_repo.lookup(test)
                         break
-                    except:
+                    except error.RepoLookupError:
                         continue
                 _update(dest_repo, uprev)
 
@@ -323,12 +327,8 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
             dir_cleanup.cleanup()
 
 def _showstats(repo, stats):
-    stats = ((stats[0], _("updated")),
-             (stats[1], _("merged")),
-             (stats[2], _("removed")),
-             (stats[3], _("unresolved")))
-    note = ", ".join([_("%d files %s") % s for s in stats])
-    repo.ui.status("%s\n" % note)
+    repo.ui.status(_("%d files updated, %d files merged, "
+                     "%d files removed, %d files unresolved\n") % stats)
 
 def update(repo, node):
     """update the working directory to node, merging linear changes"""
@@ -353,7 +353,7 @@ def merge(repo, node, force=None, remind=True):
     _showstats(repo, stats)
     if stats[3]:
         repo.ui.status(_("use 'hg resolve' to retry unresolved file merges "
-                         "or 'hg up --clean' to abandon\n"))
+                         "or 'hg update -C' to abandon\n"))
     elif remind:
         repo.ui.status(_("(branch merge, don't forget to commit)\n"))
     return stats[3] > 0

@@ -14,7 +14,7 @@ hide platform-specific details from the core.
 """
 
 from i18n import _
-import error, osutil
+import error, osutil, encoding
 import cStringIO, errno, re, shutil, sys, tempfile, traceback
 import os, stat, time, calendar, random, textwrap
 import imp
@@ -661,8 +661,9 @@ def fspath(name, root):
         contents = _fspathcache[dir]
 
         lpart = part.lower()
+        lenp = len(part)
         for n in contents:
-            if n.lower() == lpart:
+            if lenp == len(n) and n.lower() == lpart:
                 result.append(n)
                 break
         else:
@@ -1273,8 +1274,15 @@ def termwidth():
 def wrap(line, hangindent, width=None):
     if width is None:
         width = termwidth() - 2
+    if width <= hangindent:
+        # adjust for weird terminal size
+        width = max(78, hangindent + 1)
     padding = '\n' + ' ' * hangindent
-    return padding.join(textwrap.wrap(line, width=width - hangindent))
+    # To avoid corrupting multi-byte characters in line, we must wrap
+    # a Unicode string instead of a bytestring.
+    u = line.decode(encoding.encoding)
+    w = padding.join(textwrap.wrap(u, width=width - hangindent))
+    return w.encode(encoding.encoding)
 
 def iterlines(iterator):
     for chunk in iterator:

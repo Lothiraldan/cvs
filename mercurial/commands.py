@@ -1323,11 +1323,11 @@ def grep(ui, repo, pattern, *pats, **opts):
                     continue
                 files.append(fn)
 
-                if not matches[rev].has_key(fn):
+                if fn not in matches[rev]:
                     grepbody(fn, rev, flog.read(fnode))
 
                 pfn = copy or fn
-                if not matches[parent].has_key(pfn):
+                if pfn not in matches[parent]:
                     try:
                         fnode = pctx.filenode(pfn)
                         grepbody(pfn, parent, flog.read(fnode))
@@ -1789,7 +1789,7 @@ def import_(ui, repo, patch1, *patches, **opts):
                 else:
                     # launch the editor
                     message = None
-                ui.debug(_('message:\n%s\n') % message)
+                ui.debug('message:\n%s\n' % message)
 
                 wp = repo.parents()
                 if opts.get('exact'):
@@ -2044,7 +2044,7 @@ def log(ui, repo, *pats, **opts):
             if only_branches and ctx.branch() not in only_branches:
                 continue
 
-            if df and not df(ctx.date()):
+            if df and not df(ctx.date()[0]):
                 continue
 
             if opts.get('keyword'):
@@ -2155,7 +2155,8 @@ def merge(ui, repo, node=None, **opts):
         roots, heads = [common.node()], [p2.node()]
         displayer = cmdutil.show_changeset(ui, repo, opts)
         for node in repo.changelog.nodesbetween(roots=roots, heads=heads)[0]:
-            displayer.show(repo[node])
+            if node not in roots:
+                displayer.show(repo[node])
         return 0
 
     return hg.merge(repo, node, force=opts.get('force'))
@@ -3046,7 +3047,10 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     if not rev:
         rev = node
 
-    if not clean and check:
+    if check and clean:
+        raise util.Abort(_("cannot specify both -c/--check and -C/--clean"))
+
+    if check:
         # we could use dirty() but we can ignore merge and branch trivia
         c = repo[None]
         if c.modified() or c.added() or c.removed():
@@ -3089,7 +3093,7 @@ def version_(ui):
 
 globalopts = [
     ('R', 'repository', '',
-     _('repository root directory or symbolic path name')),
+     _('repository root directory or name of overlay bundle file')),
     ('', 'cwd', '', _('change working directory')),
     ('y', 'noninteractive', None,
      _('do not prompt, assume \'yes\' for any required answers')),

@@ -16,6 +16,14 @@ uisetup called
 reposetup called for a
 ui == repo.ui
 Foo
+1) foo imported
+1) bar imported
+2) foo uisetup
+2) bar uisetup
+3) foo extsetup
+3) bar extsetup
+4) foo reposetup
+4) bar reposetup
 empty extension - empty cmdtable
 
 no commands defined
@@ -36,7 +44,7 @@ enabled extensions:
  debugextension   only debugcommands
 
 global options:
- -R --repository      repository root directory or symbolic path name
+ -R --repository      repository root directory or name of overlay bundle file
     --cwd             change working directory
  -y --noninteractive  do not prompt, assume 'yes' for any required answers
  -q --quiet           suppress output
@@ -66,7 +74,7 @@ enabled extensions:
  debugextension   only debugcommands
 
 global options:
- -R --repository      repository root directory or symbolic path name
+ -R --repository      repository root directory or name of overlay bundle file
     --cwd             change working directory
  -y --noninteractive  do not prompt, assume 'yes' for any required answers
  -q --quiet           suppress output
