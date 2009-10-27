@@ -1267,7 +1267,8 @@ def grep(ui, repo, pattern, *pats, **opts):
                 for i in xrange(blo, bhi):
                     yield ('+', b[i])
 
-    def display(fn, r, pstates, states):
+    def display(fn, ctx, pstates, states):
+        rev = ctx.rev()
         datefunc = ui.quiet and util.shortdate or util.datestr
         found = False
         filerevmatches = {}
@@ -1276,17 +1277,17 @@ def grep(ui, repo, pattern, *pats, **opts):
         else:
             iter = [('', l) for l in states]
         for change, l in iter:
-            cols = [fn, str(r)]
+            cols = [fn, str(rev)]
             if opts.get('line_number'):
                 cols.append(str(l.linenum))
             if opts.get('all'):
                 cols.append(change)
             if opts.get('user'):
-                cols.append(ui.shortuser(get(r).user()))
+                cols.append(ui.shortuser(ctx.user()))
             if opts.get('date'):
-                cols.append(datefunc(get(r).date()))
+                cols.append(datefunc(ctx.date()))
             if opts.get('files_with_matches'):
-                c = (fn, r)
+                c = (fn, rev)
                 if c in filerevmatches:
                     continue
                 filerevmatches[c] = 1
@@ -1298,16 +1299,12 @@ def grep(ui, repo, pattern, *pats, **opts):
 
     skip = {}
     revfiles = {}
-    get = util.cachefunc(lambda r: repo[r])
-    changeiter, matchfn = cmdutil.walkchangerevs(ui, repo, pats, get, opts)
+    matchfn = cmdutil.match(repo, pats, opts)
     found = False
     follow = opts.get('follow')
-    for st, rev, fns in changeiter:
-        if st == 'window':
-            matches.clear()
-            revfiles.clear()
-        elif st == 'add':
-            ctx = get(rev)
+    for st, ctx, fns in cmdutil.walkchangerevs(ui, repo, matchfn, opts):
+        if st == 'add':
+            rev = ctx.rev()
             pctx = ctx.parents()[0]
             parent = pctx.rev()
             matches.setdefault(rev, {})
@@ -1341,7 +1338,8 @@ def grep(ui, repo, pattern, *pats, **opts):
                     except error.LookupError:
                         pass
         elif st == 'iter':
-            parent = get(rev).parents()[0].rev()
+            rev = ctx.rev()
+            parent = ctx.parents()[0].rev()
             for fn in sorted(revfiles.get(rev, [])):
                 states = matches[rev][fn]
                 copy = copies.get(rev, {}).get(fn)
@@ -1351,12 +1349,14 @@ def grep(ui, repo, pattern, *pats, **opts):
                     continue
                 pstates = matches.get(parent, {}).get(copy or fn, [])
                 if pstates or states:
-                    r = display(fn, rev, pstates, states)
+                    r = display(fn, ctx, pstates, states)
                     found = found or r
                     if r and not opts.get('all'):
                         skip[fn] = True
                         if copy:
                             skip[copy] = True
+            del matches[rev]
+            del revfiles[rev]
 
 def heads(ui, repo, *branchrevs, **opts):
     """show current repository heads or show branch heads
@@ -1990,9 +1990,7 @@ def log(ui, repo, *pats, **opts):
     will appear in files:.
     """
 
-    get = util.cachefunc(lambda r: repo[r])
-    changeiter, matchfn = cmdutil.walkchangerevs(ui, repo, pats, get, opts)
-
+    matchfn = cmdutil.match(repo, pats, opts)
     limit = cmdutil.loglimit(opts)
     count = 0
 
@@ -2039,7 +2037,8 @@ def log(ui, repo, *pats, **opts):
     only_branches = opts.get('only_branch')
 
     displayer = cmdutil.show_changeset(ui, repo, opts, True, matchfn)
-    for st, rev, fns in changeiter:
+    for st, ctx, fns in cmdutil.walkchangerevs(ui, repo, matchfn, opts):
+        rev = ctx.rev()
         if st == 'add':
             parents = [p for p in repo.changelog.parentrevs(rev)
                        if p != nullrev]
@@ -2048,7 +2047,6 @@ def log(ui, repo, *pats, **opts):
             if opts.get('only_merges') and len(parents) != 2:
                 continue
 
-            ctx = get(rev)
             if only_branches and ctx.branch() not in only_branches:
                 continue
 
@@ -2081,6 +2079,7 @@ def log(ui, repo, *pats, **opts):
 
         elif st == 'iter':
             if count == limit: break
+
             if displayer.flush(rev):
                 count += 1
 
