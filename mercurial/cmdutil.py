@@ -111,10 +111,15 @@ def remoteui(src, opts):
         v = opts.get(o) or src.config('ui', o)
         if v:
             dst.setconfig("ui", o, v)
+
     # copy bundle-specific options
     r = src.config('bundle', 'mainreporoot')
     if r:
         dst.setconfig('bundle', 'mainreporoot', r)
+
+    # copy auth section settings
+    for key, val in src.configitems('auth'):
+        dst.setconfig('auth', key, val)
 
     return dst
 
@@ -558,7 +563,7 @@ def copy(ui, repo, pats, opts, rename=False):
     return errors
 
 def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
-    runargs=None):
+    runargs=None, appendpid=False):
     '''Run a command as a service.'''
 
     if opts['daemon'] and not opts['daemon_pipefds']:
@@ -588,7 +593,8 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
         initfn()
 
     if opts['pid_file']:
-        fp = open(opts['pid_file'], 'w')
+        mode = appendpid and 'a' or 'w'
+        fp = open(opts['pid_file'], mode)
         fp.write(str(os.getpid()) + '\n')
         fp.close()
 
@@ -1168,7 +1174,7 @@ def walkchangerevs(repo, match, opts, prepare):
     class followfilter(object):
         def __init__(self, onlyfirst=False):
             self.startrev = nullrev
-            self.roots = []
+            self.roots = set()
             self.onlyfirst = onlyfirst
 
         def match(self, rev):
@@ -1186,18 +1192,18 @@ def walkchangerevs(repo, match, opts, prepare):
             if rev > self.startrev:
                 # forward: all descendants
                 if not self.roots:
-                    self.roots.append(self.startrev)
+                    self.roots.add(self.startrev)
                 for parent in realparents(rev):
                     if parent in self.roots:
-                        self.roots.append(rev)
+                        self.roots.add(rev)
                         return True
             else:
                 # backwards: all parents
                 if not self.roots:
-                    self.roots.extend(realparents(self.startrev))
+                    self.roots.update(realparents(self.startrev))
                 if rev in self.roots:
                     self.roots.remove(rev)
-                    self.roots.extend(realparents(rev))
+                    self.roots.update(realparents(rev))
                     return True
 
             return False

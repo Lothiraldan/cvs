@@ -1161,6 +1161,7 @@ def export(ui, repo, *changesets, **opts):
     With the --switch-parent option, the diff will be against the
     second parent. It can be useful to review a merge.
     """
+    changesets += tuple(opts.get('rev', []))
     if not changesets:
         raise util.Abort(_("export requires at least one changeset"))
     revs = cmdutil.revrange(repo, changesets)
@@ -1483,6 +1484,11 @@ def help_(ui, name=None, with_version=False):
             prefix = inst.args[0]
             select = lambda c: c.lstrip('^').startswith(prefix)
             helplist(_('list of commands:\n\n'), select)
+            return
+
+        # check if it's an invalid alias and display its error if it is
+        if getattr(entry[0], 'badalias', False):
+            entry[0](ui)
             return
 
         # synopsis
@@ -2842,7 +2848,8 @@ def status(ui, repo, *pats, **opts):
 
     If one revision is given, it is used as the base revision.
     If two revisions are given, the differences between them are
-    shown.
+    shown. The --change option can also be used as a shortcut to list
+    the changed files of a revision from its first parent.
 
     The codes used to show the status of files are::
 
@@ -2856,7 +2863,18 @@ def status(ui, repo, *pats, **opts):
         = origin of the previous file listed as A (added)
     """
 
-    node1, node2 = cmdutil.revpair(repo, opts.get('rev'))
+    revs = opts.get('rev')
+    change = opts.get('change')
+
+    if revs and change:
+        msg = _('cannot specify --rev and --change at the same time')
+        raise util.Abort(msg)
+    elif change:
+        node2 = repo.lookup(change)
+        node1 = repo[node2].parents()[0].node()
+    else:
+        node1, node2 = cmdutil.revpair(repo, revs)
+
     cwd = (pats and repo.getcwd()) or ''
     end = opts.get('print0') and '\0' or '\n'
     copy = {}
@@ -3444,7 +3462,8 @@ table = {
     "^export":
         (export,
          [('o', 'output', '', _('print output to file with formatted name')),
-          ('', 'switch-parent', None, _('diff against the second parent'))
+          ('', 'switch-parent', None, _('diff against the second parent')),
+          ('r', 'rev', [], _('revisions to export')),
           ] + diffopts,
          _('[OPTION]... [-o OUTFILESPEC] REV...')),
     "^forget":
@@ -3660,6 +3679,7 @@ table = {
           ('0', 'print0', None,
            _('end filenames with NUL, for use with xargs')),
           ('', 'rev', [], _('show difference from revision')),
+          ('', 'change', '', _('list the changed files of a revision')),
          ] + walkopts,
          _('[OPTION]... [FILE]...')),
     "tag":
