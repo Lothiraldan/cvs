@@ -26,6 +26,18 @@ Common tasks (use "hg help command" for more details)::
   add known patch to applied stack          qpush
   remove patch from applied stack           qpop
   refresh contents of top applied patch     qrefresh
+
+By default, mq will automatically use git patches when required to
+avoid losing file mode changes, copy records, binary files or empty
+files creations or deletions. This behaviour can be configured with::
+
+  [mq]
+  git = auto/keep/yes/no
+
+If set to 'keep', mq will obey the [diff] section configuration while
+preserving existing git patches upon qrefresh. If set to 'yes' or
+'no', mq will override the [diff] section and always generate git or
+regular patches, possibly losing data in the second case.
 '''
 
 from mercurial.i18n import _
@@ -225,6 +237,14 @@ class queue(object):
         self.guards_path = "guards"
         self.active_guards = None
         self.guards_dirty = False
+        # Handle mq.git as a bool with extended values
+        try:
+            gitmode = ui.configbool('mq', 'git', None)
+            if gitmode is None:
+                raise error.ConfigError()
+            self.gitmode = gitmode and 'yes' or 'no'
+        except error.ConfigError:
+            self.gitmode = ui.config('mq', 'git', 'auto').lower()
 
     @util.propertycache
     def applied(self):
@@ -260,23 +280,33 @@ class queue(object):
 
     def diffopts(self, opts={}, patchfn=None):
         diffopts = patch.diffopts(self.ui, opts)
+        if self.gitmode == 'auto':
+            diffopts.upgrade = True
+        elif self.gitmode == 'keep':
+            pass
+        elif self.gitmode in ('yes', 'no'):
+            diffopts.git = self.gitmode == 'yes'
+        else:
+            raise util.Abort(_('mq.git option can be auto/keep/yes/no'
+                               ' got %s') % self.gitmode)
         if patchfn:
             diffopts = self.patchopts(diffopts, patchfn)
         return diffopts
 
     def patchopts(self, diffopts, *patches):
         """Return a copy of input diff options with git set to true if
-        referenced patch is a git patch.
+        referenced patch is a git patch and should be preserved as such.
         """
         diffopts = diffopts.copy()
-        for patchfn in patches:
-            patchf = self.opener(patchfn, 'r')
-            # if the patch was a git patch, refresh it as a git patch
-            for line in patchf:
-                if line.startswith('diff --git'):
-                    diffopts.git = True
-                    break
-            patchf.close()
+        if not diffopts.git and self.gitmode == 'keep':
+            for patchfn in patches:
+                patchf = self.opener(patchfn, 'r')
+                # if the patch was a git patch, refresh it as a git patch
+                for line in patchf:
+                    if line.startswith('diff --git'):
+                        diffopts.git = True
+                        break
+                patchf.close()
         return diffopts
 
     def join(self, *p):
@@ -741,11 +771,13 @@ class queue(object):
     def check_toppatch(self, repo):
         if len(self.applied) > 0:
             top = bin(self.applied[-1].rev)
+            patch = self.applied[-1].name
             pp = repo.dirstate.parents()
             if top not in pp:
                 raise util.Abort(_("working directory revision is not qtip"))
-            return top
-        return None
+            return top, patch
+        return None, None
+
     def check_localchanges(self, repo, force=False, refresh=True):
         m, a, r, d = repo.status()[:4]
         if m or a or r or d:
@@ -1095,7 +1127,7 @@ class queue(object):
             end = len(self.applied)
             rev = bin(self.applied[start].rev)
             if update:
-                top = self.check_toppatch(repo)
+                top = self.check_toppatch(repo)[0]
 
             try:
                 heads = repo.changelog.heads(rev)
@@ -1144,7 +1176,7 @@ class queue(object):
             wlock.release()
 
     def diff(self, repo, pats, opts):
-        top = self.check_toppatch(repo)
+        top, patch = self.check_toppatch(repo)
         if not top:
             self.ui.write(_("no patches applied\n"))
             return
@@ -1153,7 +1185,7 @@ class queue(object):
             node1, node2 = None, qp
         else:
             node1, node2 = qp, None
-        diffopts = self.diffopts(opts)
+        diffopts = self.diffopts(opts, patch)
         self.printdiff(repo, diffopts, node1, node2, files=pats, opts=opts)
 
     def refresh(self, repo, pats=None, **opts):
@@ -1182,14 +1214,6 @@ class queue(object):
                 ph.setuser(newuser)
             if newdate:
                 ph.setdate(newdate)
-
-            # if the patch was a git patch, refresh it as a git patch
-            patchf = self.opener(patchfn, 'r')
-            for line in patchf:
-                if line.startswith('diff --git'):
-                    self.diffopts().git = True
-                    break
-            patchf.close()
 
             # only commit new patch when write is complete
             patchf = self.opener(patchfn, 'w', atomictemp=True)
@@ -1268,7 +1292,7 @@ class queue(object):
                     patchf.write(chunk)
 
                 try:
-                    if diffopts.git:
+                    if diffopts.git or diffopts.upgrade:
                         copies = {}
                         for dst in a:
                             src = repo.dirstate.copied(dst)
@@ -2036,7 +2060,7 @@ def fold(ui, repo, *files, **opts):
 
     if not files:
         raise util.Abort(_('qfold requires at least one patch name'))
-    if not q.check_toppatch(repo):
+    if not q.check_toppatch(repo)[0]:
         raise util.Abort(_('No patches applied'))
     q.check_localchanges(repo)
 
