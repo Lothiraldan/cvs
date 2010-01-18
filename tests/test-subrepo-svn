@@ -1,0 +1,78 @@
+#!/bin/sh
+
+"$TESTDIR/hghave" svn || exit 80
+
+fix_path()
+{
+    tr '\\' /
+}
+
+escapedwd=`pwd | fix_path`
+# SVN wants all paths to start with a slash. Unfortunately,
+# Windows ones don't. Handle that.
+expr $escapedwd : "\/" > /dev/null
+if [ $? -ne 0 ]; then
+    escapedwd='/'$escapedwd
+fi
+filterpath="sed s|$escapedwd|/root|"
+
+echo % create subversion repo
+
+SVNREPO="file://$escapedwd/svn-repo"
+WCROOT="$(pwd)/svn-wc"
+svnadmin create svn-repo
+svn co $SVNREPO svn-wc
+cd svn-wc
+echo alpha > alpha
+svn add alpha
+svn ci -m 'Add alpha'
+cd ..
+
+echo % create hg repo
+mkdir sub
+cd sub
+hg init t
+cd t
+
+echo % first revision, no sub
+echo a > a
+hg ci -Am0
+
+echo % add first svn sub
+echo "s = [svn]$SVNREPO" >> .hgsub
+svn co --quiet $SVNREPO s
+hg add .hgsub
+hg ci -m1
+echo % debugsub
+hg debugsub | $filterpath
+
+echo
+echo % change file in svn and hg, commit
+echo a >> a
+echo alpha >> s/alpha
+hg commit -m 'Message!'
+hg debugsub | $filterpath
+
+echo
+echo a > s/a
+echo % should be empty despite change to s/a
+hg st
+
+echo
+echo % add a commit from svn
+cd "$WCROOT"
+svn up
+echo xyz >> alpha
+svn ci -m 'amend a from svn'
+cd ../sub/t
+echo % this commit from hg will fail
+echo zzz >> s/alpha
+hg ci -m 'amend alpha from hg'
+
+echo
+echo % clone
+cd ..
+hg clone t tc | fix_path
+cd tc
+echo % debugsub in clone
+hg debugsub | $filterpath
