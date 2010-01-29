@@ -4,7 +4,7 @@
 # Copyright 2008 Alexander Solovyov <piranha@piranha.org.ua>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''command to display statistics about repository history'''
 
@@ -169,7 +169,7 @@ def churn(ui, repo, *pats, **opts):
                                     '*' * charnum(sum(count)))
 
     def charnum(count):
-        return int(round(count*width/maxcount))
+        return int(round(count * width / maxcount))
 
     for name, count in rate:
         ui.write(format(name, count))
@@ -180,7 +180,8 @@ cmdtable = {
         (churn,
          [('r', 'rev', [], _('count rate for the specified revision or range')),
           ('d', 'date', '', _('count rate for revisions matching date spec')),
-          ('t', 'template', '{author|email}', _('template to group changesets')),
+          ('t', 'template', '{author|email}',
+           _('template to group changesets')),
           ('f', 'dateformat', '',
               _('strftime-compatible format for grouping by date')),
           ('c', 'changesets', False, _('count rate by number of changesets')),

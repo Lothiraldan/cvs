@@ -3,7 +3,7 @@
 # Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from common import NoRepo, MissingTool, SKIPREV, mapfile
 from cvs import convert_cvs
@@ -108,7 +108,8 @@ class converter(object):
         parents = {}
         while visit:
             n = visit.pop(0)
-            if n in known or n in self.map: continue
+            if n in known or n in self.map:
+                continue
             known.add(n)
             commit = self.cachecommit(n)
             parents[n] = []

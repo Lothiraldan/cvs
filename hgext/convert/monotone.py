@@ -4,7 +4,7 @@
 #  others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import os, re
 from mercurial import util
@@ -38,16 +38,22 @@ class monotone_source(converter_source, commandline):
         lines    = r'(?:.|\n)+'
 
         self.dir_re      = re.compile(space + "dir" + name)
-        self.file_re     = re.compile(space + "file" + name + "content" + revision)
-        self.add_file_re = re.compile(space + "add_file" + name + "content" + revision)
-        self.patch_re    = re.compile(space + "patch" + name + "from" + revision + "to" + revision)
+        self.file_re     = re.compile(space + "file" + name +
+                                      "content" + revision)
+        self.add_file_re = re.compile(space + "add_file" + name +
+                                      "content" + revision)
+        self.patch_re    = re.compile(space + "patch" + name +
+                                      "from" + revision + "to" + revision)
         self.rename_re   = re.compile(space + "rename" + name + "to" + name)
         self.delete_re   = re.compile(space + "delete" + name)
-        self.tag_re      = re.compile(space + "tag" + name + "revision" + revision)
-        self.cert_re     = re.compile(lines + space + "name" + name + "value" + value)
+        self.tag_re      = re.compile(space + "tag" + name + "revision" +
+                                      revision)
+        self.cert_re     = re.compile(lines + space + "name" + name +
+                                      "value" + value)
 
         attr = space + "file" + lines + space + "attr" + space
-        self.attr_execute_re = re.compile(attr  + '"mtn:execute"' + space + '"true"')
+        self.attr_execute_re = re.compile(attr  + '"mtn:execute"' +
+                                          space + '"true"')
 
         # cached data
         self.manifest_rev = None

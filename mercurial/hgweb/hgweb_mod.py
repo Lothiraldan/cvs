@@ -4,7 +4,7 @@
 # Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import os
 from mercurial import ui, hg, hook, error, encoding, templater
@@ -136,7 +136,7 @@ class hgweb(object):
             style = cmd.rfind('-')
             if style != -1:
                 req.form['style'] = [cmd[:style]]
-                cmd = cmd[style+1:]
+                cmd = cmd[style + 1:]
 
             # avoid accepting e.g. style parameter as command
             if hasattr(webcommands, cmd):

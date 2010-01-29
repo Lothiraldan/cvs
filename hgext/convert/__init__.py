@@ -3,7 +3,7 @@
 # Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''import revisions from foreign VCS repositories into Mercurial'''
 
@@ -279,7 +279,8 @@ cmdtable = {
           # Main options shared with cvsps-2.1
           ('b', 'branches', [], _('only return changes on specified branches')),
           ('p', 'prefix', '', _('prefix to remove from file names')),
-          ('r', 'revisions', [], _('only return changes after or between specified tags')),
+          ('r', 'revisions', [],
+           _('only return changes after or between specified tags')),
           ('u', 'update-cache', None, _("update cvs log cache")),
           ('x', 'new-cache', None, _("create new cvs log cache")),
           ('z', 'fuzz', 60, _('set commit time fuzz in seconds')),

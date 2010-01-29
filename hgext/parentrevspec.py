@@ -3,7 +3,7 @@
 # Copyright (C) 2007 Alexis S. L. Carvalho <alexis@cecm.usp.br>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''interpret suffixes to refer to ancestor revisions
 
@@ -67,7 +67,7 @@ def reposetup(ui, repo):
                     p = cl.parentrevs(rev)
                     if j < len(suffix) and suffix[j].isdigit():
                         j += 1
-                        n = int(suffix[i+1:j])
+                        n = int(suffix[i + 1:j])
                         if n > 2 or n == 2 and p[1] == -1:
                             raise
                     else:
@@ -85,7 +85,7 @@ def reposetup(ui, repo):
                         j += 1
                     if j == i + 1:
                         raise
-                    n = int(suffix[i+1:j])
+                    n = int(suffix[i + 1:j])
                     for k in xrange(n):
                         rev = cl.parentrevs(rev)[0]
                     i = j

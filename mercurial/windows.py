@@ -3,7 +3,7 @@
 #  Copyright 2005-2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from i18n import _
 import osutil, error
@@ -47,7 +47,8 @@ class winstdout(object):
                 self.fp.write(s[start:end])
                 start = end
         except IOError, inst:
-            if inst.errno != 0: raise
+            if inst.errno != 0:
+                raise
             self.close()
             raise IOError(errno.EPIPE, 'Broken pipe')
 
@@ -55,7 +56,8 @@ class winstdout(object):
         try:
             return self.fp.flush()
         except IOError, inst:
-            if inst.errno != errno.EINVAL: raise
+            if inst.errno != errno.EINVAL:
+                raise
             self.close()
             raise IOError(errno.EPIPE, 'Broken pipe')
 
@@ -333,7 +335,7 @@ def spawndetached(args):
         hStdOutput = None
         hStdError = None
         wShowWindow = subprocess.SW_HIDE
-        
+
     args = subprocess.list2cmdline(args)
     # Not running the command in shell mode makes python26 hang when
     # writing to hgweb output socket.

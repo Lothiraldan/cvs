@@ -4,7 +4,7 @@
 # Copyright 2007, 2008 Brendan Cully <brendan@kublai.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''accelerate status report using Linux's inotify service'''
 
@@ -60,7 +60,7 @@ def reposetup(ui, repo):
                     if ui.config('inotify', 'debug'):
                         r2 = super(inotifydirstate, self).status(
                             match, False, clean, unknown)
-                        for c,a,b in zip('LMARDUIC', result, r2):
+                        for c, a, b in zip('LMARDUIC', result, r2):
                             for f in a:
                                 if f not in b:
                                     ui.warn('*** inotify: %s +%s\n' % (c, f))

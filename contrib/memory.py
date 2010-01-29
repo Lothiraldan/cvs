@@ -3,7 +3,7 @@
 # Copyright 2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''helper extension to measure memory usage
 
@@ -29,7 +29,7 @@ def memusage(ui):
     finally:
         if status is not None:
             status.close()
-    ui.write_err(", ".join(["%s: %.1f MiB" % (key, value/1024.0)
+    ui.write_err(", ".join(["%s: %.1f MiB" % (key, value / 1024.0)
                             for key, value in result.iteritems()]) + "\n")
 
 def extsetup(ui):

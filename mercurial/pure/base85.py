@@ -3,7 +3,7 @@
 # Copyright (C) 2009 Brendan Cully <brendan@kublai.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import struct
 
@@ -48,7 +48,7 @@ def b85decode(text):
     l = len(text)
     out = []
     for i in range(0, len(text), 5):
-        chunk = text[i:i+5]
+        chunk = text[i:i + 5]
         acc = 0
         for j, c in enumerate(chunk):
             try:

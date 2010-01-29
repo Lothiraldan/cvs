@@ -3,7 +3,7 @@
 # Copyright 2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import struct, difflib
 
@@ -33,13 +33,15 @@ def _normalizeblocks(a, b, blocks):
         a2end = a2 + l2
         b2end = b2 + l2
         if a1end == a2:
-            while a1end+shift < a2end and a[a1end+shift] == b[b1end+shift]:
+            while (a1end + shift < a2end and
+                   a[a1end + shift] == b[b1end + shift]):
                 shift += 1
         elif b1end == b2:
-            while b1end+shift < b2end and a[a1end+shift] == b[b1end+shift]:
+            while (b1end + shift < b2end and
+                   a[a1end + shift] == b[b1end + shift]):
                 shift += 1
-        yield a1, b1, l1+shift
-        prev = a2+shift, b2+shift, l2-shift
+        yield a1, b1, l1 + shift
+        prev = a2 + shift, b2 + shift, l2 - shift
     yield prev
 
 def bdiff(a, b):

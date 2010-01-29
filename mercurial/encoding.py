@@ -3,7 +3,7 @@
 #  Copyright 2005-2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import error
 import sys, unicodedata, locale, os
@@ -62,7 +62,7 @@ def fromlocal(s):
     try:
         return s.decode(encoding, encodingmode).encode("utf-8")
     except UnicodeDecodeError, inst:
-        sub = s[max(0, inst.start-10):inst.start+10]
+        sub = s[max(0, inst.start - 10):inst.start + 10]
         raise error.Abort("decoding near '%s': %s!" % (sub, inst))
     except LookupError, k:
         raise error.Abort("%s, please check your locale settings" % k)

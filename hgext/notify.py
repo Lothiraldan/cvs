@@ -3,7 +3,7 @@
 # Copyright 2006 Vadim Gelfer <vadim.gelfer@gmail.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''hooks for sending email notifications at commit/push time
 
@@ -134,7 +134,7 @@ class notifier(object):
             c = path.find('/')
             if c == -1:
                 break
-            path = path[c+1:]
+            path = path[c + 1:]
             count -= 1
         return path
 
@@ -216,7 +216,7 @@ class notifier(object):
                 subject = '%s: %s' % (self.root, s)
         maxsubject = int(self.ui.config('notify', 'maxsubject', 67))
         if maxsubject and len(subject) > maxsubject:
-            subject = subject[:maxsubject-3] + '...'
+            subject = subject[:maxsubject - 3] + '...'
         msg['Subject'] = mail.headencode(self.ui, subject,
                                          self.charsets, self.test)
 

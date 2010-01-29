@@ -3,7 +3,7 @@
 # Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import revlog
 
@@ -17,7 +17,7 @@ class filelog(revlog.revlog):
         if not t.startswith('\1\n'):
             return t
         s = t.index('\1\n', 2)
-        return t[s+2:]
+        return t[s + 2:]
 
     def _readmeta(self, node):
         t = self.revision(node)

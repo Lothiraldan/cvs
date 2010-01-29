@@ -3,7 +3,7 @@
 #  Copyright 2008, 2009 Marek Kubica <marek@xivilization.net> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 # This module is for handling 'bzr', that was formerly known as Bazaar-NG;
 # it cannot access 'bar' repositories, but they were never used very much
@@ -203,7 +203,8 @@ class bzr_source(converter_source):
                         changes.append((frompath, revid))
                         changes.append((topath, revid))
                         # add to mode cache
-                        mode = ((entry.executable and 'x') or (entry.kind == 'symlink' and 's')
+                        mode = ((entry.executable and 'x')
+                                or (entry.kind == 'symlink' and 's')
                                 or '')
                         self._modecache[(topath, revid)] = mode
                         # register the change as move

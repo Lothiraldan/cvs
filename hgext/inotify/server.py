@@ -3,7 +3,7 @@
 # Copyright 2009 Nicolas Dumazet <nicdumz@gmail.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from mercurial.i18n import _
 from mercurial import cmdutil, osutil, util
@@ -17,7 +17,8 @@ import struct
 import sys
 import tempfile
 
-class AlreadyStartedException(Exception): pass
+class AlreadyStartedException(Exception):
+    pass
 
 def join(a, b):
     if a:
@@ -30,7 +31,7 @@ def split(path):
     c = path.rfind('/')
     if c == -1:
         return '', path
-    return path[:c], path[c+1:]
+    return path[:c], path[c + 1:]
 
 walk_ignored_errors = (errno.ENOENT, errno.ENAMETOOLONG)
 
@@ -332,8 +333,8 @@ class socketlistener(object):
             self.sock.bind(self.sockpath)
         except socket.error, err:
             if err[0] == errno.EADDRINUSE:
-                raise AlreadyStartedException( _('cannot start: socket is '
-                                                 'already bound'))
+                raise AlreadyStartedException(_('cannot start: socket is '
+                                                'already bound'))
             if err[0] == "AF_UNIX path too long":
                 if os.path.islink(self.sockpath) and \
                         not os.path.exists(self.sockpath):

@@ -3,7 +3,7 @@
 # Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 """Storage back-end for Mercurial.
 
@@ -127,7 +127,7 @@ class lazyparser(object):
         self.dataf = dataf
         self.s = struct.calcsize(indexformatng)
         self.datasize = size
-        self.l = size/self.s
+        self.l = size / self.s
         self.index = [None] * self.l
         self.map = {nullid: nullrev}
         self.allmap = 0
@@ -902,7 +902,7 @@ class revlog(object):
             try:
                 # hex(node)[:...]
                 l = len(id) // 2  # grab an even number of digits
-                bin_id = bin(id[:l*2])
+                bin_id = bin(id[:l * 2])
                 nl = [n for n in self.nodemap if n[:l] == bin_id]
                 nl = [n for n in nl if hex(n).startswith(id)]
                 if len(nl) > 0:
@@ -1403,7 +1403,7 @@ class revlog(object):
         return (dd, di)
 
     def files(self):
-        res = [ self.indexfile ]
+        res = [self.indexfile]
         if not self._inline:
             res.append(self.datafile)
         return res

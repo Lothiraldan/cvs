@@ -1,7 +1,7 @@
 # Copyright 2009, Alexander Solovyov <piranha@piranha.org.ua>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 """extend schemes with shortcuts to repository swarms
 
@@ -64,7 +64,7 @@ class ShortRepository(object):
             parts = parts[:-1]
         else:
             tail = ''
-        context = dict((str(i+1), v) for i, v in enumerate(parts))
+        context = dict((str(i + 1), v) for i, v in enumerate(parts))
         url = ''.join(self.templater.process(self.url, context)) + tail
         return hg._lookup(url).instance(ui, url, create)
 

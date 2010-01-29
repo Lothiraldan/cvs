@@ -3,7 +3,7 @@
 #  Copyright 2005-2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import os
 from mercurial import util
@@ -43,13 +43,15 @@ class convert_git(converter_source):
 
     def getheads(self):
         if not self.rev:
-            return self.gitcmd('git rev-parse --branches --remotes').read().splitlines()
+            fh = self.gitcmd('git rev-parse --branches --remotes')
+            return fh.read().splitlines()
         else:
             fh = self.gitcmd("git rev-parse --verify %s" % self.rev)
             return [fh.read()[:-1]]
 
     def catfile(self, rev, type):
-        if rev == "0" * 40: raise IOError()
+        if rev == "0" * 40:
+            raise IOError()
         fh = self.gitcmd("git cat-file %s %s" % (type, rev))
         return fh.read()
 
@@ -86,7 +88,7 @@ class convert_git(converter_source):
     def getcommit(self, version):
         c = self.catfile(version, "commit") # read the commit hash
         end = c.find("\n\n")
-        message = c[end+2:]
+        message = c[end + 2:]
         message = self.recode(message)
         l = c[:end].splitlines()
         parents = []
@@ -105,7 +107,8 @@ class convert_git(converter_source):
                 committer = " ".join(p[:-2])
                 if committer[0] == "<": committer = committer[1:-1]
                 committer = self.recode(committer)
-            if n == "parent": parents.append(v)
+            if n == "parent":
+                parents.append(v)
 
         if committer and committer != author:
             message += "\ncommitter: %s\n" % committer
@@ -145,7 +148,7 @@ class convert_git(converter_source):
             fh.close()
         else:
             fh = self.gitcmd('git diff-tree --name-only --root -r %s "%s^%s" --'
-                             % (version, version, i+1))
+                             % (version, version, i + 1))
             changes = [f.rstrip('\n') for f in fh]
             fh.close()
 

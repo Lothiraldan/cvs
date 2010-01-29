@@ -3,7 +3,7 @@
 # Copyright 2008 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from i18n import _
 import osutil, util
@@ -32,7 +32,7 @@ def decodedir(path):
 def _buildencodefun():
     e = '_'
     win_reserved = [ord(x) for x in '\\:*?"<>|']
-    cmap = dict([ (chr(x), chr(x)) for x in xrange(127) ])
+    cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
     for x in (range(32) + range(126, 256) + win_reserved):
         cmap[chr(x)] = "~%02x" % x
     for x in range(ord("A"), ord("Z")+1) + [ord(e)]:
@@ -45,7 +45,7 @@ def _buildencodefun():
         while i < len(s):
             for l in xrange(1, 4):
                 try:
-                    yield dmap[s[i:i+l]]
+                    yield dmap[s[i:i + l]]
                     i += l
                     break
                 except KeyError:
@@ -59,7 +59,7 @@ encodefilename, decodefilename = _buildencodefun()
 
 def _build_lower_encodefun():
     win_reserved = [ord(x) for x in '\\:*?"<>|']
-    cmap = dict([ (chr(x), chr(x)) for x in xrange(127) ])
+    cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
     for x in (range(32) + range(126, 256) + win_reserved):
         cmap[chr(x)] = "~%02x" % x
     for x in range(ord("A"), ord("Z")+1):

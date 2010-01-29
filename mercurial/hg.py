@@ -4,7 +4,7 @@
 # Copyright 2006 Vadim Gelfer <vadim.gelfer@gmail.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from i18n import _
 from lock import release
@@ -348,7 +348,8 @@ _update = update
 def clean(repo, node, show_stats=True):
     """forcibly switch the working directory to node, clobbering changes"""
     stats = _merge.update(repo, node, False, True, None)
-    if show_stats: _showstats(repo, stats)
+    if show_stats:
+        _showstats(repo, stats)
     return stats[3] > 0
 
 def merge(repo, node, force=None, remind=True):

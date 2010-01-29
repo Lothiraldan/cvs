@@ -3,7 +3,7 @@
 #  Copyright 2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from i18n import _
 import error
@@ -73,10 +73,10 @@ class config(object):
     def parse(self, src, data, sections=None, remap=None, include=None):
         sectionre = re.compile(r'\[([^\[]+)\]')
         itemre = re.compile(r'([^=\s][^=]*?)\s*=\s*(.*\S|)')
-        contre = re.compile(r'\s+(\S.*\S)')
+        contre = re.compile(r'\s+(\S|\S.*\S)\s*$')
         emptyre = re.compile(r'(;|#|\s*$)')
         unsetre = re.compile(r'%unset\s+(\S+)')
-        includere = re.compile(r'%include\s+(\S.*\S)')
+        includere = re.compile(r'%include\s+(\S|\S.*\S)\s*$')
         section = ""
         item = None
         line = 0

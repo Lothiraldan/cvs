@@ -3,7 +3,7 @@
 #  Copyright 2005-2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''command to send changesets as (a series of) patch emails
 
@@ -34,6 +34,9 @@ file::
   to = recipient1, recipient2, ...
   cc = cc1, cc2, ...
   bcc = bcc1, bcc2, ...
+
+Use ``[patchbomb]`` as configuration section name if you need to
+override global ``[email]`` address settings.
 
 Then you can use the "hg email" command to mail a series of changesets
 as a patchbomb.
@@ -80,7 +83,7 @@ def prompt(ui, prompt, default=None, rest=':'):
     if not ui.interactive():
         if default is not None:
             return default
-        raise util.Abort(_("%s Please enter a valid value" % (prompt+rest)))
+        raise util.Abort(_("%s Please enter a valid value" % (prompt + rest)))
     if default:
         prompt += ' [%s]' % default
     prompt += rest

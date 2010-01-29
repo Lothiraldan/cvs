@@ -3,7 +3,7 @@
 # Copyright 2006 Vadim Gelfer <vadim.gelfer@gmail.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 '''command to allow external programs to compare revisions
 
@@ -239,7 +239,8 @@ def uisetup(ui):
     for cmd, path in ui.configitems('extdiff'):
         if cmd.startswith('cmd.'):
             cmd = cmd[4:]
-            if not path: path = cmd
+            if not path:
+                path = cmd
             diffopts = ui.config('extdiff', 'opts.' + cmd, '')
             diffopts = diffopts and [diffopts] or []
         elif cmd.startswith('opts.'):

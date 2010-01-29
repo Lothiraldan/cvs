@@ -3,7 +3,7 @@
 # Copyright 2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import struct
 try:
@@ -22,7 +22,8 @@ except ImportError:
 # temporary string buffers.
 
 def patches(a, bins):
-    if not bins: return a
+    if not bins:
+        return a
 
     plens = [len(x) for x in bins]
     pl = sum(plens)
@@ -30,7 +31,8 @@ def patches(a, bins):
     tl = bl + bl + pl # enough for the patches and two working texts
     b1, b2 = 0, bl
 
-    if not tl: return a
+    if not tl:
+        return a
 
     m = StringIO()
     def move(dest, src, count):

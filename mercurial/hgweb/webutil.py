@@ -4,7 +4,7 @@
 # Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import os, copy
 from mercurial import match, patch, util, error
@@ -59,7 +59,7 @@ def revnavgen(pos, pagelen, limit, nodefunc):
                 yield {"label": label, "node": node}
         return f
 
-    return (dict(before=gen(navbefore), after=gen(navafter)), )
+    return (dict(before=gen(navbefore), after=gen(navafter)),)
 
 def _siblings(siblings=[], hiderev=None):
     siblings = [s for s in siblings if s.node() != nullid]

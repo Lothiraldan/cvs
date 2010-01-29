@@ -3,7 +3,7 @@
 # Copyright 2005-2008 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 import cgi, re, os, time, urllib, textwrap
 import util, encoding
@@ -64,7 +64,8 @@ def fill(text, width):
             m = para_re.search(text, start)
             if not m:
                 w = len(text)
-                while w > start and text[w-1].isspace(): w -= 1
+                while w > start and text[w - 1].isspace():
+                    w -= 1
                 yield text[start:w], text[w:]
                 break
             yield text[start:m.start(0)], m.group(1)
@@ -91,17 +92,21 @@ def obfuscate(text):
 def domain(author):
     '''get domain of author, or empty string if none.'''
     f = author.find('@')
-    if f == -1: return ''
-    author = author[f+1:]
+    if f == -1:
+        return ''
+    author = author[f + 1:]
     f = author.find('>')
-    if f >= 0: author = author[:f]
+    if f >= 0:
+        author = author[:f]
     return author
 
 def person(author):
     '''get name of author, or else username.'''
-    if not '@' in author: return author
+    if not '@' in author:
+        return author
     f = author.find('<')
-    if f == -1: return util.shortuser(author)
+    if f == -1:
+        return util.shortuser(author)
     return author[:f].rstrip()
 
 def indent(text, prefix):

@@ -3,7 +3,7 @@
 #  Copyright 2007-2009 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from common import NoRepo, checktool, commandline, commit, converter_source
 from mercurial.i18n import _
@@ -12,15 +12,19 @@ import os, shutil, tempfile
 
 # The naming drift of ElementTree is fun!
 
-try: from xml.etree.cElementTree import ElementTree
+try:
+    from xml.etree.cElementTree import ElementTree
 except ImportError:
-    try: from xml.etree.ElementTree import ElementTree
+    try:
+        from xml.etree.ElementTree import ElementTree
     except ImportError:
-        try: from elementtree.cElementTree import ElementTree
+        try:
+            from elementtree.cElementTree import ElementTree
         except ImportError:
-            try: from elementtree.ElementTree import ElementTree
-            except ImportError: ElementTree = None
-
+            try:
+                from elementtree.ElementTree import ElementTree
+            except ImportError:
+                ElementTree = None
 
 class darcs_source(converter_source, commandline):
     def __init__(self, ui, path, rev=None):

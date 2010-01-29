@@ -3,9 +3,9 @@
 # Copyright 2006, 2007 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
-import errno, os, re
+import errno, os, re, xml.dom.minidom
 from i18n import _
 import config, util, node, error
 hg = None
@@ -265,8 +265,8 @@ class svnsubrepo(object):
         cmd = [util.shellquote(arg) for arg in cmd]
         cmd = util.quotecommand(' '.join(cmd))
         env = dict(os.environ)
-        for k in ('LANGUAGE', 'LANG', 'LC_ALL', 'LC_MESSAGES'):
-            env[k] = 'en_US.UTF-8'
+        # Avoid localized output, preserve current locale for everything else.
+        env['LC_MESSAGES'] = 'C'
         write, read, err = util.popen3(cmd, env=env, newlines=True)
         retdata = read.read()
         err = err.read().strip()
@@ -275,35 +275,52 @@ class svnsubrepo(object):
         return retdata
 
     def _wcrev(self):
-        info = self._svncommand(['info'])
-        mat = re.search('Revision: ([\d]+)\n', info)
-        if not mat:
+        output = self._svncommand(['info', '--xml'])
+        doc = xml.dom.minidom.parseString(output)
+        entries = doc.getElementsByTagName('entry')
+        if not entries:
             return 0
-        return mat.groups()[0]
+        return int(entries[0].getAttribute('revision') or 0)
 
-    def _url(self):
-        info = self._svncommand(['info'])
-        mat = re.search('URL: ([^\n]+)\n', info)
-        if not mat:
-            return 0
-        return mat.groups()[0]
-
-    def _wcclean(self):
-        status = self._svncommand(['status'])
-        status = '\n'.join([s for s in status.splitlines() if s[0] != '?'])
-        if status.strip():
-            return False
-        return True
+    def _wcchanged(self):
+        """Return (changes, extchanges) where changes is True
+        if the working directory was changed, and extchanges is
+        True if any of these changes concern an external entry.
+        """
+        output = self._svncommand(['status', '--xml'])
+        externals, changes = [], []
+        doc = xml.dom.minidom.parseString(output)
+        for e in doc.getElementsByTagName('entry'):
+            s = e.getElementsByTagName('wc-status')
+            if not s:
+                continue
+            item = s[0].getAttribute('item')
+            props = s[0].getAttribute('props')
+            path = e.getAttribute('path')
+            if item == 'external':
+                externals.append(path)
+            if (item not in ('', 'normal', 'unversioned', 'external')
+                or props not in ('', 'none')):
+                changes.append(path)
+        for path in changes:
+            for ext in externals:
+                if path == ext or path.startswith(ext + os.sep):
+                    return True, True
+        return bool(changes), False
 
     def dirty(self):
-        if self._wcrev() == self._state[1] and self._wcclean():
+        if self._wcrev() == self._state[1] and not self._wcchanged()[0]:
             return False
         return True
 
     def commit(self, text, user, date):
         # user and date are out of our hands since svn is centralized
-        if self._wcclean():
+        changed, extchanged = self._wcchanged()
+        if not changed:
             return self._wcrev()
+        if extchanged:
+            # Do not try to commit externals
+            raise util.Abort(_('cannot commit svn externals'))
         commitinfo = self._svncommand(['commit', '-m', text])
         self._ui.status(commitinfo)
         newrev = re.search('Committed revision ([\d]+).', commitinfo)

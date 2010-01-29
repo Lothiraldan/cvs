@@ -3,7 +3,7 @@
 # Copyright 2006 Vadim Gelfer <vadim.gelfer@gmail.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 from i18n import _
 from node import hex
@@ -205,7 +205,8 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
     prefix is name of path to put before every archive member.'''
 
     def write(name, mode, islink, getdata):
-        if matchfn and not matchfn(name): return
+        if matchfn and not matchfn(name):
+            return
         data = getdata()
         if decode:
             data = repo.wwritedata(name, data)

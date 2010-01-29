@@ -5,7 +5,7 @@
 # Copyright 2006 Matt Mackall <mpm@selenic.com>
 #
 # This software may be used and distributed according to the terms of the
-# GNU General Public License version 2, incorporated herein by reference.
+# GNU General Public License version 2 or any later version.
 
 # Modifying this script is tricky because it has many modes:
 #   - serial (default) vs parallel (-jN, N > 1)
@@ -231,7 +231,7 @@ def splitnewlines(text):
             if last:
                 lines.append(last)
             return lines
-        lines.append(text[i:n+1])
+        lines.append(text[i:n + 1])
         i = n + 1
 
 def parsehghaveoutput(lines):
@@ -660,7 +660,8 @@ def runchildren(options, tests):
     jobs = [[] for j in xrange(options.jobs)]
     while tests:
         for job in jobs:
-            if not tests: break
+            if not tests:
+                break
             job.append(tests.pop())
     fps = {}
     for j, job in enumerate(jobs):
