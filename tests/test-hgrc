@@ -1,0 +1,27 @@
+#!/bin/sh
+
+echo "invalid" > $HGRCPATH
+hg version 2>&1 | sed -e "s|$HGRCPATH|\$HGRCPATH|"
+echo "" > $HGRCPATH
+
+# issue1199: escaping
+hg init "foo%bar"
+hg clone "foo%bar" foobar
+p=`pwd`
+cd foobar
+cat .hg/hgrc | sed -e "s:$p:...:"
+hg paths | sed -e "s:$p:...:"
+hg showconfig | sed -e "s:$p:...:"
+cd ..
+
+# issue1829: wrong indentation
+echo '[foo]' > $HGRCPATH
+echo '  x = y' >> $HGRCPATH
+hg version 2>&1 | sed -e "s|$HGRCPATH|\$HGRCPATH|"
+
+python -c "print '[foo]\nbar = a\n b\n c \n  de\n fg \nbaz = bif cb \n'" \
+    > $HGRCPATH
+hg showconfig foo
+
+echo '%include /no-such-file' > $HGRCPATH
+hg version 2>&1 | sed -e "s|$HGRCPATH|\$HGRCPATH|"
