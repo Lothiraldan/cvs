@@ -15,10 +15,7 @@ This is some text in the first paragraph.
   A small indented paragraph.
   It is followed by some lines
   containing random whitespace.
- 
-  
-   
-The third and final paragraph.
+ \n  \n   \nThe third and final paragraph.
 """
 
 debugformat('paragraphs', paragraphs, 60)
@@ -134,13 +131,14 @@ debugformat('options', options, 30)
 
 
 fields = """
-Field lists give a simple two-column layout:
+:a: First item.
+:ab: Second item. Indentation and wrapping
+     is handled automatically.
 
-:key:         The whitespace following the key is
-  significant for the wrapping of this text.
-:another key: More text.
-    The indentation on the following
-    lines is not significant.
+Next list:
+
+:small: The larger key below triggers full indentation here.
+:much too large: This key is big enough to get its own line.
 """
 
 debugformat('fields', fields, 60)
