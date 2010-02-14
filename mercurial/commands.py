@@ -28,6 +28,20 @@ def add(ui, repo, *pats, **opts):
     undo an add before that, see hg forget.
 
     If no names are given, add all files to the repository.
+
+    .. container:: verbose
+
+       An example showing how new (unknown) files are added
+       automatically by ``hg add``::
+
+         $ ls
+         foo.c
+         $ hg status
+         ? foo.c
+         $ hg add
+         adding foo.c
+         $ hg status
+         A foo.c
     """
 
     bad = []
@@ -1527,7 +1541,11 @@ def help_(ui, name=None, with_version=False, unknowncmd=False):
             doc = _("(no help text available)")
         if ui.quiet:
             doc = doc.splitlines()[0]
-        ui.write("\n%s\n" % minirst.format(doc, textwidth))
+        keep = ui.verbose and ['verbose'] or []
+        formatted, pruned = minirst.format(doc, textwidth, keep=keep)
+        ui.write("\n%s\n" % formatted)
+        if pruned:
+            ui.write(_('\nuse "hg -v help %s" to show verbose help\n') % name)
 
         if not ui.quiet:
             # options

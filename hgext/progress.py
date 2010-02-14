@@ -18,8 +18,8 @@
 
 """show progress bars for some actions
 
-This extension uses the progress information commands can log with hg
-to draw progres bars that are as informative as possible. Some progress
+This extension uses the progress information logged by hg commands
+to draw progress bars that are as informative as possible. Some progress
 bars only offer indeterminate information, while others have a definite
 end point.
 
@@ -47,13 +47,7 @@ from mercurial import extensions
 from mercurial import util
 
 def spacejoin(*args):
-    ret = ''
-    for s in args:
-        if s:
-            if ret:
-                ret += ' '
-            ret += s
-    return ret
+    return ' '.join(s for s in args if s)
 
 class progbar(object):
     def __init__(self, ui):
@@ -120,7 +114,10 @@ class progbar(object):
             progwidth = termwidth - used - 3
             if total:
                 amt = pos * progwidth // total
-                bar = '=' * (amt) + ' ' * (progwidth - amt)
+                bar = '=' * (amt - 1)
+                if amt > 0:
+                    bar += '>'
+                bar += ' ' * (progwidth - amt)
             else:
                 progwidth -= 3
                 self.indetcount += 1
@@ -140,25 +137,29 @@ class progbar(object):
     def clear(self):
         sys.stdout.write('\r%s\r' % (' ' * self.width()))
 
+    def complete(self):
+        if self.ui.configbool('progress', 'clear-complete', default=True):
+            self.clear()
+        else:
+            sys.stdout.write('\n')
+        sys.stdout.flush()
+
     def width(self):
         tw = util.termwidth()
         return min(int(self.ui.config('progress', 'width', default=tw)), tw)
 
     def progress(self, orig, topic, pos, item='', unit='', total=None):
-        now = time.time()
-        if pos is None and self.topics[-1] == topic and self.printed:
-            if self.ui.configbool('progress', 'clear-complete', default=True):
-                self.clear()
-            else:
-                sys.stdout.write('\n')
-            sys.stdout.flush()
-            self.resetstate()
-        elif topic not in self.topics:
-            self.topics.append(topic)
-
-        if now - self.lastprint > 0.1 and topic == self.topics[-1]:
-            self.lastprint = now
-            self.show(topic, pos, item, unit, total)
+        if pos is None:
+            if self.topics and self.topics[-1] == topic and self.printed:
+                self.complete()
+                self.resetstate()
+        else:
+            if topic not in self.topics:
+                self.topics.append(topic)
+            now = time.time()
+            if now - self.lastprint > 0.1 and topic == self.topics[-1]:
+                self.lastprint = now
+                self.show(topic, pos, item, unit, total)
         return orig(topic, pos, item=item, unit=unit, total=total)
 
     def write(self, orig, *args):

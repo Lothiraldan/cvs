@@ -1,6 +1,6 @@
 # minirst.py - minimal reStructuredText parser
 #
-# Copyright 2009 Matt Mackall <mpm@selenic.com> and others
+# Copyright 2009, 2010 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
@@ -111,7 +111,7 @@ def findliteralblocks(blocks):
         i += 1
     return blocks
 
-_bulletre = re.compile(r'(-|[0-9A-Za-z]+\.|\(?[0-9A-Za-z]+\)) ')
+_bulletre = re.compile(r'(-|[0-9A-Za-z]+\.|\(?[0-9A-Za-z]+\)|\|) ')
 _optionre = re.compile(r'^(--[a-z-]+)((?:[ =][a-zA-Z][\w-]*)?  +)(.*)$')
 _fieldre = re.compile(r':(?![: ])([^:]*)(?<! ):[ ]+(.*)')
 _definitionre = re.compile(r'[^ ]')
@@ -186,6 +186,45 @@ def updatefieldlists(blocks):
     return blocks
 
 
+def prunecontainers(blocks, keep):
+    """Prune unwanted containers.
+
+    The blocks must have a 'type' field, i.e., they should have been
+    run through findliteralblocks first.
+    """
+    pruned = []
+    i = 0
+    while i + 1 < len(blocks):
+        # Searching for a block that looks like this:
+        #
+        # +-------+---------------------------+
+        # | ".. container ::" type            |
+        # +---+                               |
+        #     | blocks                        |
+        #     +-------------------------------+
+        if (blocks[i]['type'] == 'paragraph' and
+            blocks[i]['lines'][0].startswith('.. container::')):
+            indent = blocks[i]['indent']
+            adjustment = blocks[i + 1]['indent'] - indent
+            containertype = blocks[i]['lines'][0][15:]
+            prune = containertype not in keep
+            if prune:
+                pruned.append(containertype)
+
+            # Always delete "..container:: type" block
+            del blocks[i]
+            j = i
+            while j < len(blocks) and blocks[j]['indent'] > indent:
+                if prune:
+                    del blocks[j]
+                    i -= 1 # adjust outer index
+                else:
+                    blocks[j]['indent'] -= adjustment
+                    j += 1
+        i += 1
+    return blocks, pruned
+
+
 def findsections(blocks):
     """Finds sections.
 
@@ -252,8 +291,13 @@ def formatblock(block, width):
                                                subsequent_indent=defindent))
     initindent = subindent = indent
     if block['type'] == 'bullet':
-        m = _bulletre.match(block['lines'][0])
-        subindent = indent + m.end() * ' '
+        if block['lines'][0].startswith('| '):
+            # Remove bullet for line blocks and add no extra
+            # indention.
+            block['lines'][0] = block['lines'][0][2:]
+        else:
+            m = _bulletre.match(block['lines'][0])
+            subindent = indent + m.end() * ' '
     elif block['type'] == 'field':
         keywidth = block['keywidth']
         key = block['key']
@@ -281,25 +325,30 @@ def formatblock(block, width):
                          subsequent_indent=subindent)
 
 
-def format(text, width, indent=0):
+def format(text, width, indent=0, keep=None):
     """Parse and format the text according to width."""
     blocks = findblocks(text)
     for b in blocks:
         b['indent'] += indent
     blocks = findliteralblocks(blocks)
+    blocks, pruned = prunecontainers(blocks, keep or [])
     blocks = inlineliterals(blocks)
     blocks = splitparagraphs(blocks)
     blocks = updatefieldlists(blocks)
     blocks = findsections(blocks)
     blocks = addmargins(blocks)
-    return '\n'.join(formatblock(b, width) for b in blocks)
+    text = '\n'.join(formatblock(b, width) for b in blocks)
+    if keep is None:
+        return text
+    else:
+        return text, pruned
 
 
 if __name__ == "__main__":
     from pprint import pprint
 
-    def debug(func, blocks):
-        blocks = func(blocks)
+    def debug(func, *args):
+        blocks = func(*args)
         print "*** after %s:" % func.__name__
         pprint(blocks)
         print
@@ -308,6 +357,7 @@ if __name__ == "__main__":
     text = open(sys.argv[1]).read()
     blocks = debug(findblocks, text)
     blocks = debug(findliteralblocks, blocks)
+    blocks = debug(prunecontainers, blocks, sys.argv[2:])
     blocks = debug(inlineliterals, blocks)
     blocks = debug(splitparagraphs, blocks)
     blocks = debug(updatefieldlists, blocks)
