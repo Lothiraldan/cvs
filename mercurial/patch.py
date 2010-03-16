@@ -1175,20 +1175,6 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, eolmode='strict'):
         return -1
     return err
 
-def diffopts(ui, opts=None, untrusted=False):
-    def get(key, name=None, getter=ui.configbool):
-        return ((opts and opts.get(key)) or
-                getter('diff', name or key, None, untrusted=untrusted))
-    return mdiff.diffopts(
-        text=opts and opts.get('text'),
-        git=get('git'),
-        nodates=get('nodates'),
-        showfunc=get('show_function', 'showfunc'),
-        ignorews=get('ignore_all_space', 'ignorews'),
-        ignorewsamount=get('ignore_space_change', 'ignorewsamount'),
-        ignoreblanklines=get('ignore_blank_lines', 'ignoreblanklines'),
-        context=get('unified', getter=ui.config))
-
 def updatedir(ui, repo, patches, similarity=0):
     '''Update dirstate after patch application according to metadata'''
     if not patches:
@@ -1376,6 +1362,20 @@ def b85diff(to, tn):
 class GitDiffRequired(Exception):
     pass
 
+def diffopts(ui, opts=None, untrusted=False):
+    def get(key, name=None, getter=ui.configbool):
+        return ((opts and opts.get(key)) or
+                getter('diff', name or key, None, untrusted=untrusted))
+    return mdiff.diffopts(
+        text=opts and opts.get('text'),
+        git=get('git'),
+        nodates=get('nodates'),
+        showfunc=get('show_function', 'showfunc'),
+        ignorews=get('ignore_all_space', 'ignorews'),
+        ignorewsamount=get('ignore_space_change', 'ignorewsamount'),
+        ignoreblanklines=get('ignore_blank_lines', 'ignoreblanklines'),
+        context=get('unified', getter=ui.config))
+
 def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
          losedatafn=None):
     '''yields diff of changes to files between two nodes, or node and
@@ -1550,47 +1550,6 @@ def trydiff(repo, revs, ctx1, ctx2, modified, added, removed,
                 yield ''.join(header)
             if text:
                 yield text
-
-def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
-           opts=None):
-    '''export changesets as hg patches.'''
-
-    total = len(revs)
-    revwidth = max([len(str(rev)) for rev in revs])
-
-    def single(rev, seqno, fp):
-        ctx = repo[rev]
-        node = ctx.node()
-        parents = [p.node() for p in ctx.parents() if p]
-        branch = ctx.branch()
-        if switch_parent:
-            parents.reverse()
-        prev = (parents and parents[0]) or nullid
-
-        if not fp:
-            fp = cmdutil.make_file(repo, template, node, total=total,
-                                   seqno=seqno, revwidth=revwidth,
-                                   mode='ab')
-        if fp != sys.stdout and hasattr(fp, 'name'):
-            repo.ui.note("%s\n" % fp.name)
-
-        fp.write("# HG changeset patch\n")
-        fp.write("# User %s\n" % ctx.user())
-        fp.write("# Date %d %d\n" % ctx.date())
-        if branch and (branch != 'default'):
-            fp.write("# Branch %s\n" % branch)
-        fp.write("# Node ID %s\n" % hex(node))
-        fp.write("# Parent  %s\n" % hex(prev))
-        if len(parents) > 1:
-            fp.write("# Parent  %s\n" % hex(parents[1]))
-        fp.write(ctx.description().rstrip())
-        fp.write("\n\n")
-
-        for chunk in diff(repo, prev, node, opts=opts):
-            fp.write(chunk)
-
-    for seqno, rev in enumerate(revs):
-        single(rev, seqno + 1, fp)
 
 def diffstatdata(lines):
     filename, adds, removes = None, 0, 0

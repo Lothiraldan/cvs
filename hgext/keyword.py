@@ -1,6 +1,6 @@
 # keyword.py - $Keyword$ expansion for Mercurial
 #
-# Copyright 2007-2009 Christian Ebert <blacktrash@gmx.net>
+# Copyright 2007-2010 Christian Ebert <blacktrash@gmx.net>
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
@@ -79,7 +79,6 @@ like CVS' $Log$, are not supported. A keyword template map "Log =
 from mercurial import commands, cmdutil, dispatch, filelog, revlog, extensions
 from mercurial import patch, localrepo, templater, templatefilters, util, match
 from mercurial.hgweb import webcommands
-from mercurial.lock import release
 from mercurial.node import nullid
 from mercurial.i18n import _
 import re, shutil, tempfile
@@ -251,10 +250,8 @@ def _status(ui, repo, kwt, *pats, **opts):
     '''Bails out if [keyword] configuration is not active.
     Returns status of working directory.'''
     if kwt:
-        unknown = (opts.get('unknown') or opts.get('all')
-                   or opts.get('untracked'))
         return repo.status(match=cmdutil.match(repo, pats, opts), clean=True,
-                           unknown=unknown)
+                           unknown=opts.get('unknown') or opts.get('all'))
     if ui.configitems('keyword'):
         raise util.Abort(_('[keyword] patterns cannot match'))
     raise util.Abort(_('no [keyword] patterns configured'))
@@ -264,17 +261,15 @@ def _kwfwrite(ui, repo, expand, *pats, **opts):
     if repo.dirstate.parents()[1] != nullid:
         raise util.Abort(_('outstanding uncommitted merge'))
     kwt = kwtools['templater']
-    status = _status(ui, repo, kwt, *pats, **opts)
-    modified, added, removed, deleted = status[:4]
-    if modified or added or removed or deleted:
-        raise util.Abort(_('outstanding uncommitted changes'))
-    wlock = lock = None
+    wlock = repo.wlock()
     try:
-        wlock = repo.wlock()
-        lock = repo.lock()
-        kwt.overwrite(None, expand, status[6])
+        status = _status(ui, repo, kwt, *pats, **opts)
+        modified, added, removed, deleted, unknown, ignored, clean = status
+        if modified or added or removed or deleted:
+            raise util.Abort(_('outstanding uncommitted changes'))
+        kwt.overwrite(None, expand, clean)
     finally:
-        release(lock, wlock)
+        wlock.release()
 
 def demo(ui, repo, *args, **opts):
     '''print [keywordmaps] configuration and an expansion example
@@ -398,7 +393,7 @@ def files(ui, repo, *pats, **opts):
     cwd = pats and repo.getcwd() or ''
     modified, added, removed, deleted, unknown, ignored, clean = status
     files = []
-    if not (opts.get('unknown') or opts.get('untracked')) or opts.get('all'):
+    if not opts.get('unknown') or opts.get('all'):
         files = sorted(modified + added + clean)
     wctx = repo[None]
     kwfiles = [f for f in files if kwt.iskwfile(f, wctx.flags)]
@@ -485,15 +480,10 @@ def reposetup(ui, repo):
                 del self.commitctx
 
         def kwcommitctx(self, ctx, error=False):
-            wlock = lock = None
-            try:
-                wlock = self.wlock()
-                lock = self.lock()
-                n = super(kwrepo, self).commitctx(ctx, error)
-                kwt.overwrite(n, True, None)
-                return n
-            finally:
-                release(lock, wlock)
+            n = super(kwrepo, self).commitctx(ctx, error)
+            # no lock needed, only called from repo.commit() which already locks
+            kwt.overwrite(n, True, None)
+            return n
 
     # monkeypatches
     def kwpatchfile_init(orig, self, ui, fname, opener,
@@ -540,9 +530,6 @@ cmdtable = {
          [('A', 'all', None, _('show keyword status flags of all files')),
           ('i', 'ignore', None, _('show files excluded from expansion')),
           ('u', 'unknown', None, _('only show unknown (not tracked) files')),
-          ('a', 'all', None,
-           _('show keyword status flags of all files (DEPRECATED)')),
-          ('u', 'untracked', None, _('only show untracked files (DEPRECATED)')),
          ] + commands.walkopts,
          _('hg kwfiles [OPTION]... [FILE]...')),
     'kwshrink': (shrink, commands.walkopts,

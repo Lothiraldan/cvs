@@ -11,9 +11,9 @@ import repo, changegroup, subrepo
 import changelog, dirstate, filelog, manifest, context
 import lock, transaction, store, encoding
 import util, extensions, hook, error
-import match as match_
-import merge as merge_
-import tags as tags_
+import match as matchmod
+import merge as mergemod
+import tags as tagsmod
 from lock import release
 import weakref, stat, errno, os, time, inspect
 propertycache = util.propertycache
@@ -207,7 +207,7 @@ class localrepository(repo.repository):
         if '.hgtags' not in self.dirstate:
             self.add(['.hgtags'])
 
-        m = match_.exact(self.root, '', ['.hgtags'])
+        m = matchmod.exact(self.root, '', ['.hgtags'])
         tagnode = self.commit(message, user, date, extra=extra, match=m)
 
         for name in names:
@@ -268,8 +268,8 @@ class localrepository(repo.repository):
         alltags = {}                    # map tag name to (node, hist)
         tagtypes = {}
 
-        tags_.findglobaltags(self.ui, self, alltags, tagtypes)
-        tags_.readlocaltags(self.ui, self, alltags, tagtypes)
+        tagsmod.findglobaltags(self.ui, self, alltags, tagtypes)
+        tagsmod.readlocaltags(self.ui, self, alltags, tagtypes)
 
         # Build the return dicts.  Have to re-encode tag names because
         # the tags module always uses UTF-8 (in order not to lose info
@@ -503,7 +503,7 @@ class localrepository(repo.repository):
             for pat, cmd in self.ui.configitems(filter):
                 if cmd == '!':
                     continue
-                mf = match_.match(self.root, '', [pat])
+                mf = matchmod.match(self.root, '', [pat])
                 fn = None
                 params = cmd
                 for name, filterfn in self._datafilters.iteritems():
@@ -767,7 +767,7 @@ class localrepository(repo.repository):
             raise util.Abort('%s: %s' % (f, msg))
 
         if not match:
-            match = match_.always(self.root, '')
+            match = matchmod.always(self.root, '')
 
         if not force:
             vdirs = []
@@ -824,7 +824,7 @@ class localrepository(repo.repository):
                 and self[None].branch() == self['.'].branch()):
                 return None
 
-            ms = merge_.mergestate(self)
+            ms = mergemod.mergestate(self)
             for f in changes[0]:
                 if f in ms and ms[f] == 'u':
                     raise util.Abort(_("unresolved merge conflicts "
@@ -996,7 +996,7 @@ class localrepository(repo.repository):
 
         working = ctx2.rev() is None
         parentworking = working and ctx1 == self['.']
-        match = match or match_.always(self.root, self.getcwd())
+        match = match or matchmod.always(self.root, self.getcwd())
         listignored, listclean, listunknown = ignored, clean, unknown
 
         # load earliest manifest first for caching reasons
@@ -1826,9 +1826,9 @@ class localrepository(repo.repository):
             cnt = 0
             for chnk in group:
                 yield chnk
-                self.ui.progress(_('bundle changes'), cnt, unit=_('chunks'))
+                self.ui.progress(_('bundling changes'), cnt, unit=_('chunks'))
                 cnt += 1
-            self.ui.progress(_('bundle changes'), None, unit=_('chunks'))
+            self.ui.progress(_('bundling changes'), None, unit=_('chunks'))
 
 
             # Figure out which manifest nodes (of the ones we think might be
@@ -1854,9 +1854,9 @@ class localrepository(repo.repository):
             cnt = 0
             for chnk in group:
                 yield chnk
-                self.ui.progress(_('bundle manifests'), cnt, unit=_('chunks'))
+                self.ui.progress(_('bundling manifests'), cnt, unit=_('chunks'))
                 cnt += 1
-            self.ui.progress(_('bundle manifests'), None, unit=_('chunks'))
+            self.ui.progress(_('bundling manifests'), None, unit=_('chunks'))
 
             # These are no longer needed, dereference and toss the memory for
             # them.
@@ -1897,7 +1897,7 @@ class localrepository(repo.repository):
                                              lookup_filenode_link_func(fname))
                     for chnk in group:
                         self.ui.progress(
-                            _('bundle files'), cnt, item=fname, unit=_('chunks'))
+                            _('bundling files'), cnt, item=fname, unit=_('chunks'))
                         cnt += 1
                         yield chnk
                 if fname in msng_filenode_set:
@@ -1905,7 +1905,7 @@ class localrepository(repo.repository):
                     del msng_filenode_set[fname]
             # Signal that no more groups are left.
             yield changegroup.closechunk()
-            self.ui.progress(_('bundle files'), None, unit=_('chunks'))
+            self.ui.progress(_('bundling files'), None, unit=_('chunks'))
 
             if msng_cl_lst:
                 self.hook('outgoing', node=hex(msng_cl_lst[0]), source=source)
@@ -1954,19 +1954,19 @@ class localrepository(repo.repository):
 
             cnt = 0
             for chnk in cl.group(nodes, identity, collect):
-                self.ui.progress(_('bundle changes'), cnt, unit=_('chunks'))
+                self.ui.progress(_('bundling changes'), cnt, unit=_('chunks'))
                 cnt += 1
                 yield chnk
-            self.ui.progress(_('bundle changes'), None, unit=_('chunks'))
+            self.ui.progress(_('bundling changes'), None, unit=_('chunks'))
 
             mnfst = self.manifest
             nodeiter = gennodelst(mnfst)
             cnt = 0
             for chnk in mnfst.group(nodeiter, lookuprevlink_func(mnfst)):
-                self.ui.progress(_('bundle manifests'), cnt, unit=_('chunks'))
+                self.ui.progress(_('bundling manifests'), cnt, unit=_('chunks'))
                 cnt += 1
                 yield chnk
-            self.ui.progress(_('bundle manifests'), None, unit=_('chunks'))
+            self.ui.progress(_('bundling manifests'), None, unit=_('chunks'))
 
             cnt = 0
             for fname in sorted(changedfiles):
@@ -1981,10 +1981,10 @@ class localrepository(repo.repository):
                     lookup = lookuprevlink_func(filerevlog)
                     for chnk in filerevlog.group(nodeiter, lookup):
                         self.ui.progress(
-                            _('bundle files'), cnt, item=fname, unit=_('chunks'))
+                            _('bundling files'), cnt, item=fname, unit=_('chunks'))
                         cnt += 1
                         yield chnk
-            self.ui.progress(_('bundle files'), None, unit=_('chunks'))
+            self.ui.progress(_('bundling files'), None, unit=_('chunks'))
 
             yield changegroup.closechunk()
 

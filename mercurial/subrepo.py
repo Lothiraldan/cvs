@@ -131,7 +131,7 @@ def _abssource(repo, push=False):
         source = repo._subsource
         if source.startswith('/') or '://' in source:
             return source
-        parent = _abssource(repo._subparent)
+        parent = _abssource(repo._subparent, push)
         if '://' in parent:
             if parent[-1] == '/':
                 parent = parent[:-1]
@@ -177,24 +177,35 @@ class hgsubrepo(object):
         self._state = state
         r = ctx._repo
         root = r.wjoin(path)
-        if os.path.exists(os.path.join(root, '.hg')):
-            self._repo = hg.repository(r.ui, root)
-        else:
+        create = False
+        if not os.path.exists(os.path.join(root, '.hg')):
+            create = True
             util.makedirs(root)
-            self._repo = hg.repository(r.ui, root, create=True)
-            f = file(os.path.join(root, '.hg', 'hgrc'), 'w')
-            f.write('[paths]\ndefault = %s\n' % os.path.join(
-                _abssource(ctx._repo), path))
-            f.close()
+        self._repo = hg.repository(r.ui, root, create=create)
         self._repo._subparent = r
         self._repo._subsource = state[0]
+
+        if create:
+            fp = self._repo.opener("hgrc", "w", text=True)
+            fp.write('[paths]\n')
+
+            def addpathconfig(key, value):
+                fp.write('%s = %s\n' % (key, value))
+                self._repo.ui.setconfig('paths', key, value)
+
+            defpath = _abssource(self._repo)
+            defpushpath = _abssource(self._repo, True)
+            addpathconfig('default', defpath)
+            if defpath != defpushpath:
+                addpathconfig('default-push', defpushpath)
+            fp.close()
 
     def dirty(self):
         r = self._state[1]
         if r == '':
             return True
         w = self._repo[None]
-        if w.p1() != self._repo[r]: # version checked out changed
+        if w.p1() != self._repo[r]: # version checked out change
             return True
         return w.dirty() # working directory changed
 
@@ -217,8 +228,9 @@ class hgsubrepo(object):
             self._repo.lookup(revision)
         except error.RepoError:
             self._repo._subsource = source
-            self._repo.ui.status(_('pulling subrepo %s\n') % self._path)
             srcurl = _abssource(self._repo)
+            self._repo.ui.status(_('pulling subrepo %s from %s\n')
+                                 % (self._path, srcurl))
             other = hg.repository(self._repo.ui, srcurl)
             self._repo.pull(other)
 

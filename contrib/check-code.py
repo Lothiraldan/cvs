@@ -52,6 +52,7 @@ testpats = [
     (r'/bin/', "don't use explicit paths for tools"),
     (r'\$PWD', "don't use $PWD, use `pwd`"),
     (r'[^\n]\Z', "no trailing newline"),
+    (r'export.*=', "don't export and assign at once"),
 ]
 
 testfilters = [
@@ -82,6 +83,7 @@ pypats = [
     (r'[\x80-\xff]', "non-ASCII character literal"),
     (r'("\')\.format\(', "str.format() not available in Python 2.4"),
     (r'^\s*with\s+', "with not available in Python 2.4"),
+    (r'^\s*(any|all)\(', "any/all not available in Python 2.4"),
     (r'if\s.*\selse', "if ... else form not available in Python 2.4"),
     (r'([\(\[]\s\S)|(\S\s[\)\]])', "gratuitous whitespace in () or []"),
 #    (r'\s\s=', "gratuitous whitespace before ="),

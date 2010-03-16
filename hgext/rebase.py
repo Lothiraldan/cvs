@@ -14,7 +14,7 @@ For more information:
 http://mercurial.selenic.com/wiki/RebaseExtension
 '''
 
-from mercurial import util, repair, merge, cmdutil, commands, error
+from mercurial import hg, util, repair, merge, cmdutil, commands, error
 from mercurial import extensions, ancestor, copies, patch
 from mercurial.commands import templateopts
 from mercurial.node import nullrev
@@ -28,8 +28,39 @@ def rebase(ui, repo, **opts):
     """move changeset (and descendants) to a different branch
 
     Rebase uses repeated merging to graft changesets from one part of
-    history onto another. This can be useful for linearizing local
-    changes relative to a master development tree.
+    history (the source) onto another (the destination). This can be
+    useful for linearizing local changes relative to a master
+    development tree.
+
+    If you don't specify a destination changeset (``-d/--dest``),
+    rebase uses the tipmost head of the current named branch as the
+    destination. (The destination changeset is not modified by
+    rebasing, but new changesets are added as its descendants.)
+
+    You can specify which changesets to rebase in two ways: as a
+    "source" changeset or as a "base" changeset. Both are shorthand
+    for a topologically related set of changesets (the "source
+    branch"). If you specify source (``-s/--source``), rebase will
+    rebase that changeset and all of its descendants onto dest. If you
+    specify base (``-b/--base``), rebase will select ancestors of base
+    back to but not including the common ancestor with dest. Thus,
+    ``-b`` is less precise but more convenient than ``-s``: you can
+    specify any changeset in the source branch, and rebase will select
+    the whole branch. If you specify neither ``-s`` nor ``-b``, rebase
+    uses the parent of the working directory as the base.
+
+    By default, rebase recreates the changesets in the source branch
+    as descendants of dest and then destroys the originals. Use
+    ``--keep`` to preserve the original source changesets. Some
+    changesets in the source branch (e.g. merges from the destination
+    branch) may be dropped if they no longer contribute any change.
+
+    One result of the rules for selecting the destination changeset
+    and source branch is that, unlike ``merge``, rebase will do
+    nothing if you are at the latest (tipmost) head of a named branch
+    with two heads. You need to explicitly specify source and/or
+    destination (or ``update`` to the other head, if it's the head of
+    the intended source branch).
 
     If a rebase is interrupted to manually resolve a merge, it can be
     continued with --continue/-c or aborted with --abort/-a.
@@ -56,6 +87,9 @@ def rebase(ui, repo, **opts):
         keepf = opts.get('keep', False)
         keepbranchesf = opts.get('keepbranches', False)
         detachf = opts.get('detach', False)
+        # keepopen is not meant for use on the command line, but by
+        # other extensions
+        keepopen = opts.get('keepopen', False)
 
         if contf or abortf:
             if contf and abortf:
@@ -150,7 +184,7 @@ def rebase(ui, repo, **opts):
 
         ui.note(_('rebase merging completed\n'))
 
-        if collapsef:
+        if collapsef and not keepopen:
             p1, p2 = defineparents(repo, min(state), target,
                                                         state, targetancestors)
             commitmsg = 'Collapsed revision'
@@ -314,10 +348,10 @@ def updatemq(repo, state, skipped, **opts):
     'Update rebased mq patches - finalize and then import them'
     mqrebase = {}
     for p in repo.mq.applied:
-        if repo[p.rev].rev() in state:
+        if repo[p.node].rev() in state:
             repo.ui.debug('revision %d is an mq patch (%s), finalize it.\n' %
-                                        (repo[p.rev].rev(), p.name))
-            mqrebase[repo[p.rev].rev()] = (p.name, isagitpatch(repo, p.name))
+                                        (repo[p.node].rev(), p.name))
+            mqrebase[repo[p.node].rev()] = (p.name, isagitpatch(repo, p.name))
 
     if mqrebase:
         repo.mq.finish(repo, mqrebase.keys())
@@ -409,10 +443,14 @@ def buildstate(repo, dest, src, base, detach):
         branch = repo[None].branch()
         dest = repo[branch].rev()
     else:
-        if 'qtip' in repo.tags() and (repo[dest].hex() in
-                                [s.rev for s in repo.mq.applied]):
-            raise util.Abort(_('cannot rebase onto an applied mq patch'))
         dest = repo[dest].rev()
+
+    # This check isn't strictly necessary, since mq detects commits over an
+    # applied patch. But it prevents messing up the working directory when
+    # a partially completed rebase is blocked by mq.
+    if 'qtip' in repo.tags() and (repo[dest].node() in
+                            [s.node for s in repo.mq.applied]):
+        raise util.Abort(_('cannot rebase onto an applied mq patch'))
 
     if src:
         commonbase = repo[src].ancestor(repo[dest])
@@ -467,7 +505,14 @@ def pullrebase(orig, ui, repo, *args, **opts):
 
         cmdutil.bail_if_changed(repo)
         revsprepull = len(repo)
-        orig(ui, repo, *args, **opts)
+        origpostincoming = commands.postincoming
+        def _dummy(*args, **kwargs):
+            pass
+        commands.postincoming = _dummy
+        try:
+            orig(ui, repo, *args, **opts)
+        finally:
+            commands.postincoming = origpostincoming
         revspostpull = len(repo)
         if revspostpull > revsprepull:
             rebase(ui, repo, **opts)
@@ -475,7 +520,7 @@ def pullrebase(orig, ui, repo, *args, **opts):
             dest = repo[branch].rev()
             if dest != repo['.'].rev():
                 # there was nothing to rebase we force an update
-                merge.update(repo, dest, False, False, False)
+                hg.update(repo, dest)
     else:
         orig(ui, repo, *args, **opts)
 
@@ -490,9 +535,10 @@ cmdtable = {
 "rebase":
         (rebase,
         [
-        ('s', 'source', '', _('rebase from a given revision')),
-        ('b', 'base', '', _('rebase from the base of a given revision')),
-        ('d', 'dest', '', _('rebase onto a given revision')),
+        ('s', 'source', '', _('rebase from the specified changeset')),
+        ('b', 'base', '', _('rebase from the base of the specified changeset '
+                            '(up to greatest common ancestor of base and dest)')),
+        ('d', 'dest', '', _('rebase onto the specified changeset')),
         ('', 'collapse', False, _('collapse the rebased changesets')),
         ('', 'keep', False, _('keep original changesets')),
         ('', 'keepbranches', False, _('keep original branch names')),
@@ -501,6 +547,6 @@ cmdtable = {
         ('c', 'continue', False, _('continue an interrupted rebase')),
         ('a', 'abort', False, _('abort an interrupted rebase'))] +
          templateopts,
-        _('hg rebase [-s REV | -b REV] [-d REV] [--collapse] [--detach] '
-                        '[--keep] [--keepbranches] | [-c] | [-a]')),
+        _('hg rebase [-s REV | -b REV] [-d REV] [options]\n'
+          'hg rebase {-a|-c}'))
 }

@@ -289,10 +289,17 @@ def findrenames(repo, added, removed, threshold):
     '''find renamed files -- yields (before, after, score) tuples'''
     copies = {}
     ctx = repo['.']
-    for r in removed:
+    for i, r in enumerate(removed):
+        repo.ui.progress(_('searching'), i, total=len(removed))
         if r not in ctx:
             continue
         fctx = ctx.filectx(r)
+
+        # lazily load text
+        @util.cachefunc
+        def data():
+            orig = fctx.data()
+            return orig, mdiff.splitnewlines(orig)
 
         def score(text):
             if not len(text):
@@ -301,14 +308,13 @@ def findrenames(repo, added, removed, threshold):
                 return 1.0
             if threshold == 1.0:
                 return 0.0
-            orig = fctx.data()
+            orig, lines = data()
             # bdiff.blocks() returns blocks of matching lines
             # count the number of bytes in each
             equal = 0
-            alines = mdiff.splitnewlines(text)
             matches = bdiff.blocks(text, orig)
             for x1, x2, y1, y2 in matches:
-                for line in alines[x1:x2]:
+                for line in lines[y1:y2]:
                     equal += len(line)
 
             lengths = len(text) + len(orig)
@@ -319,6 +325,7 @@ def findrenames(repo, added, removed, threshold):
             myscore = score(repo.wread(a))
             if myscore >= bestscore:
                 copies[a] = (r, myscore)
+    repo.ui.progress(_('searching'), None, total=len(removed))
 
     for dest, v in copies.iteritems():
         source, score = v
@@ -356,9 +363,7 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
             removed.append(abs)
         elif repo.dirstate[abs] == 'a':
             added.append(abs)
-    if not dry_run:
-        repo.remove(deleted)
-        repo.add(unknown)
+    copies = {}
     if similarity > 0:
         for old, new, score in findrenames(repo, added + unknown,
                                            removed + deleted, similarity):
@@ -366,8 +371,17 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
                 repo.ui.status(_('recording removal of %s as rename to %s '
                                  '(%d%% similar)\n') %
                                (m.rel(old), m.rel(new), score * 100))
-            if not dry_run:
+            copies[new] = old
+
+    if not dry_run:
+        wlock = repo.wlock()
+        try:
+            repo.remove(deleted)
+            repo.add(unknown)
+            for new, old in copies.iteritems():
                 repo.copy(old, new)
+        finally:
+            wlock.release()
 
 def copy(ui, repo, pats, opts, rename=False):
     # called with the repo lock held
@@ -645,6 +659,46 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
 
     if runfn:
         return runfn()
+
+def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
+           opts=None):
+    '''export changesets as hg patches.'''
+
+    total = len(revs)
+    revwidth = max([len(str(rev)) for rev in revs])
+
+    def single(rev, seqno, fp):
+        ctx = repo[rev]
+        node = ctx.node()
+        parents = [p.node() for p in ctx.parents() if p]
+        branch = ctx.branch()
+        if switch_parent:
+            parents.reverse()
+        prev = (parents and parents[0]) or nullid
+
+        if not fp:
+            fp = make_file(repo, template, node, total=total, seqno=seqno,
+                           revwidth=revwidth, mode='ab')
+        if fp != sys.stdout and hasattr(fp, 'name'):
+            repo.ui.note("%s\n" % fp.name)
+
+        fp.write("# HG changeset patch\n")
+        fp.write("# User %s\n" % ctx.user())
+        fp.write("# Date %d %d\n" % ctx.date())
+        if branch and (branch != 'default'):
+            fp.write("# Branch %s\n" % branch)
+        fp.write("# Node ID %s\n" % hex(node))
+        fp.write("# Parent  %s\n" % hex(prev))
+        if len(parents) > 1:
+            fp.write("# Parent  %s\n" % hex(parents[1]))
+        fp.write(ctx.description().rstrip())
+        fp.write("\n\n")
+
+        for chunk in patch.diff(repo, prev, node, opts=opts):
+            fp.write(chunk)
+
+    for seqno, rev in enumerate(revs):
+        single(rev, seqno + 1, fp)
 
 class changeset_printer(object):
     '''show changeset information when templating not requested.'''

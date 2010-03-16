@@ -12,8 +12,8 @@ import os, re, sys, difflib, time, tempfile
 import hg, util, revlog, bundlerepo, extensions, copies, error
 import patch, help, mdiff, url, encoding, templatekw
 import archival, changegroup, cmdutil, sshserver, hbisect
-from hgweb import server
-import merge as merge_
+from hgweb import server, hgweb_mod, hgwebdir_mod
+import merge as mergemod
 import minirst
 
 # Commands start here, listed alphabetically
@@ -158,8 +158,10 @@ def archive(ui, repo, dest, **opts):
     By default, the revision used is the parent of the working
     directory; use -r/--rev to specify a different revision.
 
-    To specify the type of archive to create, use -t/--type. Valid
-    types are:
+    The archive type is automatically detected based on file
+    extension (or override using -t/--type).
+
+    Valid types are:
 
     :``files``: a directory full of files (default)
     :``tar``:   tar archive, uncompressed
@@ -184,16 +186,32 @@ def archive(ui, repo, dest, **opts):
     dest = cmdutil.make_filename(repo, dest, node)
     if os.path.realpath(dest) == repo.root:
         raise util.Abort(_('repository root cannot be destination'))
-    matchfn = cmdutil.match(repo, [], opts)
-    kind = opts.get('type') or 'files'
+
+    def guess_type():
+        exttypes = {
+            'tar': ['.tar'],
+            'tbz2': ['.tbz2', '.tar.bz2'],
+            'tgz': ['.tgz', '.tar.gz'],
+            'zip': ['.zip'],
+        }
+
+        for type, extensions in exttypes.items():
+            if util.any(dest.endswith(ext) for ext in extensions):
+                return type
+        return None
+
+    kind = opts.get('type') or guess_type() or 'files'
     prefix = opts.get('prefix')
+
     if dest == '-':
         if kind == 'files':
             raise util.Abort(_('cannot archive plain files to stdout'))
         dest = sys.stdout
         if not prefix:
             prefix = os.path.basename(repo.root) + '-%h'
+
     prefix = cmdutil.make_filename(repo, prefix, node)
+    matchfn = cmdutil.match(repo, [], opts)
     archival.archive(repo, dest, node, kind, not opts.get('no_decode'),
                      matchfn, prefix)
 
@@ -451,7 +469,7 @@ def branch(ui, repo, label=None, **opts):
         if not opts.get('force') and utflabel in repo.branchtags():
             if label not in [p.branch() for p in repo.parents()]:
                 raise util.Abort(_('a branch of the same name already exists'
-                                   ' (use --force to override)'))
+                                   " (use 'hg update' to switch to it)"))
         repo.dirstate.setbranch(utflabel)
         ui.status(_('marked working directory as branch %s\n') % label)
     else:
@@ -564,6 +582,10 @@ def bundle(ui, repo, fname, dest=None, **opts):
         revs, checkout = hg.addbranchrevs(repo, other, branches, revs)
         o = repo.findoutgoing(other, force=opts.get('force'))
 
+    if not o:
+        ui.status(_("no changes found\n"))
+        return
+
     if revs:
         cg = repo.changegroupsubset(o, revs, 'bundle')
     else:
@@ -621,20 +643,6 @@ def clone(ui, source, dest=None, **opts):
     .hg/hgrc and working directory will be created on the remote side.
     Please see 'hg help urls' for important details about ``ssh://`` URLs.
 
-    If the -U/--noupdate option is specified, the new clone will contain
-    only a repository (.hg) and no working copy (the working copy parent
-    will be the null changeset). Otherwise, clone will initially check
-    out (in order of precedence):
-
-    a) the changeset, tag or branch specified with -u/--updaterev
-    b) the changeset, tag or branch given with the first -r/--rev
-    c) the branch given with the first -b/--branch
-    d) the branch given with the url#branch source syntax
-    e) the head of the default branch
-
-    Use 'hg clone -u . src dst' to checkout the source repository's
-    parent changeset (applicable for local source repositories only).
-
     A set of changesets (tags, or branch names) to pull may be specified
     by listing each changeset (tag, or branch name) with -r/--rev.
     If -r/--rev is used, the cloned repository will contain only a subset
@@ -649,12 +657,12 @@ def clone(ui, source, dest=None, **opts):
 
     For efficiency, hardlinks are used for cloning whenever the source
     and destination are on the same filesystem (note this applies only
-    to the repository data, not to the checked out files). Some
+    to the repository data, not to the working directory). Some
     filesystems, such as AFS, implement hardlinking incorrectly, but
     do not report errors. In these cases, use the --pull option to
     avoid hardlinking.
 
-    In some cases, you can clone repositories and checked out files
+    In some cases, you can clone repositories and the working directory
     using full hardlinks with ::
 
       $ cp -al REPO REPOCLONE
@@ -665,6 +673,20 @@ def clone(ui, source, dest=None, **opts):
     breaks hardlinks (Emacs and most Linux Kernel tools do so). Also,
     this is not compatible with certain extensions that place their
     metadata under the .hg directory, such as mq.
+
+    Mercurial will update the working directory to the first applicable
+    revision from this list:
+
+    a) null if -U or the source repository has no changesets
+    b) if -u . and the source repository is local, the first parent of
+       the source repository's working directory
+    c) the changeset specified with -u (if a branch name, this means the
+       latest head of that branch)
+    d) the changeset specified with -r
+    e) the tipmost head specified with -b
+    f) the tipmost head specified with the url#branch source syntax
+    g) the tipmost head of the default branch
+    h) tip
     """
     if opts.get('noupdate') and opts.get('updaterev'):
         raise util.Abort(_("cannot specify both --noupdate and --updaterev"))
@@ -1204,7 +1226,7 @@ def export(ui, repo, *changesets, **opts):
         ui.note(_('exporting patches:\n'))
     else:
         ui.note(_('exporting patch:\n'))
-    patch.export(repo, revs, template=opts.get('output'),
+    cmdutil.export(repo, revs, template=opts.get('output'),
                  switch_parent=opts.get('switch_parent'),
                  opts=patch.diffopts(ui, opts))
 
@@ -2574,7 +2596,7 @@ def resolve(ui, repo, *pats, **opts):
         raise util.Abort(_('no files or directories specified; '
                            'use --all to remerge all files'))
 
-    ms = merge_.mergestate(repo)
+    ms = mergemod.mergestate(repo)
     m = cmdutil.match(repo, pats, opts)
 
     for f in ms:
@@ -2864,6 +2886,10 @@ def serve(ui, repo, **opts):
     By default, the server logs accesses to stdout and errors to
     stderr. Use the -A/--accesslog and -E/--errorlog options to log to
     files.
+
+    To have the server choose a free port number to listen on, specify
+    a port number of 0; in this case, the server will print the port
+    number it uses.
     """
 
     if opts["stdio"]:
@@ -2873,25 +2899,35 @@ def serve(ui, repo, **opts):
         s = sshserver.sshserver(ui, repo)
         s.serve_forever()
 
+    # this way we can check if something was given in the command-line
+    if opts.get('port'):
+        opts['port'] = int(opts.get('port'))
+
     baseui = repo and repo.baseui or ui
     optlist = ("name templates style address port prefix ipv6"
-               " accesslog errorlog webdir_conf certificate encoding")
+               " accesslog errorlog certificate encoding")
     for o in optlist.split():
-        if opts.get(o, None):
-            baseui.setconfig("web", o, str(opts[o]))
-            if (repo is not None) and (repo.ui != baseui):
-                repo.ui.setconfig("web", o, str(opts[o]))
+        val = opts.get(o, '')
+        if val in (None, ''): # should check against default options instead
+            continue
+        baseui.setconfig("web", o, val)
+        if repo and repo.ui != baseui:
+            repo.ui.setconfig("web", o, val)
 
-    if repo is None and not ui.config("web", "webdir_conf"):
-        raise error.RepoError(_("There is no Mercurial repository here"
-                                " (.hg not found)"))
+    if opts.get('webdir_conf'):
+        app = hgwebdir_mod.hgwebdir(opts['webdir_conf'], ui)
+    elif repo is not None:
+        app = hgweb_mod.hgweb(hg.repository(repo.ui, repo.root))
+    else:
+        raise error.RepoError(_("There is no Mercurial repository"
+                                " here (.hg not found)"))
 
     class service(object):
         def init(self):
             util.set_signal_handler()
-            self.httpd = server.create_server(baseui, repo)
+            self.httpd = server.create_server(ui, app)
 
-            if not ui.verbose:
+            if opts['port'] and not ui.verbose:
                 return
 
             if self.httpd.prefix:
@@ -2912,8 +2948,12 @@ def serve(ui, repo, **opts):
             fqaddr = self.httpd.fqaddr
             if ':' in fqaddr:
                 fqaddr = '[%s]' % fqaddr
-            ui.status(_('listening at http://%s%s/%s (bound to %s:%d)\n') %
-                      (fqaddr, port, prefix, bindaddr, self.httpd.port))
+            if opts['port']:
+                write = ui.status
+            else:
+                write = ui.write
+            write(_('listening at http://%s%s/%s (bound to %s:%d)\n') %
+                  (fqaddr, port, prefix, bindaddr, self.httpd.port))
 
         def run(self):
             self.httpd.serve_forever()
@@ -3043,7 +3083,7 @@ def summary(ui, repo, **opts):
         ui.status(m)
 
     st = list(repo.status(unknown=True))[:6]
-    ms = merge_.mergestate(repo)
+    ms = mergemod.mergestate(repo)
     st.append([f for f in ms if ms[f] == 'u'])
     labels = [_('%d modified'), _('%d added'), _('%d removed'),
               _('%d deleted'), _('%d unknown'), _('%d ignored'),
@@ -3767,7 +3807,8 @@ table = {
           ('d', 'daemon', None, _('run server in background')),
           ('', 'daemon-pipefds', '', _('used internally by daemon mode')),
           ('E', 'errorlog', '', _('name of error log file to write to')),
-          ('p', 'port', 0, _('port to listen on (default: 8000)')),
+          # use string type, then we can check if something was passed
+          ('p', 'port', '', _('port to listen on (default: 8000')),
           ('a', 'address', '',
            _('address to listen on (default: all interfaces)')),
           ('', 'prefix', '',
