@@ -455,6 +455,14 @@ class localrepository(repo.repository):
             pass
         raise error.RepoLookupError(_("unknown revision '%s'") % key)
 
+    def lookupbranch(self, key, remote=None):
+        repo = remote or self
+        if key in repo.branchmap():
+            return key
+
+        repo = (remote and remote.local()) and remote or self
+        return repo[key].branch()
+
     def local(self):
         return True
 
@@ -790,10 +798,10 @@ class localrepository(repo.repository):
 
         wlock = self.wlock()
         try:
-            p1, p2 = self.dirstate.parents()
             wctx = self[None]
+            merge = len(wctx.parents()) > 1
 
-            if (not force and p2 != nullid and match and
+            if (not force and merge and match and
                 (match.files() or match.anypats())):
                 raise util.Abort(_('cannot partially commit a merge '
                                    '(do not specify files or patterns)'))
@@ -833,9 +841,9 @@ class localrepository(repo.repository):
                     elif f not in self.dirstate:
                         fail(f, _("file not tracked!"))
 
-            if (not force and not extra.get("close") and p2 == nullid
+            if (not force and not extra.get("close") and not merge
                 and not (changes[0] or changes[1] or changes[2])
-                and self[None].branch() == self['.'].branch()):
+                and wctx.branch() == wctx.p1().branch()):
                 return None
 
             ms = mergemod.mergestate(self)
@@ -844,8 +852,7 @@ class localrepository(repo.repository):
                     raise util.Abort(_("unresolved merge conflicts "
                                                     "(see hg resolve)"))
 
-            cctx = context.workingctx(self, (p1, p2), text, user, date,
-                                      extra, changes)
+            cctx = context.workingctx(self, text, user, date, extra, changes)
             if editor:
                 cctx._text = editor(self, cctx, subs)
             edited = (text != cctx._text)
@@ -866,8 +873,9 @@ class localrepository(repo.repository):
             msgfile.write(cctx._text)
             msgfile.close()
 
+            p1, p2 = self.dirstate.parents()
+            hookp1, hookp2 = hex(p1), (p2 != nullid and hex(p2) or '')
             try:
-                hookp1, hookp2 = hex(p1), (p2 != nullid and hex(p2) or '')
                 self.hook("precommit", throw=True, parent1=hookp1, parent2=hookp2)
                 ret = self.commitctx(cctx, True)
             except:
