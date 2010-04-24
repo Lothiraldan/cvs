@@ -129,7 +129,7 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
             if prefix == ".":
                 prefix = ""
         except IOError:
-            raise logerror('Not a CVS sandbox')
+            raise logerror(_('not a CVS sandbox'))
 
         if prefix and not prefix.endswith(os.sep):
             prefix += os.sep
@@ -402,6 +402,8 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
             branchpoints = set()
             for branch, revision in branchmap.iteritems():
                 revparts = tuple([int(i) for i in revision.split('.')])
+                if len(revparts) < 2: # bad tags
+                    continue
                 if revparts[-2] == 0 and revparts[-1] % 2 == 0:
                     # normal branch
                     if revparts[:-2] == e.revision:
@@ -435,8 +437,8 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
             log.sort(key=lambda x: x.date)
 
             if oldlog and oldlog[-1].date >= log[0].date:
-                raise logerror('Log cache overlaps with new log entries,'
-                               ' re-run without cache.')
+                raise logerror(_('log cache overlaps with new log entries,'
+                                 ' re-run without cache.'))
 
             log = oldlog + log
 
