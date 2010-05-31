@@ -8,7 +8,7 @@
 from node import hex, nullid, nullrev, short
 from i18n import _
 import os, sys, errno, re, glob, tempfile
-import mdiff, bdiff, util, templater, patch, error, encoding, templatekw
+import util, templater, patch, error, encoding, templatekw
 import match as _match
 import similar
 
@@ -351,12 +351,13 @@ def copy(ui, repo, pats, opts, rename=False):
 
     def walkpat(pat):
         srcs = []
+        badstates = after and '?' or '?r'
         m = match(repo, [pat], opts, globbed=True)
         for abs in repo.walk(m):
             state = repo.dirstate[abs]
             rel = m.rel(abs)
             exact = m.exact(abs)
-            if state in '?r':
+            if state in badstates:
                 if exact and state == '?':
                     ui.warn(_('%s: not copying - file is not managed\n') % rel)
                 if exact and state == 'r':

@@ -32,6 +32,9 @@ preserving existing git patches upon qrefresh. If set to 'yes' or 'no', mq
 will override the [diff] section and always generate git or regular patches,
 possibly losing data in the second case.
 
+You will by default be managing a patch queue named "patches". You can create
+other, independent patch queues with the "hg qqueue" command.
+
 list of commands:
 
  qapplied     print the patches already applied
@@ -49,6 +52,7 @@ list of commands:
  qpop         pop the current patch off the stack
  qprev        print the name of the previous patch
  qpush        push the next patch onto the stack
+ qqueue       manage multiple patch queues
  qrefresh     update the current patch
  qrename      rename a patch
  qselect      set or print guarded patches to push

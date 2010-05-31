@@ -971,7 +971,8 @@ class localrepository(repo.repository):
                 self.branchtags()
             return n
         finally:
-            del tr
+            if tr:
+                tr.release()
             lock.release()
 
     def destroyed(self):
@@ -1041,7 +1042,9 @@ class localrepository(repo.repository):
             match.bad = bad
 
         if working: # we need to scan the working dir
-            subrepos = ctx1.substate.keys()
+            subrepos = []
+            if '.hgsub' in self.dirstate:
+                subrepos = ctx1.substate.keys()
             s = self.dirstate.status(match, subrepos, listignored,
                                      listclean, listunknown)
             cmp, modified, added, removed, deleted, unknown, ignored, clean = s
@@ -2192,7 +2195,7 @@ class localrepository(repo.repository):
 
             tr.close()
         finally:
-            del tr
+            tr.release()
 
         if changesets > 0:
             # forcefully update the on-disk branch cache
