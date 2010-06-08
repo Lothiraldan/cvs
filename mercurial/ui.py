@@ -154,11 +154,83 @@ class ui(object):
 
     def configlist(self, section, name, default=None, untrusted=False):
         """Return a list of comma/space separated strings"""
+
+        def _parse_plain(parts, s, offset):
+            whitespace = False
+            while offset < len(s) and (s[offset].isspace() or s[offset] == ','):
+                whitespace = True
+                offset += 1
+            if offset >= len(s):
+                return None, parts, offset
+            if whitespace:
+                parts.append('')
+            if s[offset] == '"' and not parts[-1]:
+                return _parse_quote, parts, offset + 1
+            elif s[offset] == '"' and parts[-1][-1] == '\\':
+                parts[-1] = parts[-1][:-1] + s[offset]
+                return _parse_plain, parts, offset + 1
+            parts[-1] += s[offset]
+            return _parse_plain, parts, offset + 1
+
+        def _parse_quote(parts, s, offset):
+            if offset < len(s) and s[offset] == '"': # ""
+                parts.append('')
+                offset += 1
+                while offset < len(s) and (s[offset].isspace() or
+                        s[offset] == ','):
+                    offset += 1
+                return _parse_plain, parts, offset
+
+            while offset < len(s) and s[offset] != '"':
+                if (s[offset] == '\\' and offset + 1 < len(s)
+                        and s[offset + 1] == '"'):
+                    offset += 1
+                    parts[-1] += '"'
+                else:
+                    parts[-1] += s[offset]
+                offset += 1
+
+            if offset >= len(s):
+                real_parts = _configlist(parts[-1])
+                if not real_parts:
+                    parts[-1] = '"'
+                else:
+                    real_parts[0] = '"' + real_parts[0]
+                    parts = parts[:-1]
+                    parts.extend(real_parts)
+                return None, parts, offset
+
+            offset += 1
+            while offset < len(s) and s[offset] in [' ', ',']:
+                offset += 1
+
+            if offset < len(s):
+                if offset + 1 == len(s) and s[offset] == '"':
+                    parts[-1] += '"'
+                    offset += 1
+                else:
+                    parts.append('')
+            else:
+                return None, parts, offset
+
+            return _parse_plain, parts, offset
+
+        def _configlist(s):
+            s = s.rstrip(' ,')
+            if not s:
+                return None
+            parser, parts, offset = _parse_plain, [''], 0
+            while parser:
+                parser, parts, offset = parser(parts, s, offset)
+            return parts
+
         result = self.config(section, name, untrusted=untrusted)
         if result is None:
             result = default or []
         if isinstance(result, basestring):
-            result = result.replace(",", " ").split()
+            result = _configlist(result.lstrip(' ,\n'))
+            if result is None:
+                result = default or []
         return result
 
     def has_section(self, section, untrusted=False):
@@ -194,6 +266,8 @@ class ui(object):
         user = os.environ.get("HGUSER")
         if user is None:
             user = self.config("ui", "username")
+            if user is not None:
+                user = os.path.expandvars(user)
         if user is None:
             user = os.environ.get("EMAIL")
         if user is None and self.configbool("ui", "askusername"):
@@ -239,17 +313,42 @@ class ui(object):
     def pushbuffer(self):
         self._buffers.append([])
 
-    def popbuffer(self):
+    def popbuffer(self, labeled=False):
+        '''pop the last buffer and return the buffered output
+
+        If labeled is True, any labels associated with buffered
+        output will be handled. By default, this has no effect
+        on the output returned, but extensions and GUI tools may
+        handle this argument and returned styled output. If output
+        is being buffered so it can be captured and parsed or
+        processed, labeled should not be set to True.
+        '''
         return "".join(self._buffers.pop())
 
-    def write(self, *args):
+    def write(self, *args, **opts):
+        '''write args to output
+
+        By default, this method simply writes to the buffer or stdout,
+        but extensions or GUI tools may override this method,
+        write_err(), popbuffer(), and label() to style output from
+        various parts of hg.
+
+        An optional keyword argument, "label", can be passed in.
+        This should be a string containing label names separated by
+        space. Label names take the form of "topic.type". For example,
+        ui.debug() issues a label of "ui.debug".
+
+        When labeling output for a specific command, a label of
+        "cmdname.type" is recommended. For example, status issues
+        a label of "status.modified" for modified files.
+        '''
         if self._buffers:
             self._buffers[-1].extend([str(a) for a in args])
         else:
             for a in args:
                 sys.stdout.write(str(a))
 
-    def write_err(self, *args):
+    def write_err(self, *args, **opts):
         try:
             if not getattr(sys.stdout, 'closed', False):
                 sys.stdout.flush()
@@ -335,17 +434,37 @@ class ui(object):
             return getpass.getpass(prompt or _('password: '))
         except EOFError:
             raise util.Abort(_('response expected'))
-    def status(self, *msg):
+    def status(self, *msg, **opts):
+        '''write status message to output (if ui.quiet is False)
+
+        This adds an output label of "ui.status".
+        '''
         if not self.quiet:
-            self.write(*msg)
-    def warn(self, *msg):
-        self.write_err(*msg)
-    def note(self, *msg):
+            opts['label'] = opts.get('label', '') + ' ui.status'
+            self.write(*msg, **opts)
+    def warn(self, *msg, **opts):
+        '''write warning message to output (stderr)
+
+        This adds an output label of "ui.warning".
+        '''
+        opts['label'] = opts.get('label', '') + ' ui.warning'
+        self.write_err(*msg, **opts)
+    def note(self, *msg, **opts):
+        '''write note to output (if ui.verbose is True)
+
+        This adds an output label of "ui.note".
+        '''
         if self.verbose:
-            self.write(*msg)
-    def debug(self, *msg):
+            opts['label'] = opts.get('label', '') + ' ui.note'
+            self.write(*msg, **opts)
+    def debug(self, *msg, **opts):
+        '''write debug message to output (if ui.debugflag is True)
+
+        This adds an output label of "ui.debug".
+        '''
         if self.debugflag:
-            self.write(*msg)
+            opts['label'] = opts.get('label', '') + ' ui.debug'
+            self.write(*msg, **opts)
     def edit(self, text, user):
         (fd, name) = tempfile.mkstemp(prefix="hg-editor-", suffix=".txt",
                                       text=True)
@@ -417,3 +536,15 @@ class ui(object):
                      % (topic, item, pos, total, unit, pct))
         else:
             self.debug('%s:%s %s%s\n' % (topic, item, pos, unit))
+
+    def label(self, msg, label):
+        '''style msg based on supplied label
+
+        Like ui.write(), this just returns msg unchanged, but extensions
+        and GUI tools can override it to allow styling output without
+        writing it.
+
+        ui.write(s, 'label') is equivalent to
+        ui.write(ui.label(s, 'label')).
+        '''
+        return msg

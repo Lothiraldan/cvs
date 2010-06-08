@@ -9,7 +9,7 @@ from i18n import _
 import os, sys, atexit, signal, pdb, socket, errno, shlex, time
 import util, commands, hg, fancyopts, extensions, hook, error
 import cmdutil, encoding
-import ui as _ui
+import ui as uimod
 
 def run():
     "run the command in sys.argv"
@@ -18,14 +18,18 @@ def run():
 def dispatch(args):
     "run the command specified in args"
     try:
-        u = _ui.ui()
+        u = uimod.ui()
         if '--traceback' in args:
             u.setconfig('ui', 'traceback', 'on')
     except util.Abort, inst:
         sys.stderr.write(_("abort: %s\n") % inst)
         return -1
-    except error.ConfigError, inst:
-        sys.stderr.write(_("hg: %s\n") % inst)
+    except error.ParseError, inst:
+        if len(inst.args) > 1:
+            sys.stderr.write(_("hg: parse error at %s: %s\n") %
+                             (inst.args[1], inst.args[0]))
+        else:
+            sys.stderr.write(_("hg: parse error: %s\n") % inst.args[0])
         return -1
     return _runcatch(u, args)
 
@@ -62,8 +66,13 @@ def _runcatch(ui, args):
     except error.AmbiguousCommand, inst:
         ui.warn(_("hg: command '%s' is ambiguous:\n    %s\n") %
                 (inst.args[0], " ".join(inst.args[1])))
-    except error.ConfigError, inst:
-        ui.warn(_("hg: %s\n") % inst.args[0])
+    except error.ParseError, inst:
+        if len(inst.args) > 1:
+            ui.warn(_("hg: parse error at %s: %s\n") %
+                             (inst.args[1], inst.args[0]))
+        else:
+            ui.warn(_("hg: parse error: %s\n") % inst.args[0])
+        return -1
     except error.LockHeld, inst:
         if inst.errno == errno.ETIMEDOUT:
             reason = _('timed out waiting for lock held by %s') % inst.locker
@@ -73,7 +82,7 @@ def _runcatch(ui, args):
     except error.LockUnavailable, inst:
         ui.warn(_("abort: could not lock %s: %s\n") %
                (inst.desc or inst.filename, inst.strerror))
-    except error.ParseError, inst:
+    except error.CommandError, inst:
         if inst.args[0]:
             ui.warn(_("hg %s: %s\n") % (inst.args[0], inst.args[1]))
             commands.help_(ui, inst.args[0])
@@ -258,7 +267,7 @@ def _parse(ui, args):
     try:
         args = fancyopts.fancyopts(args, commands.globalopts, options)
     except fancyopts.getopt.GetoptError, inst:
-        raise error.ParseError(None, inst)
+        raise error.CommandError(None, inst)
 
     if args:
         cmd, args = args[0], args[1:]
@@ -281,7 +290,7 @@ def _parse(ui, args):
     try:
         args = fancyopts.fancyopts(args, c, cmdoptions, True)
     except fancyopts.getopt.GetoptError, inst:
-        raise error.ParseError(cmd, inst)
+        raise error.CommandError(cmd, inst)
 
     # separate global options back out
     for o in commands.globalopts:
@@ -475,7 +484,7 @@ def _runcommand(ui, options, cmd, cmdfunc):
         try:
             return cmdfunc()
         except error.SignatureError:
-            raise error.ParseError(cmd, _("invalid arguments"))
+            raise error.CommandError(cmd, _("invalid arguments"))
 
     if options['profile']:
         format = ui.config('profiling', 'format', default='text')

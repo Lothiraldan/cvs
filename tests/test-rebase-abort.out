@@ -12,12 +12,13 @@ o  0: C1
 
 
 % Conflicting rebase
-merging common
 warning: conflicts during merge.
 merging common failed!
 abort: fix unresolved conflicts with hg resolve then run hg rebase --continue
+merging common
 
 % Abort
+saved backup bundle to 
 rebase aborted
 @  4: L2
 |

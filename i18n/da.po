@@ -17,8 +17,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Mercurial\n"
 "Report-Msgid-Bugs-To: <mercurial-devel@selenic.com>\n"
-"POT-Creation-Date: 2010-05-08 22:29+0200\n"
-"PO-Revision-Date: 2010-05-08 23:40+0200\n"
+"POT-Creation-Date: 2010-04-05 01:22+0200\n"
+"PO-Revision-Date: 2010-04-05 01:37+0200\n"
 "Last-Translator:  <mg@lazybytes.net>\n"
 "Language-Team: Danish\n"
 "MIME-Version: 1.0\n"
@@ -384,7 +384,7 @@ msgstr "python mysql-understøttelse ikke tilgængelig: %s"
 
 #, python-format
 msgid "hook type %s does not pass a changeset id"
-msgstr "hook type %s overfører ikke noget ændrings-ID"
+msgstr ""
 
 #, python-format
 msgid "database error: %s"
@@ -425,9 +425,8 @@ msgstr "kommando til at vise statistikker om depotets historie"
 msgid "Revision %d is a merge, ignoring...\n"
 msgstr "Revision %d er en sammenføjning; ignorerer...\n"
 
-#, python-format
-msgid "generating stats: %d%%"
-msgstr "genererer statistik: %d%%"
+msgid "analyzing"
+msgstr ""
 
 msgid ""
 "histogram of changes to the repository\n"
@@ -524,11 +523,8 @@ msgstr "vil tilføjede/fjernede linier separat"
 msgid "file with email aliases"
 msgstr "fil med email-aliaser"
 
-msgid "show progress"
-msgstr "vis fremskridt"
-
-msgid "hg churn [-d DATE] [-r REV] [--aliases FILE] [--progress] [FILE]"
-msgstr "hg churn [-d DATO] [-r REV] [--aliases FIL] [--progress] [FIL]"
+msgid "hg churn [-d DATE] [-r REV] [--aliases FILE] [FILE]"
+msgstr "hg churn [-d DATO] [-r REV] [--aliases FIL] [FIL]"
 
 msgid ""
 "colorize output from some commands\n"
@@ -940,13 +936,6 @@ msgstr "ignoreret af kompatibilitetsgrunde"
 msgid "hg debugcvsps [OPTION]... [PATH]..."
 msgstr "hg debugcvsps [TILVALG]... [STI]..."
 
-#, python-format
-msgid "%s does not look like a Bazaar repository"
-msgstr "%s ser ikke ud som et Bazaar depot"
-
-msgid "Bazaar modules could not be loaded"
-msgstr "Bazaar-modulerne kunne ikke indlæses"
-
 msgid ""
 "warning: lightweight checkouts may cause conversion failures, try with a "
 "regular branch instead.\n"
@@ -1058,12 +1047,8 @@ msgid "--sourcesort is not supported by this data source"
 msgstr "--sourcesort er ikke supporteret at denne datakilde"
 
 #, python-format
-msgid "%s does not look like a CVS checkout"
-msgstr "%s ser ikke ud som et CVS arbejdskatalog"
-
-#, python-format
 msgid "revision %s is not a patchset number"
-msgstr "revision %s er ikke et patchset-nummer"
+msgstr ""
 
 #, python-format
 msgid "connecting to %s\n"
@@ -1096,9 +1081,6 @@ msgstr "ukendt CVS svar: %s"
 msgid "collecting CVS rlog\n"
 msgstr "samler CVS rlog\n"
 
-msgid "not a CVS sandbox"
-msgstr ""
-
 #, python-format
 msgid "reading cvs log cache %s\n"
 msgstr "læser cvs log-mellemlager %s\n"
@@ -1127,9 +1109,6 @@ msgstr "forventede et revisionsnummer"
 msgid "revision must be followed by date line"
 msgstr "revision skal efterfølges af datolinje"
 
-msgid "log cache overlaps with new log entries, re-run without cache."
-msgstr ""
-
 #, python-format
 msgid "writing cvs log cache %s\n"
 msgstr "skriver cvs log-mellemlager %s\n"
@@ -1157,10 +1136,6 @@ msgid "%d changeset entries\n"
 msgstr "%d ændringer\n"
 
 #, python-format
-msgid "%s does not look like a darcs repository"
-msgstr "%s ser ikke ud som et darcs depot"
-
-#, python-format
 msgid "darcs version 2.1 or newer needed (found %r)"
 msgstr "kræver darcs version 2.1 eller nyere (fandt %r)"
 
@@ -1185,26 +1160,7 @@ msgid "source repository doesn't support --filemap"
 msgstr "kildedepot understøtter ikke --filemap"
 
 #, python-format
-msgid "%s does not look like a Git repository"
-msgstr "%s ser ikke ud som et Git depot"
-
-msgid "cannot retrieve git heads"
-msgstr "kan ikke hente git-hoveder"
-
-#, python-format
-msgid "cannot read %r object at %s"
-msgstr "kan ikke læse %r objekt ved %s"
-
-#, python-format
-msgid "cannot read changes in %s"
-msgstr "kan ikke læse ændringer i %s"
-
-#, python-format
-msgid "cannot read tags from %s"
-msgstr "kan ikke læse mærkater fra %s"
-
-#, python-format
-msgid "%s does not look like a GNU Arch repository"
+msgid "%s does not look like a GNU Arch repo"
 msgstr "%s ser ikke ud som et GNU Arch depot"
 
 msgid "cannot find a GNU Arch tool"
@@ -1224,16 +1180,12 @@ msgid "could not parse cat-log of %s"
 msgstr "kan ikke parse cat-log af %s"
 
 #, python-format
-msgid "%s is not a local Mercurial repository"
+msgid "%s is not a local Mercurial repo"
 msgstr "%s er ikke et lokalt Mercurial depot"
 
 #, python-format
 msgid "initializing destination %s repository\n"
 msgstr "initialiserer mål %s depot\n"
-
-#, python-format
-msgid "could not create hg repository %s as sink"
-msgstr "kunne ikke oprette hg depot %s som mål"
 
 #, python-format
 msgid "pulling from %s into %s\n"
@@ -1254,16 +1206,12 @@ msgid "ignoring: %s\n"
 msgstr "ignorerer: %s\n"
 
 #, python-format
-msgid "%s does not look like a monotone repository"
+msgid "%s does not look like a monotone repo"
 msgstr "%s ser ikke ud som et monotone depot"
 
 #, python-format
 msgid "copying file in renamed directory from '%s' to '%s'"
 msgstr "kopierer fil i omdøbt katalog fra '%s' til '%s'"
-
-#, python-format
-msgid "%s does not look like a P4 repository"
-msgstr "%s ser ikke ud som et P4 depot"
 
 msgid "reading p4 views\n"
 msgstr "læser p4 views\n"
@@ -1278,10 +1226,6 @@ msgid ""
 "svn: cannot probe remote repository, assume it could be a subversion "
 "repository. Use --source-type if you know better.\n"
 msgstr ""
-
-#, python-format
-msgid "%s does not look like a Subversion repository"
-msgstr "%s ser ikke ud som et Subversion depot"
 
 msgid "Subversion python bindings could not be loaded"
 msgstr "Subversion python bindingerne kunne ikke indlæses"
@@ -1349,11 +1293,11 @@ msgid "svn: branch has no revision %s"
 msgstr "svn: gren har ikke nogen revision %s"
 
 #, python-format
-msgid "initializing svn repository %r\n"
+msgid "initializing svn repo %r\n"
 msgstr "initialiserer svn depot %r\n"
 
 #, python-format
-msgid "initializing svn working copy %r\n"
+msgid "initializing svn wc %r\n"
 msgstr "initialiserer svn arbejdskatalog %r\n"
 
 msgid "unexpected svn output:\n"
@@ -2040,7 +1984,7 @@ msgid "rescanning due to .hgignore change\n"
 msgstr "genskanner på grund af ændring af .hgignore\n"
 
 msgid "cannot start: socket is already bound"
-msgstr "kan ikke starte: soklen er allede bundet"
+msgstr ""
 
 msgid ""
 "cannot start: tried linking .hg/inotify.sock to a temporary socket but .hg/"
@@ -2220,9 +2164,6 @@ msgstr ""
 "\n"
 "nøgleord skrevet til %s:\n"
 
-msgid "unhooked all commit hooks\n"
-msgstr ""
-
 msgid "hg keyword configuration and expansion example"
 msgstr "eksempel på konfiguration og ekspansion af nøgleord"
 
@@ -2310,12 +2251,6 @@ msgstr "vis filer ekskluderet fra ekspansion"
 
 msgid "only show unknown (not tracked) files"
 msgstr "vis kun ukendte (ikke-fulgte) filer"
-
-msgid "show keyword status flags of all files (DEPRECATED)"
-msgstr "vis keyword status for alle filer (FORÆLDET)"
-
-msgid "only show untracked files (DEPRECATED)"
-msgstr "vis kun ikke-fulgte filer (FORÆLDET)"
 
 msgid "hg kwfiles [OPTION]... [FILE]..."
 msgstr "hg kwfiles [TILVALG]... [FIL]..."
@@ -2491,7 +2426,7 @@ msgid "patch failed, rejects left in working dir\n"
 msgstr "rettelse fejlede, afvisninger er efterladt i arbejdskataloget\n"
 
 msgid "fuzz found when applying patch, stopping\n"
-msgstr "fandt fnidder ved anvendelsen af rettelsen, stopper\n"
+msgstr ""
 
 #, python-format
 msgid "revision %d is not managed"
@@ -2640,7 +2575,7 @@ msgid "patch %s is not in series file"
 msgstr "rettelsen %s er ikke i series filen"
 
 msgid "No saved patch data found\n"
-msgstr "Fandt ingen gemt rettelsesdata\n"
+msgstr ""
 
 #, python-format
 msgid "restoring status: %s\n"
@@ -3133,30 +3068,19 @@ msgid "copy %s to %s\n"
 msgstr "kopier %s til %s\n"
 
 msgid ""
-"strip a changeset and all its descendants from the repository\n"
+"strip a revision and all its descendants from the repository\n"
 "\n"
-"    The strip command removes all changesets whose local revision\n"
-"    number is greater than or equal to REV, and then restores any\n"
-"    changesets that are not descendants of REV. If the working\n"
-"    directory has uncommitted changes, the operation is aborted unless\n"
-"    the --force flag is supplied.\n"
-"\n"
-"    If a parent of the working directory is stripped, then the working\n"
-"    directory will automatically be updated to the most recent\n"
-"    available ancestor of the stripped parent after the operation\n"
-"    completes.\n"
-"\n"
-"    Any stripped changesets are stored in ``.hg/strip-backup`` as a\n"
-"    bundle (see ``hg help bundle`` and ``hg help unbundle``). They can\n"
-"    be restored by running ``hg unbundle .hg/strip-backup/BUNDLE``,\n"
-"    where BUNDLE is the bundle file created by the strip. Note that\n"
-"    the local revision numbers will in general be different after the\n"
-"    restore.\n"
-"\n"
-"    Use the --nobackup option to discard the backup bundle once the\n"
-"    operation completes.\n"
+"    If one of the working directory's parent revisions is stripped, the\n"
+"    working directory will be updated to the parent of the stripped\n"
+"    revision.\n"
 "    "
 msgstr ""
+"strip en revision og alle dens efterkommere fra depotet\n"
+"\n"
+"    Hvis en af arbejdskatalogets forælder-revisioner bliver strippet,\n"
+"    så vil arbejdskataloget blive opdateret til forældren af den\n"
+"    strippede revision.\n"
+"    "
 
 msgid ""
 "set or print guarded patches to push\n"
@@ -3415,8 +3339,8 @@ msgstr "tilføj \"Date: <aktuel dato>\" til rettelsen"
 msgid "add \"Date: <given date>\" to patch"
 msgstr "tilføj \"Date: <given dato>\" til rettelsen"
 
-msgid "hg qnew [-e] [-m TEXT] [-l FILE] PATCH [FILE]..."
-msgstr "hg qnew [-e] [-m TEKST] [-l FIL] RETTELSE [FIL]..."
+msgid "hg qnew [-e] [-m TEXT] [-l FILE] [-f] PATCH [FILE]..."
+msgstr "hg qnew [-e] [-m TEKST] [-l FIL] [-f] RETTELSE [FIL]..."
 
 msgid "hg qnext [-s]"
 msgstr "hg qnext [-s]"
@@ -3440,7 +3364,7 @@ msgid "apply if the patch has rejects"
 msgstr ""
 
 msgid "list patch name in commit text"
-msgstr "put rettelsens navn ind i deponeringsbeskeden"
+msgstr ""
 
 msgid "apply all patches"
 msgstr "anvend alle rettelser"
@@ -3479,7 +3403,7 @@ msgid "delete save entry"
 msgstr ""
 
 msgid "update queue working directory"
-msgstr "opdater arbejdskataloget for kø-depotet"
+msgstr ""
 
 msgid "hg qrestore [-d] [-u] REV"
 msgstr "hg qrestore [-d] [-u] REV"
@@ -3520,14 +3444,10 @@ msgstr "udskriv rettelser som ikke er i serien"
 msgid "hg qseries [-ms]"
 msgstr "hg qseries [-ms]"
 
-msgid ""
-"force removal of changesets even if the working directory has uncommitted "
-"changes"
-msgstr ""
+msgid "force removal with local changes"
+msgstr "gennemtving fjernelse af rettelse med lokale ændringer"
 
-msgid ""
-"bundle only changesets with local revision number greater than REV which are "
-"not descendants of REV (DEPRECATED)"
+msgid "bundle unrelated changesets"
 msgstr ""
 
 msgid "no backups"
@@ -4357,7 +4277,7 @@ msgid "hg qrecord [OPTION]... PATCH [FILE]..."
 msgstr "hg qrecord [TILVALG]... RETTELSE [FIL]..."
 
 msgid "recreates hardlinks between repository clones"
-msgstr "genopret hårde lænker mellem depot-kloner"
+msgstr ""
 
 msgid ""
 "recreate hardlinks between two repositories\n"
@@ -4416,7 +4336,7 @@ msgstr "sammenkæder"
 
 #, python-format
 msgid "relinked %d files (%d bytes reclaimed)\n"
-msgstr "genlænkede %d filer (%d byte indvundet)\n"
+msgstr ""
 
 msgid "[ORIGIN]"
 msgstr "[KILDE]"
@@ -4843,6 +4763,9 @@ msgstr "der er specificeret for mange revisioner"
 msgid "invalid format spec '%%%s' in output filename"
 msgstr "ugyldig formatspecifikation '%%%s' i output filnavn"
 
+msgid "searching"
+msgstr "søger"
+
 #, python-format
 msgid "adding %s\n"
 msgstr "tilføjer %s\n"
@@ -4974,7 +4897,7 @@ msgstr "uddrag:      %s\n"
 
 #, python-format
 msgid "%s: no key named '%s'"
-msgstr "%s: ingen nøgle ved navn '%s'"
+msgstr ""
 
 #, python-format
 msgid "%s: %s"
@@ -5170,8 +5093,10 @@ msgid ""
 "    By default, the revision used is the parent of the working\n"
 "    directory; use -r/--rev to specify a different revision.\n"
 "\n"
-"    To specify the type of archive to create, use -t/--type. Valid\n"
-"    types are:\n"
+"    The archive type is automatically detected based on file\n"
+"    extension (or override using -t/--type).\n"
+"\n"
+"    Valid types are:\n"
 "\n"
 "    :``files``: a directory full of files (default)\n"
 "    :``tar``:   tar archive, uncompressed\n"
@@ -5781,10 +5706,10 @@ msgid "Checking extensions...\n"
 msgstr "Kontrollerer udvidelser...\n"
 
 msgid " One or more extensions could not be found"
-msgstr " En eller flere udvidelser blev ikke fundet"
+msgstr ""
 
 msgid " (check that you compiled the extensions)\n"
-msgstr " (kontroller at du har kompileret udvidelserne)\n"
+msgstr ""
 
 msgid "Checking templates...\n"
 msgstr ""
@@ -5793,21 +5718,21 @@ msgid " (templates seem to have been installed incorrectly)\n"
 msgstr ""
 
 msgid "Checking patch...\n"
-msgstr "Kontrollerer patch...\n"
+msgstr ""
 
 msgid " patch call failed:\n"
-msgstr " kaldet til patch fejlede:\n"
+msgstr ""
 
 msgid " unexpected patch output!\n"
-msgstr " uventet output fra patch!\n"
+msgstr ""
 
 msgid " patch test failed!\n"
-msgstr " patch testen fejlede!\n"
+msgstr ""
 
 msgid ""
 " (Current patch tool may be incompatible with patch, or misconfigured. "
 "Please check your .hgrc file)\n"
-msgstr " (Det nuværende patch-værktøj er måske inkompatibelt med patch eller konfigureret forkert. Undersøg venligst din .hgrc-fil)\n"
+msgstr ""
 
 msgid ""
 " Internal patcher failure, please report this error to http://mercurial."
@@ -5828,20 +5753,20 @@ msgid " Can't find editor '%s' in PATH\n"
 msgstr ""
 
 msgid "Checking username...\n"
-msgstr "Kontrollerer brugernavn...\n"
+msgstr ""
 
 msgid " (specify a username in your .hgrc file)\n"
-msgstr " (angiv et brugernavn i din .hgrc-fil)\n"
+msgstr ""
 
 msgid "No problems detected\n"
 msgstr "Fandt ingen problemer\n"
 
 #, python-format
 msgid "%s problems detected, please check your install!\n"
-msgstr "fandt %s problemer, kontroller venligst din installation!\n"
+msgstr ""
 
 msgid "dump rename information"
-msgstr "dump information om omdøbninger"
+msgstr ""
 
 #, python-format
 msgid "%s renamed from %s:%s\n"
@@ -5986,10 +5911,10 @@ msgid "export requires at least one changeset"
 msgstr ""
 
 msgid "exporting patches:\n"
-msgstr "eksporterer rettelser:\n"
+msgstr ""
 
 msgid "exporting patch:\n"
-msgstr "eksporterer rettelse:\n"
+msgstr ""
 
 msgid ""
 "forget the specified files on the next commit\n"
@@ -6160,11 +6085,11 @@ msgstr ""
 "\n"
 
 msgid "use \"hg help extensions\" for information on enabling extensions\n"
-msgstr "brug \"hg help extensions\" for at få mere information om hvordan man slår udvidelser til\n"
+msgstr ""
 
 #, python-format
 msgid "'%s' is provided by the following extension:"
-msgstr "'%s' er i denne udvidelse:"
+msgstr ""
 
 msgid "Mercurial Distributed SCM\n"
 msgstr "Mercurial Distribueret SCM\n"
@@ -6180,7 +6105,7 @@ msgid "enabled extensions:"
 msgstr "aktiverede udvidelser:"
 
 msgid "DEPRECATED"
-msgstr "FORÆLDET"
+msgstr ""
 
 msgid ""
 "\n"
@@ -6485,7 +6410,7 @@ msgstr ""
 "    "
 
 msgid "can only specify an explicit filename"
-msgstr "kan kun angive et eksplicit filnavn"
+msgstr ""
 
 #, python-format
 msgid "'%s' not found in manifest!"
@@ -6499,17 +6424,6 @@ msgid ""
 "\n"
 "    Path names are defined in the [paths] section of /etc/mercurial/hgrc\n"
 "    and $HOME/.hgrc. If run inside a repository, .hg/hgrc is used, too.\n"
-"\n"
-"    The path names ``default`` and ``default-push`` have a special\n"
-"    meaning.  When performing a push or pull operation, they are used\n"
-"    as fallbacks if no location is specified on the command-line.\n"
-"    When ``default-push`` is set, it will be used for push and\n"
-"    ``default`` will be used for pull; otherwise ``default`` is used\n"
-"    as the fallback for both.  When cloning a repository, the clone\n"
-"    source is written as ``default`` in ``.hg/hgrc``.  Note that\n"
-"    ``default`` and ``default-push`` apply to all inbound (e.g. ``hg\n"
-"    incoming``) and outbound (e.g. ``hg outgoing``, ``hg email`` and\n"
-"    ``hg bundle``) operations.\n"
 "\n"
 "    See 'hg help urls' for more information.\n"
 "    "
@@ -6850,46 +6764,33 @@ msgid ""
 "    Print the root directory of the current repository.\n"
 "    "
 msgstr ""
-"print roden (toppen) af det nuværende arbejdskatalog\n"
-"\n"
-"    Print rod-kataloget for det nuværende depot.\n"
-"    "
 
 msgid ""
 "export the repository via HTTP\n"
 "\n"
-"    Start a local HTTP repository browser and pull server. You can use\n"
-"    this for ad-hoc sharing and browing of repositories. It is\n"
-"    recommended to use a real web server to serve a repository for\n"
-"    longer periods of time.\n"
-"\n"
-"    Please note that the server does not implement access control.\n"
-"    This means that, by default, anybody can read from the server and\n"
-"    nobody can write to it by default. Set the ``web.allow_push``\n"
-"    option to ``*`` to allow everybody to push to the server. You\n"
-"    should use a real web server if you need to authenticate users.\n"
+"    Start a local HTTP repository browser and pull server.\n"
 "\n"
 "    By default, the server logs accesses to stdout and errors to\n"
 "    stderr. Use the -A/--accesslog and -E/--errorlog options to log to\n"
 "    files.\n"
+"\n"
+"    To have the server choose a free port number to listen on, specify\n"
+"    a port number of 0; in this case, the server will print the port\n"
+"    number it uses.\n"
 "    "
 msgstr ""
 "eksporter depotet via HTTP\n"
 "\n"
-"    Start en lokal HTTP depotbrowser og pull-server. Du kan bruge\n"
-"    denne til ad-hoc deling og browsning af depoter. Det anbefales at\n"
-"    man bruger en rigtig web-server for at serve et depot for længere\n"
-"    tidsrum.\n"
-"\n"
-"    Bemærk venligst at serveren ikke implementerer adgangskontrol.\n"
-"    Dette betyder at alle som udgangspunkt kan læse fra serveren og at\n"
-"    ingen kan skrive til den. Sæt ``web.allow_push`` til ``*`` for at\n"
-"    tillade at enhver skubber ændringer til serveren. Du skal bruge en\n"
-"    rigtig web-server hvis du har behov for at autentificere brugere.\n"
+"    Start en lokal HTTP depotbrowser og pull-server.\n"
 "\n"
 "    Som standard logger serveren forespørgsler til stdout og fejl til\n"
 "    stderr. Brug -A/--accesslog og -E/--errorlog tilvalgene for at\n"
-"    logge til filer."
+"    logge til filer.\n"
+"\n"
+"    For at få serveren til at vælge et frit portnummer at lytte til,\n"
+"    angiv da portnummer 0; så vil serveren skrive det portnummer den\n"
+"    bruger.\n"
+"    "
 
 #, python-format
 msgid "listening at http://%s%s/%s (bound to %s:%d)\n"
@@ -7363,7 +7264,7 @@ msgid "number of lines of context to show"
 msgstr "antal linier kontekst der skal vises"
 
 msgid "output diffstat-style summary of changes"
-msgstr "vis en opsummering af ændringerne i stil med diffstat"
+msgstr ""
 
 msgid "guess renamed files by similarity (0<=s<=100)"
 msgstr "gæt omdøbte filer ud fra enshed (0<=s<=100)"
@@ -7611,8 +7512,8 @@ msgstr "udskriv kun filnavne og revisioner som matcher"
 msgid "print matching line numbers"
 msgstr "udskriv matchende linienumre"
 
-msgid "only search files changed within revision range"
-msgstr "søg kun i filer som er ændret i det angivne interval"
+msgid "search in given revision range"
+msgstr "søg i det angivne interval"
 
 msgid "[OPTION]... PATTERN [FILE]..."
 msgstr "[TILVALG]... MØNSTER [FIL]..."
@@ -7838,7 +7739,7 @@ msgstr "navn på adgangslogfilen der skrives til"
 msgid "name of error log file to write to"
 msgstr "navn på fejlllog fil der skrives til"
 
-msgid "port to listen on (default: 8000)"
+msgid "port to listen on (default: 8000"
 msgstr "port der skal lyttes på (standard: 8000)"
 
 msgid "address to listen on (default: all interfaces)"
@@ -8051,6 +7952,10 @@ msgstr "dræbt!\n"
 #, python-format
 msgid "hg: unknown command '%s'\n"
 msgstr "hg: ukendt kommando '%s'\n"
+
+#, python-format
+msgid "abort: could not import module %s!\n"
+msgstr "afbrudt: kunne ikke importere modul %s!\n"
 
 msgid "(did you forget to compile extensions?)\n"
 msgstr "(glemte du at kompilere udvidelserne?)\n"
@@ -8709,9 +8614,8 @@ msgid ""
 "You can customize output for any \"log-like\" command: log,\n"
 "outgoing, incoming, tip, parents, heads and glog.\n"
 "\n"
-"Four styles are packaged with Mercurial: default (the style used\n"
-"when no explicit preference is passed), compact, changelog,\n"
-"and xml.\n"
+"Three styles are packaged with Mercurial: default (the style used\n"
+"when no explicit preference is passed), compact and changelog.\n"
 "Usage::\n"
 "\n"
 "    $ hg log -r1 --style changelog\n"
@@ -9252,9 +9156,6 @@ msgstr "leder efter ændringer\n"
 msgid "queries"
 msgstr ""
 
-msgid "searching"
-msgstr "søger"
-
 msgid "already have changeset "
 msgstr "har allerede ændringen "
 
@@ -9279,11 +9180,11 @@ msgstr "afbrudt: skub laver nye hoveder på grenen '%s'!\n"
 msgid "abort: push creates new remote heads!\n"
 msgstr "afbrudt: skub laver nye fjern-hoveder!\n"
 
-msgid "(you should pull and merge or use push -f to force)\n"
-msgstr "(du skal hive og sammenføje eller bruge -f for at gennemtvinge)\n"
-
 msgid "(did you forget to merge? use push -f to force)\n"
 msgstr "(glemte du at sammenføje? brug push -f for at gennemtvinge)\n"
+
+msgid "(you should pull and merge or use push -f to force)\n"
+msgstr "(du skal hive og sammenføje eller bruge -f for at gennemtvinge)\n"
 
 #, python-format
 msgid "abort: push creates new remote branches: %s!\n"
@@ -9589,6 +9490,15 @@ msgstr "patch kommando fejlede: %s"
 msgid "Unsupported line endings type: %s"
 msgstr "Linieendelse %s understøttes ikke"
 
+msgid ""
+"internal patcher failed\n"
+"please report details to http://mercurial.selenic.com/bts/\n"
+"or mercurial@selenic.com\n"
+msgstr ""
+"intern lappe-funktionalitet fejlede\n"
+"angiv venligst fejldetaljer på http://mercurial.selenic.com/bts/\n"
+"eller mercurial@selenic.com\n"
+
 #, python-format
 msgid " %d files changed, %d insertions(+), %d deletions(-)\n"
 msgstr "%d filer ændret, %d indsættelser(+), %d sletninger(-)\n"
@@ -9736,8 +9646,8 @@ msgid "removing subrepo %s\n"
 msgstr "fjerner underdepot %s\n"
 
 #, python-format
-msgid "pulling subrepo %s\n"
-msgstr "hiver fra underdepot %s\n"
+msgid "pulling subrepo %s from %s\n"
+msgstr "hiver underdepot %s fra %s\n"
 
 #, python-format
 msgid "pushing subrepo %s\n"

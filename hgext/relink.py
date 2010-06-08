@@ -39,7 +39,7 @@ def relink(ui, repo, origin=None, **opts):
     if not hasattr(util, 'samefile') or not hasattr(util, 'samedevice'):
         raise util.Abort(_('hardlinks are not supported on this system'))
     src = hg.repository(
-        cmdutil.remoteui(repo, opts),
+        hg.remoteui(repo, opts),
         ui.expandpath(origin or 'default-relink', origin or 'default'))
     if not src.local():
         raise util.Abort('must specify local origin repository')
@@ -145,7 +145,7 @@ def do_relink(src, dst, files, ui):
         except OSError, inst:
             ui.warn('%s: %s\n' % (tgt, str(inst)))
 
-    ui.progress(_('relinking'), None, unit=_(' files'), total=total)
+    ui.progress(_('relinking'), None)
 
     ui.status(_('relinked %d files (%d bytes reclaimed)\n') %
               (relinked, savedbytes))

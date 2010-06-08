@@ -12,8 +12,8 @@ points to a changeset identified by its hash. If you commit a
 changeset that is based on a changeset that has a bookmark on it, the
 bookmark shifts to the new changeset.
 
-It is possible to use bookmark names in every revision lookup (e.g. hg
-merge, hg update).
+It is possible to use bookmark names in every revision lookup (e.g.
+:hg:`merge`, :hg:`update`).
 
 By default, when several bookmarks point to the same changeset, they
 will all move forward together. It is possible to obtain a more
@@ -88,10 +88,10 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False, rename=No
 
     Bookmarks are pointers to certain commits that move when
     committing. Bookmarks are local. They can be renamed, copied and
-    deleted. It is possible to use bookmark names in 'hg merge' and
-    'hg update' to merge and update respectively to a given bookmark.
+    deleted. It is possible to use bookmark names in :hg:`merge` and
+    :hg:`update` to merge and update respectively to a given bookmark.
 
-    You can use 'hg bookmark NAME' to set a bookmark on the working
+    You can use :hg:`bookmark NAME` to set a bookmark on the working
     directory's parent revision with the given name. If you specify
     a revision using -r REV (where REV may be an existing bookmark),
     the bookmark is assigned to that revision.
@@ -152,15 +152,22 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False, rename=No
             for bmark, n in marks.iteritems():
                 if ui.configbool('bookmarks', 'track.current'):
                     current = repo._bookmarkcurrent
-                    prefix = (bmark == current and n == cur) and '*' or ' '
+                    if bmark == current and n == cur:
+                        prefix, label = '*', 'bookmarks.current'
+                    else:
+                        prefix, label = ' ', ''
                 else:
-                    prefix = (n == cur) and '*' or ' '
+                    if n == cur:
+                        prefix, label = '*', 'bookmarks.current'
+                    else:
+                        prefix, label = ' ', ''
 
                 if ui.quiet:
-                    ui.write("%s\n" % bmark)
+                    ui.write("%s\n" % bmark, label=label)
                 else:
                     ui.write(" %s %-25s %d:%s\n" % (
-                        prefix, bmark, repo.changelog.rev(n), hexfn(n)))
+                        prefix, bmark, repo.changelog.rev(n), hexfn(n)),
+                        label=label)
         return
 
 def _revstostrip(changelog, node):
@@ -234,10 +241,10 @@ def reposetup(ui, repo):
                 file.close()
             return mark
 
-        def rollback(self):
+        def rollback(self, *args):
             if os.path.exists(self.join('undo.bookmarks')):
                 util.rename(self.join('undo.bookmarks'), self.join('bookmarks'))
-            return super(bookmark_repo, self).rollback()
+            return super(bookmark_repo, self).rollback(*args)
 
         def lookup(self, key):
             if key in self._bookmarks:
@@ -301,7 +308,7 @@ def reposetup(ui, repo):
                 super(bookmark_repo, self).invalidate()
                 for attr in ('_bookmarks', '_bookmarkcurrent'):
                     if attr in self.__dict__:
-                        delattr(repo, attr)
+                        delattr(self, attr)
 
     repo.__class__ = bookmark_repo
 
@@ -332,3 +339,5 @@ cmdtable = {
           ('m', 'rename', '', _('rename a given bookmark'))],
          _('hg bookmarks [-f] [-d] [-m NAME] [-r REV] [NAME]')),
 }
+
+colortable = {'bookmarks.current': 'green'}
