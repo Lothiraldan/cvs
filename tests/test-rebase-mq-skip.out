@@ -1,0 +1,17 @@
+0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+
+% "Mainstream" import p1.patch
+1 files updated, 0 files merged, 2 files removed, 0 files unresolved
+applying p1.patch
+
+% Rebase
+1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+saved backup bundle to 
+@  3 P0 tags: p0.patch qbase qtip tip
+|
+o  2 P1 tags: qparent
+|
+o  1 R1 tags:
+|
+o  0 C1 tags:
+
