@@ -23,6 +23,8 @@ _compress = zlib.compress
 _decompress = zlib.decompress
 _sha = util.sha1
 
+_cached, _uncached = 0, 0
+
 # revlog header flags
 REVLOGV0 = 0
 REVLOGNG = 1
@@ -34,8 +36,9 @@ REVLOG_DEFAULT_VERSION = REVLOG_DEFAULT_FORMAT | REVLOG_DEFAULT_FLAGS
 REVLOGNG_FLAGS = REVLOGNGINLINEDATA | REVLOGSHALLOW
 
 # revlog index flags
+REVIDX_PARENTDELTA  = 1
 REVIDX_PUNCHED_FLAG = 2
-REVIDX_KNOWN_FLAGS = REVIDX_PUNCHED_FLAG
+REVIDX_KNOWN_FLAGS = REVIDX_PUNCHED_FLAG | REVIDX_PARENTDELTA
 
 # amount of data read unconditionally, should be >= 4
 # when not inline: threshold for using lazy index
@@ -441,12 +444,16 @@ class revlog(object):
         self.nodemap = {nullid: nullrev}
         self.index = []
         self._shallowroot = shallowroot
+        self._parentdelta = 0
 
         v = REVLOG_DEFAULT_VERSION
         if hasattr(opener, 'options') and 'defversion' in opener.options:
             v = opener.options['defversion']
             if v & REVLOGNG:
                 v |= REVLOGNGINLINEDATA
+            if v & REVLOGNG and 'parentdelta' in opener.options:
+                self._parentdelta = 1
+
         if shallowroot:
             v |= REVLOGSHALLOW
 
@@ -1011,9 +1018,37 @@ class revlog(object):
     def _chunkclear(self):
         self._chunkcache = (0, '')
 
+    def deltaparent(self, rev):
+        """return previous revision or parentrev according to flags"""
+        if self.base(rev) == rev:
+            return nullrev
+        elif self.flags(rev) & REVIDX_PARENTDELTA:
+            return self.parentrevs(rev)[0]
+        else:
+            return rev - 1
+
+
+    def deltachain(self, rev, cache):
+        """return chain of revisions to construct a given revision"""
+        chain = []
+        check = False
+        index = self.index
+        e = index[rev]
+        while rev != e[3] and rev != cache:
+            chain.append(rev)
+            if e[0] & REVIDX_PARENTDELTA:
+                rev = e[5]
+            else:
+                rev -= 1
+            e = index[rev]
+        chain.reverse()
+        if rev == cache:
+            check = True
+        return check, rev, chain
+
     def revdiff(self, rev1, rev2):
         """return or calculate a delta between two revisions"""
-        if rev1 + 1 == rev2 and self.base(rev1) == self.base(rev2):
+        if rev1 != nullrev and self.deltaparent(rev2) == rev1:
             return self._chunk(rev2)
 
         return mdiff.textdiff(self.revision(self.node(rev1)),
@@ -1021,15 +1056,18 @@ class revlog(object):
 
     def revision(self, node):
         """return an uncompressed revision of a given node"""
+        cache = nullrev
         if node == nullid:
             return ""
-        if self._cache and self._cache[0] == node:
-            return self._cache[2]
+        if self._cache:
+            cache = self._cache[1]
+            if self._cache[0] == node:
+                return self._cache[2]
 
         # look up what we need to read
         text = None
         rev = self.rev(node)
-        base = self.base(rev)
+        cache, base, chain = self.deltachain(rev, cache)
 
         # check rev flags
         if self.flags(rev) & ~REVIDX_KNOWN_FLAGS:
@@ -1037,9 +1075,14 @@ class revlog(object):
                               (self.flags(rev) & ~REVIDX_KNOWN_FLAGS))
 
         # do we have useful data cached?
-        if self._cache and self._cache[1] >= base and self._cache[1] < rev:
-            base = self._cache[1]
+        if cache and self._cache:
+            global _cached
+            _cached += 1
             text = self._cache[2]
+        else:
+            global _uncached
+            _uncached += 1
+
 
         # drop cache to save memory
         self._cache = None
@@ -1049,7 +1092,7 @@ class revlog(object):
         if text is None:
             text = self._chunk(base)
 
-        bins = [self._chunk(r) for r in xrange(base + 1, rev + 1)]
+        bins = [self._chunk(r) for r in chain]
         text = mdiff.patches(text, bins)
         p1, p2 = self.parents(node)
         if (node != hash(text, p1, p2) and
@@ -1128,10 +1171,15 @@ class revlog(object):
         prev = curr - 1
         base = self.base(prev)
         offset = self.end(prev)
+        flags = 0
 
         if curr:
             if not d:
-                ptext = self.revision(self.node(prev))
+                if self._parentdelta:
+                    ptext = self.revision(p1)
+                    flags = REVIDX_PARENTDELTA
+                else:
+                    ptext = self.revision(self.node(prev))
                 d = mdiff.textdiff(ptext, text)
             data = compress(d)
             l = len(data[1]) + len(data[0])
@@ -1146,7 +1194,7 @@ class revlog(object):
             l = len(data[1]) + len(data[0])
             base = curr
 
-        e = (offset_type(offset, 0), l, len(text),
+        e = (offset_type(offset, flags), l, len(text),
              base, link, self.rev(p1), self.rev(p2), node)
         self.index.insert(-1, e)
         self.nodemap[node] = curr

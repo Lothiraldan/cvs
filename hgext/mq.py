@@ -2041,6 +2041,10 @@ def refresh(ui, repo, *pats, **opts):
     If -s/--short is specified, files currently included in the patch
     will be refreshed just like matched files and remain in the patch.
 
+    If -e/--edit is specified, Mercurial will start your configured editor for
+    you to enter a message. In case qrefresh fails, you will find a backup of
+    your message in ``.hg/last-message.txt``.
+
     hg add/remove/copy/rename work as usual, though you might want to
     use git-style patches (-g/--git or [diff] git=1) to track copies
     and renames. See the diffs help topic for more information on the
@@ -2057,6 +2061,10 @@ def refresh(ui, repo, *pats, **opts):
         patch = q.applied[-1].name
         ph = patchheader(q.join(patch), q.plainmode)
         message = ui.edit('\n'.join(ph.message), ph.user or ui.username())
+        # We don't want to lose the patch message if qrefresh fails (issue2062)
+        msgfile = repo.opener('last-message.txt', 'wb')
+        msgfile.write(message)
+        msgfile.close()
     setupheaderopts(ui, opts)
     ret = q.refresh(repo, pats, msg=message, **opts)
     q.save_dirty()
@@ -2662,7 +2670,9 @@ def qqueue(ui, repo, name=None, **opts):
     def _setactive(name):
         if q.applied:
             raise util.Abort(_('patches applied - cannot set new queue active'))
+        _setactivenocheck(name)
 
+    def _setactivenocheck(name):
         fh = repo.opener(_activequeue, 'w')
         if name != 'patches':
             fh.write(name)
@@ -2672,6 +2682,12 @@ def qqueue(ui, repo, name=None, **opts):
         fh = repo.opener(_allqueues, 'a')
         fh.write('%s\n' % (name,))
         fh.close()
+
+    def _queuedir(name):
+        if name == 'patches':
+            return repo.join('patches')
+        else:
+            return repo.join('patches-' + name)
 
     def _validname(name):
         for n in name:
@@ -2702,6 +2718,31 @@ def qqueue(ui, repo, name=None, **opts):
             _addqueue(_defaultqueue)
         _addqueue(name)
         _setactive(name)
+    elif opts.get('rename'):
+        current = _getcurrent()
+        if name == current:
+            raise util.Abort(_('can\'t rename "%s" to its current name') % name)
+        if name in existing:
+            raise util.Abort(_('queue "%s" already exists') % name)
+
+        olddir = _queuedir(current)
+        newdir = _queuedir(name)
+
+        if os.path.exists(newdir):
+            raise util.Abort(_('non-queue directory "%s" already exists') %
+                    newdir)
+
+        fh = repo.opener('patches.queues.new', 'w')
+        for queue in existing:
+            if queue == current:
+                fh.write('%s\n' % (name,))
+                if os.path.exists(olddir):
+                    util.rename(olddir, newdir)
+            else:
+                fh.write('%s\n' % (queue,))
+        fh.close()
+        util.rename(repo.join('patches.queues.new'), repo.join(_allqueues))
+        _setactivenocheck(name)
     elif opts.get('delete'):
         if name not in existing:
             raise util.Abort(_('cannot delete queue that does not exist'))
@@ -3043,6 +3084,7 @@ cmdtable = {
          [
              ('l', 'list', False, _('list all available queues')),
              ('c', 'create', False, _('create new queue')),
+             ('', 'rename', False, _('rename active queue')),
              ('', 'delete', False, _('delete reference to queue')),
          ],
          _('[OPTION] [QUEUE]')),
