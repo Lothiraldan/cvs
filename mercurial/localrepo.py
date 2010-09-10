@@ -28,6 +28,7 @@ class localrepository(repo.repository):
         self.root = os.path.realpath(util.expandpath(path))
         self.path = os.path.join(self.root, ".hg")
         self.origroot = path
+        self.auditor = util.path_auditor(self.root, self._checknested)
         self.opener = util.opener(self.path)
         self.wopener = util.opener(self.root)
         self.baseui = baseui
@@ -110,6 +111,44 @@ class localrepository(repo.repository):
         self.filterpats = {}
         self._datafilters = {}
         self._transref = self._lockref = self._wlockref = None
+
+    def _checknested(self, path):
+        """Determine if path is a legal nested repository."""
+        if not path.startswith(self.root):
+            return False
+        subpath = path[len(self.root) + 1:]
+
+        # XXX: Checking against the current working copy is wrong in
+        # the sense that it can reject things like
+        #
+        #   $ hg cat -r 10 sub/x.txt
+        #
+        # if sub/ is no longer a subrepository in the working copy
+        # parent revision.
+        #
+        # However, it can of course also allow things that would have
+        # been rejected before, such as the above cat command if sub/
+        # is a subrepository now, but was a normal directory before.
+        # The old path auditor would have rejected by mistake since it
+        # panics when it sees sub/.hg/.
+        #
+        # All in all, checking against the working copy seems sensible
+        # since we want to prevent access to nested repositories on
+        # the filesystem *now*.
+        ctx = self[None]
+        parts = util.splitpath(subpath)
+        while parts:
+            prefix = os.sep.join(parts)
+            if prefix in ctx.substate:
+                if prefix == subpath:
+                    return True
+                else:
+                    sub = ctx.sub(prefix)
+                    return sub.checknested(subpath[len(prefix) + 1:])
+            else:
+                parts.pop()
+        return False
+
 
     @propertycache
     def changelog(self):
@@ -337,8 +376,7 @@ class localrepository(repo.repository):
 
         return partial
 
-    def branchmap(self):
-        '''returns a dictionary {branch: [branchheads]}'''
+    def updatebranchcache(self):
         tip = self.changelog.tip()
         if self._branchcache is not None and self._branchcachetip == tip:
             return self._branchcache
@@ -355,6 +393,9 @@ class localrepository(repo.repository):
         # this private cache holds all heads (not just tips)
         self._branchcache = partial
 
+    def branchmap(self):
+        '''returns a dictionary {branch: [branchheads]}'''
+        self.updatebranchcache()
         return self._branchcache
 
     def branchtags(self):
@@ -875,7 +916,7 @@ class localrepository(repo.repository):
             # commit subs
             if subs or removedsubs:
                 state = wctx.substate.copy()
-                for s in subs:
+                for s in sorted(subs):
                     sub = wctx.sub(s)
                     self.ui.status(_('committing subrepository %s\n') %
                         subrepo.relpath(sub))
@@ -976,7 +1017,7 @@ class localrepository(repo.repository):
             tr.close()
 
             if self._branchcache:
-                self.branchtags()
+                self.updatebranchcache()
             return n
         finally:
             if tr:
@@ -1011,7 +1052,8 @@ class localrepository(repo.repository):
         return self[node].walk(match)
 
     def status(self, node1='.', node2=None, match=None,
-               ignored=False, clean=False, unknown=False):
+               ignored=False, clean=False, unknown=False,
+               listsubrepos=False):
         """return status of files between two nodes or node and working directory
 
         If node1 is None, use the first dirstate parent instead.
@@ -1117,6 +1159,24 @@ class localrepository(repo.repository):
             removed = mf1.keys()
 
         r = modified, added, removed, deleted, unknown, ignored, clean
+
+        if listsubrepos:
+            for subpath, sub in subrepo.itersubrepos(ctx1, ctx2):
+                if working:
+                    rev2 = None
+                else:
+                    rev2 = ctx2.substate[subpath][1]
+                try:
+                    submatch = matchmod.narrowmatcher(subpath, match)
+                    s = sub.status(rev2, match=submatch, ignored=listignored,
+                                   clean=listclean, unknown=listunknown,
+                                   listsubrepos=True)
+                    for rfiles, sfiles in zip(r, s):
+                        rfiles.extend("%s/%s" % (subpath, f) for f in sfiles)
+                except error.LookupError:
+                    self.ui.status(_("skipping missing subrepository: %s\n")
+                                   % subpath)
+
         [l.sort() for l in r]
         return r
 
@@ -1203,7 +1263,7 @@ class localrepository(repo.repository):
                 cg = remote.changegroup(fetch, 'pull')
             else:
                 if not remote.capable('changegroupsubset'):
-                    raise util.Abort(_("Partial pull cannot be done because "
+                    raise util.Abort(_("partial pull cannot be done because "
                                        "other repository doesn't support "
                                        "changegroupsubset."))
                 cg = remote.changegroupsubset(fetch, heads, 'pull')
@@ -1700,7 +1760,7 @@ class localrepository(repo.repository):
         if changesets > 0:
             # forcefully update the on-disk branch cache
             self.ui.debug("updating the branch cache\n")
-            self.branchtags()
+            self.updatebranchcache()
             self.hook("changegroup", node=hex(cl.node(clstart)),
                       source=srctype, url=url)
 

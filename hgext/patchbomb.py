@@ -22,9 +22,9 @@ Each message refers to the first in the series using the In-Reply-To
 and References headers, so they will show up as a sequence in threaded
 mail and news readers, and in mail archives.
 
-With the -d/--diffstat option, you will be prompted for each changeset
-with a diffstat summary and the changeset summary, so you can be sure
-you are sending the right changes.
+With the -d/--diffstat or -c/--confirm options, you will be presented
+with a final summary of all messages and asked for confirmation before
+the messages are sent.
 
 To configure other defaults, add a section like this to your hgrc
 file::
@@ -81,9 +81,7 @@ from mercurial.i18n import _
 from mercurial.node import bin
 
 def prompt(ui, prompt, default=None, rest=':'):
-    if not ui.interactive():
-        if default is not None:
-            return default
+    if not ui.interactive() and default is None:
         raise util.Abort(_("%s Please enter a valid value" % (prompt + rest)))
     if default:
         prompt += ' [%s]' % default
@@ -96,27 +94,18 @@ def prompt(ui, prompt, default=None, rest=':'):
             return default
         ui.warn(_('Please enter a valid value.\n'))
 
-def cdiffstat(ui, summary, patchlines):
-    s = patch.diffstat(patchlines)
-    if summary:
-        ui.write(summary, '\n')
-        ui.write(s, '\n')
-    ans = prompt(ui, _('does the diffstat above look okay?'), 'y')
-    if not ans.lower().startswith('y'):
-        raise util.Abort(_('diffstat rejected'))
-    return s
-
 def introneeded(opts, number):
     '''is an introductory message required?'''
     return number > 1 or opts.get('intro') or opts.get('desc')
 
-def makepatch(ui, repo, patch, opts, _charsets, idx, total, patchname=None):
+def makepatch(ui, repo, patchlines, opts, _charsets, idx, total,
+              patchname=None):
 
     desc = []
     node = None
     body = ''
 
-    for line in patch:
+    for line in patchlines:
         if line.startswith('#'):
             if line.startswith('# Node ID'):
                 node = line.split()[-1]
@@ -134,21 +123,22 @@ def makepatch(ui, repo, patch, opts, _charsets, idx, total, patchname=None):
         body += '\n\n\n'
 
     if opts.get('plain'):
-        while patch and patch[0].startswith('# '):
-            patch.pop(0)
-        if patch:
-            patch.pop(0)
-        while patch and not patch[0].strip():
-            patch.pop(0)
+        while patchlines and patchlines[0].startswith('# '):
+            patchlines.pop(0)
+        if patchlines:
+            patchlines.pop(0)
+        while patchlines and not patchlines[0].strip():
+            patchlines.pop(0)
 
+    ds = patch.diffstat(patchlines)
     if opts.get('diffstat'):
-        body += cdiffstat(ui, '\n'.join(desc), patch) + '\n\n'
+        body += ds + '\n\n'
 
     if opts.get('attach') or opts.get('inline'):
         msg = email.MIMEMultipart.MIMEMultipart()
         if body:
             msg.attach(mail.mimeencode(ui, body, _charsets, opts.get('test')))
-        p = mail.mimetextpatch('\n'.join(patch), 'x-patch', opts.get('test'))
+        p = mail.mimetextpatch('\n'.join(patchlines), 'x-patch', opts.get('test'))
         binnode = bin(node)
         # if node is mq patch, it will have the patch file's name as a tag
         if not patchname:
@@ -167,7 +157,7 @@ def makepatch(ui, repo, patch, opts, _charsets, idx, total, patchname=None):
         p['Content-Disposition'] = disposition + '; filename=' + patchname
         msg.attach(p)
     else:
-        body += '\n'.join(patch)
+        body += '\n'.join(patchlines)
         msg = mail.mimetextpatch(body, display=opts.get('test'))
 
     flag = ' '.join(opts.get('flag'))
@@ -182,7 +172,7 @@ def makepatch(ui, repo, patch, opts, _charsets, idx, total, patchname=None):
         subj = '[PATCH %0*d of %d%s] %s' % (tlen, idx, total, flag, subj)
     msg['Subject'] = mail.headencode(ui, subj, _charsets, opts.get('test'))
     msg['X-Mercurial-Node'] = node
-    return msg, subj
+    return msg, subj, ds
 
 def patchbomb(ui, repo, *revs, **opts):
     '''send changesets by email
@@ -352,17 +342,16 @@ def patchbomb(ui, repo, *revs, **opts):
                            prompt(ui, 'Subject: ', rest=subj))
 
             body = ''
-            if opts.get('diffstat'):
-                d = cdiffstat(ui, _('Final summary:\n'), jumbo)
-                if d:
-                    body = '\n' + d
+            ds = patch.diffstat(jumbo)
+            if ds and opts.get('diffstat'):
+                body = '\n' + ds
 
             body = getdescription(body, sender)
             msg = mail.mimeencode(ui, body, _charsets, opts.get('test'))
             msg['Subject'] = mail.headencode(ui, subj, _charsets,
                                              opts.get('test'))
 
-            msgs.insert(0, (msg, subj))
+            msgs.insert(0, (msg, subj, ds))
         return msgs
 
     def getbundlemsgs(bundle):
@@ -381,7 +370,7 @@ def patchbomb(ui, repo, *revs, **opts):
         email.Encoders.encode_base64(datapart)
         msg.attach(datapart)
         msg['Subject'] = mail.headencode(ui, subj, _charsets, opts.get('test'))
-        return [(msg, subj)]
+        return [(msg, subj, None)]
 
     sender = (opts.get('from') or ui.config('email', 'from') or
               ui.config('patchbomb', 'from') or
@@ -394,16 +383,27 @@ def patchbomb(ui, repo, *revs, **opts):
     else:
         msgs = getpatchmsgs(list(getpatches(revs)))
 
+    showaddrs = []
+
     def getaddrs(opt, prpt=None, default=None):
         addrs = opts.get(opt.replace('-', '_'))
+        if opt != 'reply-to':
+            showaddr = '%s:' % opt.capitalize()
+        else:
+            showaddr = 'Reply-To:'
+
         if addrs:
+            showaddrs.append('%s %s' % (showaddr, ', '.join(addrs)))
             return mail.addrlistencode(ui, addrs, _charsets,
                                        opts.get('test'))
 
-        addrs = (ui.config('email', opt) or
-                 ui.config('patchbomb', opt) or '')
+        addrs = ui.config('email', opt) or ui.config('patchbomb', opt) or ''
         if not addrs and prpt:
             addrs = prompt(ui, prpt, default)
+
+        if addrs:
+            showaddr = '%s %s' % (showaddr, addrs)
+            showaddrs.append(showaddr)
 
         return mail.addrlistencode(ui, [addrs], _charsets, opts.get('test'))
 
@@ -411,6 +411,20 @@ def patchbomb(ui, repo, *revs, **opts):
     cc = getaddrs('cc', 'Cc', '')
     bcc = getaddrs('bcc')
     replyto = getaddrs('reply-to')
+
+    if opts.get('diffstat') or opts.get('confirm'):
+        ui.write(_('\nFinal summary:\n\n'))
+        ui.write('From: %s\n' % sender)
+        for addr in showaddrs:
+            ui.write('%s\n' % addr)
+        for m, subj, ds in msgs:
+            ui.write('Subject: %s\n' % subj)
+            if ds:
+                ui.write(ds)
+        ui.write('\n')
+        if ui.promptchoice(_('are you sure you want to send (yn)?'),
+                           (_('&Yes'), _('&No'))):
+            raise util.Abort(_('patchbomb canceled'))
 
     ui.write('\n')
 
@@ -427,7 +441,7 @@ def patchbomb(ui, repo, *revs, **opts):
     sender_addr = email.Utils.parseaddr(sender)[1]
     sender = mail.addressencode(ui, sender, _charsets, opts.get('test'))
     sendmail = None
-    for m, subj in msgs:
+    for m, subj, ds in msgs:
         try:
             m['Message-Id'] = genmsgid(m['X-Mercurial-Node'])
         except TypeError:
@@ -495,6 +509,7 @@ emailopts = [
           ('i', 'inline', None, _('send patches as inline attachments')),
           ('', 'bcc', [], _('email addresses of blind carbon copy recipients')),
           ('c', 'cc', [], _('email addresses of copy recipients')),
+          ('', 'confirm', None, _('ask for confirmation before sending')),
           ('d', 'diffstat', None, _('add diffstat output to messages')),
           ('', 'date', '', _('use the given date as the sending date')),
           ('', 'desc', '', _('use the given file as the series description')),

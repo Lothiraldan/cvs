@@ -29,7 +29,7 @@ also available. Effects are rendered with the ECMA-48 SGR control
 function (aka ANSI escape codes). This module also provides the
 render_text function, which can be used to add effects to any text.
 
-Default effects may be overridden from the .hgrc file::
+Default effects may be overridden from your configuration file::
 
   [color]
   status.modified = blue bold underline red_background
@@ -77,9 +77,9 @@ Any value other than 'ansi', 'win32', or 'auto' will disable color.
 
 '''
 
-import os, sys
+import os
 
-from mercurial import commands, dispatch, extensions, ui as uimod
+from mercurial import commands, dispatch, extensions, ui as uimod, util
 from mercurial.i18n import _
 
 # start and stop parameters for effects
@@ -209,9 +209,12 @@ def uisetup(ui):
     elif mode != 'ansi':
         return
     def colorcmd(orig, ui_, opts, cmd, cmdfunc):
-        if (opts['color'] == 'always' or
-            (opts['color'] == 'auto' and (os.environ.get('TERM') != 'dumb'
-                                          and ui_.formatted()))):
+        coloropt = opts['color']
+        auto = coloropt == 'auto'
+        always = util.parsebool(coloropt)
+        if (always or
+            (always is None and
+             (auto and (os.environ.get('TERM') != 'dumb' and ui_.formatted())))):
             colorui._colormode = mode
             colorui.__bases__ = (ui_.__class__,)
             ui_.__class__ = colorui
@@ -220,9 +223,10 @@ def uisetup(ui):
         return orig(ui_, opts, cmd, cmdfunc)
     extensions.wrapfunction(dispatch, '_runcommand', colorcmd)
 
-commands.globalopts.append(('', 'color', 'auto',
-                            _("when to colorize (always, auto, or never)"),
-                            _('TYPE')))
+commands.globalopts.append(
+    ('', 'color', 'auto',
+     _("when to colorize (boolean, always, auto, or never)"),
+     _('TYPE')))
 
 try:
     import re, pywintypes, win32console as win32c
@@ -254,8 +258,10 @@ try:
         'inverse': win32c.COMMON_LVB_REVERSE_VIDEO, # double-byte charsets only
     }
 
-    stdout = win32c.GetStdHandle(win32c.STD_OUTPUT_HANDLE)
     try:
+        stdout = win32c.GetStdHandle(win32c.STD_OUTPUT_HANDLE)
+        if stdout is None:
+            raise ImportError()
         origattr = stdout.GetConsoleScreenBufferInfo()['Attributes']
     except pywintypes.error:
         # stdout may be defined but not support

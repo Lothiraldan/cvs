@@ -59,7 +59,8 @@ def add(ui, repo, *pats, **opts):
             if ui.verbose or not exact:
                 ui.status(_('adding %s\n') % m.rel(f))
     if not opts.get('dry_run'):
-        bad += [f for f in repo[None].add(names) if f in m.files()]
+        rejected = repo[None].add(names)
+        bad += [f for f in rejected if f in m.files()]
     return bad and 1 or 0
 
 def addremove(ui, repo, *pats, **opts):
@@ -335,6 +336,15 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
             else:
                 ui.write(_("The first bad revision is:\n"))
             displayer.show(repo[nodes[0]])
+            parents = repo[nodes[0]].parents()
+            if len(parents) > 1:
+                side = good and state['bad'] or state['good']
+                num = len(set(i.node() for i in parents) & set(side))
+                if num == 1:
+                    common = parents[0].ancestor(parents[1])
+                    ui.write(_('Not all ancestors of this changeset have been'
+                               ' checked.\nTo check the other ancestors, start'
+                               ' from the common ancestor, %s.\n' % common))
         else:
             # multiple possible revisions
             if good:
@@ -410,14 +420,19 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
         return
 
     # update state
-    node = repo.lookup(rev or '.')
+
+    if rev:
+        nodes = [repo.lookup(i) for i in cmdutil.revrange(repo, [rev])]
+    else:
+        nodes = [repo.lookup('.')]
+
     if good or bad or skip:
         if good:
-            state['good'].append(node)
+            state['good'] += nodes
         elif bad:
-            state['bad'].append(node)
+            state['bad'] += nodes
         elif skip:
-            state['skip'].append(node)
+            state['skip'] += nodes
         hbisect.save_state(repo, state)
 
     if not check_state(state):
@@ -839,7 +854,7 @@ def debugancestor(ui, repo, *args):
         lookup = r.lookup
     elif len(args) == 2:
         if not repo:
-            raise util.Abort(_("There is no Mercurial repository here "
+            raise util.Abort(_("there is no Mercurial repository here "
                                "(.hg not found)"))
         rev1, rev2 = args
         r = repo.changelog
@@ -1214,9 +1229,15 @@ def debugdag(ui, repo, file_=None, *revs, **opts):
         ui.write(line)
         ui.write("\n")
 
-def debugdata(ui, file_, rev):
+def debugdata(ui, repo, file_, rev):
     """dump the contents of a data file revision"""
-    r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_[:-2] + ".i")
+    r = None
+    if repo:
+        filelog = repo.file(file_)
+        if len(filelog):
+            r = filelog
+    if not r:
+        r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_[:-2] + ".i")
     try:
         ui.write(r.revision(r.lookup(rev)))
     except KeyError:
@@ -1234,9 +1255,15 @@ def debugdate(ui, date, range=None, **opts):
         m = util.matchdate(range)
         ui.write("match: %s\n" % m(d[0]))
 
-def debugindex(ui, file_):
+def debugindex(ui, repo, file_):
     """dump the contents of an index file"""
-    r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_)
+    r = None
+    if repo:
+        filelog = repo.file(file_)
+        if len(filelog):
+            r = filelog
+    if not r:
+        r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_)
     ui.write("   rev    offset  length   base linkrev"
              " nodeid       p1           p2\n")
     for i in r:
@@ -1249,9 +1276,15 @@ def debugindex(ui, file_):
                 i, r.start(i), r.length(i), r.base(i), r.linkrev(i),
             short(node), short(pp[0]), short(pp[1])))
 
-def debugindexdot(ui, file_):
+def debugindexdot(ui, repo, file_):
     """dump an index DAG as a graphviz dot file"""
-    r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_)
+    r = None
+    if repo:
+        filelog = repo.file(file_)
+        if len(filelog):
+            r = filelog
+    if not r:
+        r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_)
     ui.write("digraph G {\n")
     for i in r:
         node = r.node(i)
@@ -1335,7 +1368,8 @@ def debuginstall(ui):
     if patchproblems:
         if ui.config('ui', 'patch'):
             ui.write(_(" (Current patch tool may be incompatible with patch,"
-                       " or misconfigured. Please check your .hgrc file)\n"))
+                       " or misconfigured. Please check your configuration"
+                       " file)\n"))
         else:
             ui.write(_(" Internal patcher failure, please report this error"
                        " to http://mercurial.selenic.com/bts/\n"))
@@ -1351,19 +1385,21 @@ def debuginstall(ui):
     if not cmdpath:
         if editor == 'vi':
             ui.write(_(" No commit editor set and can't find vi in PATH\n"))
-            ui.write(_(" (specify a commit editor in your .hgrc file)\n"))
+            ui.write(_(" (specify a commit editor in your configuration"
+                       " file)\n"))
         else:
             ui.write(_(" Can't find editor '%s' in PATH\n") % editor)
-            ui.write(_(" (specify a commit editor in your .hgrc file)\n"))
+            ui.write(_(" (specify a commit editor in your configuration"
+                       " file)\n"))
             problems += 1
 
     # check username
     ui.status(_("Checking username...\n"))
     try:
-        user = ui.username()
+        ui.username()
     except util.Abort, e:
         ui.write(" %s\n" % e)
-        ui.write(_(" (specify a username in your .hgrc file)\n"))
+        ui.write(_(" (specify a username in your configuration file)\n"))
         problems += 1
 
     if not problems:
@@ -1450,7 +1486,8 @@ def diff(ui, repo, *pats, **opts):
 
     diffopts = patch.diffopts(ui, opts)
     m = cmdutil.match(repo, pats, opts)
-    cmdutil.diffordiffstat(ui, repo, diffopts, node1, node2, m, stat=stat)
+    cmdutil.diffordiffstat(ui, repo, diffopts, node1, node2, m, stat=stat,
+                           listsubrepos=opts.get('subrepos'))
 
 def export(ui, repo, *changesets, **opts):
     """dump the header and diffs for one or more changesets
@@ -2102,7 +2139,7 @@ def identify(ui, repo, source=None,
     """
 
     if not repo and not source:
-        raise util.Abort(_("There is no Mercurial repository here "
+        raise util.Abort(_("there is no Mercurial repository here "
                            "(.hg not found)"))
 
     hexfunc = ui.debugflag and hex or short
@@ -2724,8 +2761,8 @@ def paths(ui, repo, search=None):
     Show definition of symbolic path name NAME. If no name is given,
     show definition of all available names.
 
-    Path names are defined in the [paths] section of
-    ``/etc/mercurial/hgrc`` and ``$HOME/.hgrc``. If run inside a
+    Path names are defined in the [paths] section of your
+    configuration file and in ``/etc/mercurial/hgrc``. If run inside a
     repository, ``.hg/hgrc`` is used, too.
 
     The path names ``default`` and ``default-push`` have a special
@@ -2795,7 +2832,7 @@ def pull(ui, repo, source="default", **opts):
         try:
             revs = [other.lookup(rev) for rev in revs]
         except error.CapabilityError:
-            err = _("Other repository doesn't support revision lookup, "
+            err = _("other repository doesn't support revision lookup, "
                     "so a rev cannot be specified.")
             raise util.Abort(err)
 
@@ -2910,21 +2947,24 @@ def remove(ui, repo, *pats, **opts):
             ui.warn(_('not removing %s: file is untracked\n') % m.rel(f))
             ret = 1
 
-    def warn(files, reason):
-        for f in files:
-            ui.warn(_('not removing %s: file %s (use -f to force removal)\n')
-                    % (m.rel(f), reason))
-            ret = 1
-
     if force:
         remove, forget = modified + deleted + clean, added
     elif after:
         remove, forget = deleted, []
-        warn(modified + added + clean, _('still exists'))
+        for f in modified + added + clean:
+            ui.warn(_('not removing %s: file still exists (use -f'
+                      ' to force removal)\n') % m.rel(f))
+            ret = 1
     else:
         remove, forget = deleted + clean, []
-        warn(modified, _('is modified'))
-        warn(added, _('has been marked for add'))
+        for f in modified:
+            ui.warn(_('not removing %s: file is modified (use -f'
+                      ' to force removal)\n') % m.rel(f))
+            ret = 1
+        for f in added:
+            ui.warn(_('not removing %s: file has been marked for add (use -f'
+                      ' to force removal)\n') % m.rel(f))
+            ret = 1
 
     for f in sorted(remove + forget):
         if ui.verbose or not m.exact(f):
@@ -2960,11 +3000,11 @@ def resolve(ui, repo, *pats, **opts):
     """redo merges or set/view the merge status of files
 
     Merges with unresolved conflicts are often the result of
-    non-interactive merging using the ``internal:merge`` hgrc setting,
-    or a command-line merge tool like ``diff3``. The resolve command
-    is used to manage the files involved in a merge, after :hg:`merge`
-    has been run, and before :hg:`commit` is run (i.e. the working
-    directory must have two parents).
+    non-interactive merging using the ``internal:merge`` configuration
+    setting, or a command-line merge tool like ``diff3``. The resolve
+    command is used to manage the files involved in a merge, after
+    :hg:`merge` has been run, and before :hg:`commit` is run (i.e. the
+    working directory must have two parents).
 
     The resolve command can be used in the following ways:
 
@@ -3332,7 +3372,7 @@ def serve(ui, repo, **opts):
 
     # this way we can check if something was given in the command-line
     if opts.get('port'):
-        opts['port'] = int(opts.get('port'))
+        opts['port'] = util.getport(opts.get('port'))
 
     baseui = repo and repo.baseui or ui
     optlist = ("name templates style address port prefix ipv6"
@@ -3454,7 +3494,8 @@ def status(ui, repo, *pats, **opts):
         show = ui.quiet and states[:4] or states[:5]
 
     stat = repo.status(node1, node2, cmdutil.match(repo, pats, opts),
-                       'ignored' in show, 'clean' in show, 'unknown' in show)
+                       'ignored' in show, 'clean' in show, 'unknown' in show,
+                       opts.get('subrepos'))
     changestates = zip(states, 'MAR!?IC', stat)
 
     if (opts.get('all') or opts.get('copies')) and not opts.get('no_status'):
@@ -3967,6 +4008,11 @@ similarityopts = [
      _('guess renamed files by similarity (0<=s<=100)'), _('SIMILARITY'))
 ]
 
+subrepoopts = [
+    ('S', 'subrepos', None,
+     _('recurse into subrepositories'))
+]
+
 table = {
     "^add": (add, walkopts + dryrunopts, _('[OPTION]... [FILE]...')),
     "addremove":
@@ -4153,7 +4199,7 @@ table = {
            _('revision'), _('REV')),
           ('c', 'change', '',
            _('change made by revision'), _('REV'))
-         ] + diffopts + diffopts2 + walkopts,
+         ] + diffopts + diffopts2 + walkopts + subrepoopts,
          _('[OPTION]... ([-c REV] | [-r REV1 [-r REV2]]) [FILE]...')),
     "^export":
         (export,
@@ -4430,7 +4476,7 @@ table = {
            _('show difference from revision'), _('REV')),
           ('', 'change', '',
            _('list the changed files of a revision'), _('REV')),
-         ] + walkopts,
+         ] + walkopts + subrepoopts,
          _('[OPTION]... [FILE]...')),
     "tag":
         (tag,
@@ -4470,7 +4516,7 @@ table = {
     "version": (version_, []),
 }
 
-norepo = ("clone init version help debugcommands debugcomplete debugdata"
-          " debugindex debugindexdot debugdate debuginstall debugfsinfo"
-          " debugpushkey")
-optionalrepo = ("identify paths serve showconfig debugancestor debugdag")
+norepo = ("clone init version help debugcommands debugcomplete"
+          " debugdate debuginstall debugfsinfo debugpushkey")
+optionalrepo = ("identify paths serve showconfig debugancestor debugdag"
+                " debugdata debugindex debugindexdot")

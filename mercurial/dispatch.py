@@ -190,6 +190,7 @@ def aliasargs(fn):
 class cmdalias(object):
     def __init__(self, name, definition, cmdtable):
         self.name = self.cmd = name
+        self.cmdname = ''
         self.definition = definition
         self.args = []
         self.opts = []
@@ -234,7 +235,7 @@ class cmdalias(object):
             return
 
         args = shlex.split(self.definition)
-        cmd = args.pop(0)
+        self.cmdname = cmd = args.pop(0)
         args = map(util.expandpath, args)
 
         for invalidarg in ("--cwd", "-R", "--repository", "--repo"):
@@ -286,12 +287,18 @@ class cmdalias(object):
 
     def __call__(self, ui, *args, **opts):
         if self.shadows:
-            ui.debug("alias '%s' shadows command\n" % self.name)
+            ui.debug("alias '%s' shadows command '%s'\n" %
+                     (self.name, self.cmdname))
 
         if self.definition.startswith('!'):
             return self.fn(ui, *args, **opts)
         else:
-            return util.checksignature(self.fn)(ui, *args, **opts)
+            try:
+                util.checksignature(self.fn)(ui, *args, **opts)
+            except error.SignatureError:
+                args = ' '.join([self.cmdname] + self.args)
+                ui.debug("alias '%s' expands to '%s'\n" % (self.name, args))
+                raise
 
 def addaliases(ui, cmdtable):
     # aliases are processed after extensions have been loaded, so they
@@ -463,9 +470,9 @@ def _dispatch(ui, args):
     cmd, func, args, options, cmdoptions = _parse(lui, args)
 
     if options["config"]:
-        raise util.Abort(_("Option --config may not be abbreviated!"))
+        raise util.Abort(_("option --config may not be abbreviated!"))
     if options["cwd"]:
-        raise util.Abort(_("Option --cwd may not be abbreviated!"))
+        raise util.Abort(_("option --cwd may not be abbreviated!"))
     if options["repository"]:
         raise util.Abort(_(
             "Option -R has to be separated from other options (e.g. not -qR) "

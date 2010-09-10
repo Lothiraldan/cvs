@@ -46,6 +46,23 @@
   +a
   
 
+  $ hg --config ui.interactive=1 email --confirm -n -f quux -t foo -c bar -r tip<<EOF
+  > n
+  > EOF
+  This patch series consists of 1 patches.
+  
+  
+  Final summary:
+  
+  From: quux
+  To: foo
+  Cc: bar
+  Subject: [PATCH] a
+   a |  1 +
+   1 files changed, 1 insertions(+), 0 deletions(-)
+  
+  are you sure you want to send (yn)? abort: patchbomb canceled
+
   $ echo b > b
   $ hg commit -Amb -d '2 0'
   adding b
@@ -332,11 +349,17 @@ test diffstat for single patch:
   >  fixheaders
   This patch series consists of 1 patches.
   
-  c
   
+  Final summary:
+  
+  From: quux
+  To: foo
+  Cc: bar
+  Subject: [PATCH] test
    c |  1 +
    1 files changed, 1 insertions(+), 0 deletions(-)
   
+  are you sure you want to send (yn)? y
   
   Displaying [PATCH] test ...
   Content-Type: text/plain; charset="us-ascii"
@@ -374,25 +397,27 @@ test diffstat for multiple patches:
   >  -r 0:1 | fixheaders
   This patch series consists of 2 patches.
   
-  a
-  
-   a |  1 +
-   1 files changed, 1 insertions(+), 0 deletions(-)
-  
-  b
-  
-   b |  1 +
-   1 files changed, 1 insertions(+), 0 deletions(-)
-  
-  Final summary:
-  
-   a |  1 +
-   b |  1 +
-   2 files changed, 2 insertions(+), 0 deletions(-)
-  
   
   Write the introductory message for the patch series.
   
+  
+  Final summary:
+  
+  From: quux
+  To: foo
+  Cc: bar
+  Subject: [PATCH 0 of 2] test
+   a |  1 +
+   b |  1 +
+   2 files changed, 2 insertions(+), 0 deletions(-)
+  Subject: [PATCH 1 of 2] a
+   a |  1 +
+   1 files changed, 1 insertions(+), 0 deletions(-)
+  Subject: [PATCH 2 of 2] b
+   b |  1 +
+   1 files changed, 1 insertions(+), 0 deletions(-)
+  
+  are you sure you want to send (yn)? y
   
   Displaying [PATCH 0 of 2] test ...
   Content-Type: text/plain; charset="us-ascii"
@@ -1772,6 +1797,7 @@ test multi-byte domain parsing:
   $ hg email --date '1980-1-1 0:1' -m tmp.mbox -f quux -t "bar@${UUML}nicode.com" -s test -r 0
   This patch series consists of 1 patches.
   
+  Cc: 
   
   Writing [PATCH] test ...
 
@@ -1816,11 +1842,13 @@ test outgoing:
   $ hg email --date '1980-1-1 0:1' -n -t foo -s test -o ../t
   comparing with ../t
   searching for changes
+  From [test]: test
   This patch series consists of 8 patches.
   
   
   Write the introductory message for the patch series.
   
+  Cc: 
   
   Displaying [PATCH 0 of 8] test ...
   Content-Type: text/plain; charset="us-ascii"
@@ -2088,8 +2116,10 @@ dest#branch URIs:
   $ hg email --date '1980-1-1 0:1' -n -t foo -s test -o ../t#test
   comparing with ../t
   searching for changes
+  From [test]: test
   This patch series consists of 1 patches.
   
+  Cc: 
   
   Displaying [PATCH] test ...
   Content-Type: text/plain; charset="us-ascii"
