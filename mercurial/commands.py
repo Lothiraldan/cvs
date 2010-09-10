@@ -846,7 +846,7 @@ def debugancestor(ui, repo, *args):
         lookup = r.lookup
     elif len(args) == 2:
         if not repo:
-            raise util.Abort(_("There is no Mercurial repository here "
+            raise util.Abort(_("there is no Mercurial repository here "
                                "(.hg not found)"))
         rev1, rev2 = args
         r = repo.changelog
@@ -1341,7 +1341,8 @@ def debuginstall(ui):
     if patchproblems:
         if ui.config('ui', 'patch'):
             ui.write(_(" (Current patch tool may be incompatible with patch,"
-                       " or misconfigured. Please check your .hgrc file)\n"))
+                       " or misconfigured. Please check your configuration"
+                       " file)\n"))
         else:
             ui.write(_(" Internal patcher failure, please report this error"
                        " to http://mercurial.selenic.com/bts/\n"))
@@ -1357,10 +1358,12 @@ def debuginstall(ui):
     if not cmdpath:
         if editor == 'vi':
             ui.write(_(" No commit editor set and can't find vi in PATH\n"))
-            ui.write(_(" (specify a commit editor in your .hgrc file)\n"))
+            ui.write(_(" (specify a commit editor in your configuration"
+                       " file)\n"))
         else:
             ui.write(_(" Can't find editor '%s' in PATH\n") % editor)
-            ui.write(_(" (specify a commit editor in your .hgrc file)\n"))
+            ui.write(_(" (specify a commit editor in your configuration"
+                       " file)\n"))
             problems += 1
 
     # check username
@@ -1369,7 +1372,7 @@ def debuginstall(ui):
         user = ui.username()
     except util.Abort, e:
         ui.write(" %s\n" % e)
-        ui.write(_(" (specify a username in your .hgrc file)\n"))
+        ui.write(_(" (specify a username in your configuration file)\n"))
         problems += 1
 
     if not problems:
@@ -2105,7 +2108,7 @@ def identify(ui, repo, source=None,
     """
 
     if not repo and not source:
-        raise util.Abort(_("There is no Mercurial repository here "
+        raise util.Abort(_("there is no Mercurial repository here "
                            "(.hg not found)"))
 
     hexfunc = ui.debugflag and hex or short
@@ -2727,8 +2730,8 @@ def paths(ui, repo, search=None):
     Show definition of symbolic path name NAME. If no name is given,
     show definition of all available names.
 
-    Path names are defined in the [paths] section of
-    ``/etc/mercurial/hgrc`` and ``$HOME/.hgrc``. If run inside a
+    Path names are defined in the [paths] section of your
+    configuration file and in ``/etc/mercurial/hgrc``. If run inside a
     repository, ``.hg/hgrc`` is used, too.
 
     The path names ``default`` and ``default-push`` have a special
@@ -2798,7 +2801,7 @@ def pull(ui, repo, source="default", **opts):
         try:
             revs = [other.lookup(rev) for rev in revs]
         except error.CapabilityError:
-            err = _("Other repository doesn't support revision lookup, "
+            err = _("other repository doesn't support revision lookup, "
                     "so a rev cannot be specified.")
             raise util.Abort(err)
 
@@ -2913,21 +2916,24 @@ def remove(ui, repo, *pats, **opts):
             ui.warn(_('not removing %s: file is untracked\n') % m.rel(f))
             ret = 1
 
-    def warn(files, reason):
-        for f in files:
-            ui.warn(_('not removing %s: file %s (use -f to force removal)\n')
-                    % (m.rel(f), reason))
-            ret = 1
-
     if force:
         remove, forget = modified + deleted + clean, added
     elif after:
         remove, forget = deleted, []
-        warn(modified + added + clean, _('still exists'))
+        for f in modified + added + clean:
+            ui.warn(_('not removing %s: file still exists (use -f'
+                      ' to force removal)\n') % m.rel(f))
+            ret = 1
     else:
         remove, forget = deleted + clean, []
-        warn(modified, _('is modified'))
-        warn(added, _('has been marked for add'))
+        for f in modified:
+            ui.warn(_('not removing %s: file is modified (use -f'
+                      ' to force removal)\n') % m.rel(f))
+            ret = 1
+        for f in added:
+            ui.warn(_('not removing %s: file has been marked for add (use -f'
+                      ' to force removal)\n') % m.rel(f))
+            ret = 1
 
     for f in sorted(remove + forget):
         if ui.verbose or not m.exact(f):
@@ -2963,11 +2969,11 @@ def resolve(ui, repo, *pats, **opts):
     """redo merges or set/view the merge status of files
 
     Merges with unresolved conflicts are often the result of
-    non-interactive merging using the ``internal:merge`` hgrc setting,
-    or a command-line merge tool like ``diff3``. The resolve command
-    is used to manage the files involved in a merge, after :hg:`merge`
-    has been run, and before :hg:`commit` is run (i.e. the working
-    directory must have two parents).
+    non-interactive merging using the ``internal:merge`` configuration
+    setting, or a command-line merge tool like ``diff3``. The resolve
+    command is used to manage the files involved in a merge, after
+    :hg:`merge` has been run, and before :hg:`commit` is run (i.e. the
+    working directory must have two parents).
 
     The resolve command can be used in the following ways:
 
