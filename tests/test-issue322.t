@@ -1,4 +1,4 @@
-# http://mercurial.selenic.com/bts/issue322
+http://mercurial.selenic.com/bts/issue322
 
 File replaced with directory:
 
@@ -56,6 +56,4 @@ Should fail - would corrupt dirstate:
   $ hg add b
   abort: directory 'b' already in dirstate
   [255]
-
-  $ exit 0
 

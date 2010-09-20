@@ -862,7 +862,6 @@ log -p -R repo
 #      \     /
 #         o
 #
-
 # Where "o" is a revision containing "foo" and
 # "x" is a revision without "foo"
 
@@ -1020,5 +1019,3 @@ log -p -R repo
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     add foo, related
   
-
-  $ exit 0

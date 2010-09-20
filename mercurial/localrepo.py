@@ -1543,7 +1543,7 @@ class localrepository(repo.repository):
             if msng_cl_lst:
                 self.hook('outgoing', node=hex(msng_cl_lst[0]), source=source)
 
-        return util.chunkbuffer(gengroup())
+        return changegroup.unbundle10(util.chunkbuffer(gengroup()), 'UN')
 
     def changegroup(self, basenodes, source):
         # to avoid a race we use changegroupsubset() (issue1320)
@@ -1621,7 +1621,7 @@ class localrepository(repo.repository):
             if nodes:
                 self.hook('outgoing', node=hex(nodes[0]), source=source)
 
-        return util.chunkbuffer(gengroup())
+        return changegroup.unbundle10(util.chunkbuffer(gengroup()), 'UN')
 
     def addchangegroup(self, source, srctype, url, emptyok=False, lock=None):
         """Add the changegroup returned by source.read() to this repo.
@@ -1671,8 +1671,10 @@ class localrepository(repo.repository):
                                      total=self.total)
                     self.count += 1
             pr = prog()
-            chunkiter = changegroup.chunkiter(source, progress=pr)
-            if cl.addgroup(chunkiter, csmap, trp) is None and not emptyok:
+            source.callback = pr
+
+            if (cl.addgroup(source, csmap, trp) is None
+                and not emptyok):
                 raise util.Abort(_("received changelog group is empty"))
             clend = len(cl)
             changesets = clend - clstart
@@ -1686,12 +1688,11 @@ class localrepository(repo.repository):
             pr.step = _('manifests')
             pr.count = 1
             pr.total = changesets # manifests <= changesets
-            chunkiter = changegroup.chunkiter(source, progress=pr)
             # no need to check for empty manifest group here:
             # if the result of the merge of 1 and 2 is the same in 3 and 4,
             # no new manifest will be created and the manifest group will
             # be empty during the pull
-            self.manifest.addgroup(chunkiter, revmap, trp)
+            self.manifest.addgroup(source, revmap, trp)
             self.ui.progress(_('manifests'), None)
 
             needfiles = {}
@@ -1709,16 +1710,17 @@ class localrepository(repo.repository):
             pr.step = 'files'
             pr.count = 1
             pr.total = efiles
+            source.callback = None
+
             while 1:
-                f = changegroup.getchunk(source)
+                f = source.chunk()
                 if not f:
                     break
                 self.ui.debug("adding %s revisions\n" % f)
                 pr()
                 fl = self.file(f)
                 o = len(fl)
-                chunkiter = changegroup.chunkiter(source)
-                if fl.addgroup(chunkiter, revmap, trp) is None:
+                if fl.addgroup(source, revmap, trp) is None:
                     raise util.Abort(_("received file revlog group is empty"))
                 revisions += len(fl) - o
                 files += 1

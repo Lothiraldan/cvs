@@ -135,8 +135,9 @@ Prepare custom diff/edit tool:
 
   $ chmod +x 'diff tool.py'
 
-# will change to /tmp/extdiff.TMP and populate directories a.TMP and a
-# and start tool
+will change to /tmp/extdiff.TMP and populate directories a.TMP and a
+and start tool
+
   $ hg extdiff -p "`pwd`/diff tool.py"
   [1]
 
@@ -169,6 +170,4 @@ Test extdiff with --option:
   $ hg falabala -o this -c 1
   diffing this a.8a5febb7f867/a a.34eed99112ab/a
   [1]
-
-  $ true
 

@@ -1,5 +1,5 @@
-# Source bundle was generated with the following script.
-#
+Source bundle was generated with the following script:
+
 # hg init
 # echo a > a
 # ln -s a l
@@ -12,11 +12,9 @@
   $ hg init
   $ hg -q pull "$TESTDIR/test-manifest.hg"
 
-
 The next call is expected to return nothing:
 
   $ hg manifest
-
 
   $ hg co
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -65,7 +63,3 @@ The next two calls are expected to abort:
   $ hg manifest -r tip tip
   abort: please specify just one revision
   [255]
-
-
-  $ true
-
