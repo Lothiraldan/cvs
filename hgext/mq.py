@@ -821,7 +821,11 @@ class queue(object):
         diffopts = self.diffopts({'git': opts.get('git')})
         self.check_reserved_name(patchfn)
         if os.path.exists(self.join(patchfn)):
-            raise util.Abort(_('patch "%s" already exists') % patchfn)
+            if os.path.isdir(self.join(patchfn)):
+                raise util.Abort(_('"%s" already exists as a directory')
+                                 % patchfn)
+            else:
+                raise util.Abort(_('patch "%s" already exists') % patchfn)
         if opts.get('include') or opts.get('exclude') or pats:
             match = cmdutil.match(repo, pats, opts)
             # detect missing files in pats
@@ -839,8 +843,12 @@ class queue(object):
         insert = self.full_series_end()
         wlock = repo.wlock()
         try:
-            # if patch file write fails, abort early
-            p = self.opener(patchfn, "w")
+            try:
+                # if patch file write fails, abort early
+                p = self.opener(patchfn, "w")
+            except IOError, e:
+                raise util.Abort(_('cannot write patch "%s": %s')
+                                 % (patchfn, e.strerror))
             try:
                 if self.plainmode:
                     if user:
@@ -2400,7 +2408,7 @@ def rename(ui, repo, patch, name=None, **opts):
         os.makedirs(destdir)
     util.rename(q.join(patch), absdest)
     r = q.qrepo()
-    if r:
+    if r and patch in r.dirstate:
         wctx = r[None]
         wlock = r.wlock()
         try:
