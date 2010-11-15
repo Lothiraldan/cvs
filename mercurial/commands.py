@@ -1120,7 +1120,7 @@ def debugpushkey(ui, repopath, namespace, *keyinfo):
         key, old, new = keyinfo
         r = target.pushkey(namespace, key, old, new)
         ui.status(str(r) + '\n')
-        return not(r)
+        return not r
     else:
         for k, v in target.listkeys(namespace).iteritems():
             ui.write("%s\t%s\n" % (k.encode('string-escape'),
@@ -1273,7 +1273,7 @@ def debugindex(ui, repo, file_, **opts):
 
     format = opts.get('format', 0)
     if format not in (0, 1):
-        raise util.abort("unknown format %d" % format)
+        raise util.Abort("unknown format %d" % format)
 
     if not r:
         r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_)
