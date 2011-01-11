@@ -1880,7 +1880,7 @@ def help_(ui, name=None, with_version=False, unknowncmd=False):
                 msg = _('use "hg help" for the full list of commands '
                         'or "hg -v" for details')
             elif aliases:
-                msg = _('use "hg -v help%s" to show aliases and '
+                msg = _('use "hg -v help%s" to show builtin aliases and '
                         'global options') % (name and " " + name or "")
             else:
                 msg = _('use "hg -v help %s" to show global options') % name
@@ -3250,7 +3250,7 @@ def revert(ui, repo, *pats, **opts):
                     continue
                 audit_path(f)
                 try:
-                    util.unlink(repo.wjoin(f))
+                    util.unlinkpath(repo.wjoin(f))
                 except OSError:
                     pass
                 repo.dirstate.remove(f)

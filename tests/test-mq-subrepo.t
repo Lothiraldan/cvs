@@ -1,8 +1,12 @@
+  $ "$TESTDIR/hghave" svn || exit 80
+
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "mq=" >> $HGRCPATH
   $ echo "record=" >> $HGRCPATH
   $ echo "[diff]" >> $HGRCPATH
   $ echo "nodates=1" >> $HGRCPATH
+
+  $ stdin=`pwd`/stdin.tmp
 
 fn to create new repository w/dirty subrepo, and cd into it
   $ mkrepo() {
@@ -21,41 +25,42 @@ fn to create dirty subrepo
   > }
 
   $ testadd() {
-  >     local stdin=`cat`
+  >     cat - > "$stdin"
   >     mksubrepo sub
   >     echo sub = sub >> .hgsub
   >     hg add .hgsub
   >     echo % abort when adding .hgsub w/dirty subrepo
   >     hg status -S
   >     echo '%' $*
-  >     echo "$stdin" | hg $*
+  >     cat "$stdin" | hg $*
   >     echo [$?]
   >     hg -R sub ci -m0sub
   >     echo % update substate when adding .hgsub w/clean updated subrepo
   >     hg status -S
   >     echo '%' $*
-  >     echo "$stdin" | hg $*
+  >     cat "$stdin" | hg $*
   >     hg debugsub
   > }
 
   $ testmod() {
-  >     local stdin=`cat`
+  >     cat - > "$stdin"
   >     mksubrepo sub2
   >     echo sub2 = sub2 >> .hgsub
   >     echo % abort when modifying .hgsub w/dirty subrepo
   >     hg status -S
   >     echo '%' $*
-  >     echo "$stdin" | hg $*
+  >     cat "$stdin" | hg $*
   >     echo [$?]
   >     hg -R sub2 ci -m0sub2
   >     echo % update substate when modifying .hgsub w/clean updated subrepo
   >     hg status -S
   >     echo '%' $*
-  >     echo "$stdin" | hg $*
+  >     cat "$stdin" | hg $*
   >     hg debugsub
   > }
 
   $ testrm1() {
+  >     cat - > "$stdin"
   >     mksubrepo sub3
   >     echo sub3 = sub3 >> .hgsub
   >     hg ci -Aqmsub3
@@ -65,11 +70,13 @@ fn to create dirty subrepo
   >     echo % update substate when removing .hgsub w/dirty subrepo
   >     hg status -S
   >     echo '%' $*
-  >     echo "$stdin" | hg $*
+  >     cat "$stdin" | hg $*
   >     echo % debugsub should be empty
   >     hg debugsub
   > }
+
   $ testrm2() {
+  >     cat - > "$stdin"
   >     mksubrepo sub4
   >     echo sub4 = sub4 >> .hgsub
   >     hg ci -Aqmsub4
@@ -78,7 +85,7 @@ fn to create dirty subrepo
   >     echo % update substate when removing .hgsub w/clean updated subrepo
   >     hg status -S
   >     echo '%' $*
-  >     echo "$stdin" | hg $*
+  >     cat "$stdin" | hg $*
   >     echo % debugsub should be empty
   >     hg debugsub
   > }
@@ -340,3 +347,42 @@ handle subrepos safely on qrecord
   % debugsub should be empty
 
   $ cd ..
+
+
+handle svn subrepos safely
+
+  $ svnadmin create svn-repo-2499
+  $ curpath=`pwd | tr '\\\\' /`
+  $ expr "$svnpath" : "\/" > /dev/null
+  > if [ $? -ne 0 ]; then
+  >   curpath="/$curpath"
+  > fi
+  $ svnurl="file://$curpath/svn-repo-2499/project"
+  $ mkdir -p svn-project-2499/trunk
+  $ svn import -m 'init project' svn-project-2499 "$svnurl"
+  Adding         svn-project-2499/trunk
+  
+  Committed revision 1.
+
+qnew on repo w/svn subrepo
+  $ mkrepo repo-2499-svn-subrepo
+  $ svn co "$svnurl"/trunk sub
+  Checked out revision 1.
+  $ echo 'sub = [svn]sub' >> .hgsub
+  $ hg add .hgsub
+  $ hg status -S
+  A .hgsub
+  ? sub/.svn/entries
+  $ hg qnew -m0 0.diff
+  committing subrepository sub
+  $ cd sub
+  $ echo a > a
+  $ svn add a
+  A         a
+  $ svn st
+  A       a
+  $ cd ..
+  $ hg status -S        # doesn't show status for svn subrepos (yet)
+  $ hg qnew -m1 1.diff
+  abort: uncommitted changes in subrepository sub
+  [255]
