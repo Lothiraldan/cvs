@@ -82,7 +82,7 @@ def writestate(repo, state):
                 ''.join(['%s %s\n' % (state[s][1], s)
                          for s in sorted(state)]), '')
 
-def submerge(repo, wctx, mctx, actx):
+def submerge(repo, wctx, mctx, actx, overwrite):
     """delegated from merge.applyupdates: merging of .hgsubstate file
     in working context, merging context and ancestor context"""
     if mctx == actx: # backwards?
@@ -114,7 +114,7 @@ def submerge(repo, wctx, mctx, actx):
                 continue
             elif ld == a: # other side changed
                 debug(s, "other changed, get", r)
-                wctx.sub(s).get(r)
+                wctx.sub(s).get(r, overwrite)
                 sm[s] = r
             elif ld[0] != r[0]: # sources differ
                 if repo.ui.promptchoice(
@@ -123,11 +123,11 @@ def submerge(repo, wctx, mctx, actx):
                       % (s, l[0], r[0]),
                       (_('&Local'), _('&Remote')), 0):
                     debug(s, "prompt changed, get", r)
-                    wctx.sub(s).get(r)
+                    wctx.sub(s).get(r, overwrite)
                     sm[s] = r
             elif ld[1] == a[1]: # local side is unchanged
                 debug(s, "other side changed, get", r)
-                wctx.sub(s).get(r)
+                wctx.sub(s).get(r, overwrite)
                 sm[s] = r
             else:
                 debug(s, "both sides changed, merge with", r)
@@ -263,13 +263,13 @@ class abstractsubrepo(object):
         """
         raise NotImplementedError
 
-    def get(self, state):
+    def get(self, state, overwrite=False):
         """run whatever commands are needed to put the subrepo into
         this state
         """
         raise NotImplementedError
 
-    def merge(self, state):
+    def merge(self, state, overwrite=False):
         """merge currently-saved state with the new state."""
         raise NotImplementedError
 
@@ -398,8 +398,8 @@ class hgsubrepo(abstractsubrepo):
         if r == '' and not ignoreupdate: # no state recorded
             return True
         w = self._repo[None]
-        # version checked out changed?
         if w.p1() != self._repo[r] and not ignoreupdate:
+            # different version checked out
             return True
         return w.dirty() # working directory changed
 
@@ -431,7 +431,7 @@ class hgsubrepo(abstractsubrepo):
             other = hg.repository(self._repo.ui, srcurl)
             self._repo.pull(other)
 
-    def get(self, state):
+    def get(self, state, overwrite=False):
         self._get(state)
         source, revision, kind = state
         self._repo.ui.debug("getting subrepo %s\n" % self._path)
@@ -599,7 +599,9 @@ class svnsubrepo(abstractsubrepo):
         except OSError:
             pass
 
-    def get(self, state):
+    def get(self, state, overwrite=False):
+        if overwrite:
+            self._svncommand(['revert', '--recursive'])
         status = self._svncommand(['checkout', state[0], '--revision', state[1]])
         if not re.search('Checked out revision [0-9]+.', status):
             raise util.Abort(status.splitlines()[-1])
@@ -742,14 +744,14 @@ class gitsubrepo(abstractsubrepo):
                                (revision, self._relpath))
 
     def dirty(self, ignoreupdate=False):
-        # version checked out changed?
         if not ignoreupdate and self._state[1] != self._gitstate():
+            # different version checked out
             return True
         # check for staged changes or modified files; ignore untracked files
         out, code = self._gitdir(['diff-index', '--quiet', 'HEAD'])
         return code == 1
 
-    def get(self, state):
+    def get(self, state, overwrite=False):
         source, revision, kind = state
         self._fetch(source, revision)
         # if the repo was set to be bare, unbare it
@@ -759,8 +761,24 @@ class gitsubrepo(abstractsubrepo):
                 self._gitcommand(['reset', '--hard', 'HEAD'])
                 return
         elif self._gitstate() == revision:
+            if overwrite:
+                # first reset the index to unmark new files for commit, because 
+                # reset --hard will otherwise throw away files added for commit,
+                # not just unmark them.
+                self._gitcommand(['reset', 'HEAD'])
+                self._gitcommand(['reset', '--hard', 'HEAD'])
             return
         branch2rev, rev2branch = self._gitbranchmap()
+
+        def checkout(args):
+            cmd = ['checkout']
+            if overwrite:
+                # first reset the index to unmark new files for commit, because
+                # the -f option will otherwise throw away files added for
+                # commit, not just unmark them.
+                self._gitcommand(['reset', 'HEAD'])
+                cmd.append('-f')
+            self._gitcommand(cmd + args)
 
         def rawcheckout():
             # no branch to checkout, check it out with no branch
@@ -768,7 +786,7 @@ class gitsubrepo(abstractsubrepo):
                           self._relpath)
             self._ui.warn(_('check out a git branch if you intend '
                             'to make changes\n'))
-            self._gitcommand(['checkout', '-q', revision])
+            checkout(['-q', revision])
 
         if revision not in rev2branch:
             rawcheckout()
@@ -778,12 +796,12 @@ class gitsubrepo(abstractsubrepo):
         for b in branches:
             if b == 'refs/heads/master':
                 # master trumps all other branches
-                self._gitcommand(['checkout', 'refs/heads/master'])
+                checkout(['refs/heads/master'])
                 return
             if not firstlocalbranch and not b.startswith('refs/remotes/'):
                 firstlocalbranch = b
         if firstlocalbranch:
-            self._gitcommand(['checkout', firstlocalbranch])
+            checkout([firstlocalbranch])
             return
 
         tracking = self._gittracking(branch2rev.keys())
@@ -798,7 +816,7 @@ class gitsubrepo(abstractsubrepo):
         if remote not in tracking:
             # create a new local tracking branch
             local = remote.split('/', 2)[2]
-            self._gitcommand(['checkout', '-b', local, remote])
+            checkout(['-b', local, remote])
         elif self._gitisancestor(branch2rev[tracking[remote]], remote):
             # When updating to a tracked remote branch,
             # if the local tracking branch is downstream of it,
@@ -807,7 +825,7 @@ class gitsubrepo(abstractsubrepo):
             # Since we are only looking at branching at update, we need to
             # detect this situation and perform this action lazily.
             if tracking[remote] != self._gitcurrentbranch():
-                self._gitcommand(['checkout', tracking[remote]])
+                checkout([tracking[remote]])
             self._gitcommand(['merge', '--ff', remote])
         else:
             # a real merge would be required, just checkout the revision
