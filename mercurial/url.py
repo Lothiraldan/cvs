@@ -71,6 +71,38 @@ def netlocunsplit(host, port, user=None, passwd=None):
         return userpass + '@' + hostport
     return hostport
 
+def readauthforuri(ui, uri):
+    # Read configuration
+    config = dict()
+    for key, val in ui.configitems('auth'):
+        if '.' not in key:
+            ui.warn(_("ignoring invalid [auth] key '%s'\n") % key)
+            continue
+        group, setting = key.rsplit('.', 1)
+        gdict = config.setdefault(group, dict())
+        if setting in ('username', 'cert', 'key'):
+            val = util.expandpath(val)
+        gdict[setting] = val
+
+    # Find the best match
+    scheme, hostpath = uri.split('://', 1)
+    bestlen = 0
+    bestauth = None
+    for group, auth in config.iteritems():
+        prefix = auth.get('prefix')
+        if not prefix:
+            continue
+        p = prefix.split('://', 1)
+        if len(p) > 1:
+            schemes, prefix = [p[0]], p[1]
+        else:
+            schemes = (auth.get('schemes') or 'https').split()
+        if (prefix == '*' or hostpath.startswith(prefix)) and \
+            len(prefix) > bestlen and scheme in schemes:
+            bestlen = len(prefix)
+            bestauth = group, auth
+    return bestauth
+
 _safe = ('abcdefghijklmnopqrstuvwxyz'
          'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
          '0123456789' '_.-/')
@@ -123,9 +155,11 @@ class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
             return (user, passwd)
 
         if not user:
-            auth = self.readauthtoken(authuri)
-            if auth:
+            res = readauthforuri(self.ui, authuri)
+            if res:
+                group, auth = res
                 user, passwd = auth.get('username'), auth.get('password')
+                self.ui.debug("using auth.%s.* for authentication\n" % group)
         if not user or not passwd:
             if not self.ui.interactive():
                 raise util.Abort(_('http authorization required'))
@@ -147,38 +181,6 @@ class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def _writedebug(self, user, passwd):
         msg = _('http auth: user %s, password %s\n')
         self.ui.debug(msg % (user, passwd and '*' * len(passwd) or 'not set'))
-
-    def readauthtoken(self, uri):
-        # Read configuration
-        config = dict()
-        for key, val in self.ui.configitems('auth'):
-            if '.' not in key:
-                self.ui.warn(_("ignoring invalid [auth] key '%s'\n") % key)
-                continue
-            group, setting = key.split('.', 1)
-            gdict = config.setdefault(group, dict())
-            if setting in ('username', 'cert', 'key'):
-                val = util.expandpath(val)
-            gdict[setting] = val
-
-        # Find the best match
-        scheme, hostpath = uri.split('://', 1)
-        bestlen = 0
-        bestauth = None
-        for auth in config.itervalues():
-            prefix = auth.get('prefix')
-            if not prefix:
-                continue
-            p = prefix.split('://', 1)
-            if len(p) > 1:
-                schemes, prefix = [p[0]], p[1]
-            else:
-                schemes = (auth.get('schemes') or 'https').split()
-            if (prefix == '*' or hostpath.startswith(prefix)) and \
-                len(prefix) > bestlen and scheme in schemes:
-                bestlen = len(prefix)
-                bestauth = auth
-        return bestauth
 
 class proxyhandler(urllib2.ProxyHandler):
     def __init__(self, ui):
@@ -258,18 +260,36 @@ class httpsendfile(object):
     defines a __len__ attribute to feed the Content-Length header.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, ui, *args, **kwargs):
         # We can't just "self._data = open(*args, **kwargs)" here because there
         # is an "open" function defined in this module that shadows the global
         # one
+        self.ui = ui
         self._data = __builtin__.open(*args, **kwargs)
-        self.read = self._data.read
         self.seek = self._data.seek
         self.close = self._data.close
         self.write = self._data.write
+        self._len = os.fstat(self._data.fileno()).st_size
+        self._pos = 0
+        self._total = len(self) / 1024 * 2
+
+    def read(self, *args, **kwargs):
+        try:
+            ret = self._data.read(*args, **kwargs)
+        except EOFError:
+            self.ui.progress(_('sending'), None)
+        self._pos += len(ret)
+        # We pass double the max for total because we currently have
+        # to send the bundle twice in the case of a server that
+        # requires authentication. Since we can't know until we try
+        # once whether authentication will be required, just lie to
+        # the user and maybe the push succeeds suddenly at 50%.
+        self.ui.progress(_('sending'), self._pos / 1024,
+                         unit=_('kb'), total=self._total)
+        return ret
 
     def __len__(self):
-        return os.fstat(self._data.fileno()).st_size
+        return self._len
 
 def _gen_sendfile(connection):
     def _sendfile(self, data):
@@ -603,7 +623,13 @@ if has_https:
             return keepalive.KeepAliveHandler._start_transaction(self, h, req)
 
         def https_open(self, req):
-            self.auth = self.pwmgr.readauthtoken(req.get_full_url())
+            res = readauthforuri(self.ui, req.get_full_url())
+            if res:
+                group, auth = res
+                self.auth = auth
+                self.ui.debug("using auth.%s.* for authentication\n" % group)
+            else:
+                self.auth = None
             return self.do_open(self._makeconnection, req)
 
         def _makeconnection(self, host, port=None, *args, **kwargs):

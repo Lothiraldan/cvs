@@ -147,6 +147,11 @@ def revrange(repo, revs):
         # attempt to parse old-style ranges first to deal with
         # things like old-tag which contain query metacharacters
         try:
+            if isinstance(spec, int):
+                seen.add(spec)
+                l.append(spec)
+                continue
+
             if revrangesep in spec:
                 start, end = spec.split(revrangesep, 1)
                 start = revfix(repo, start, 0)
@@ -228,7 +233,8 @@ def make_file(repo, pat, node=None,
     writable = 'w' in mode or 'a' in mode
 
     if not pat or pat == '-':
-        return writable and sys.stdout or sys.stdin
+        fp = writable and sys.stdout or sys.stdin
+        return os.fdopen(os.dup(fp.fileno()), mode)
     if hasattr(pat, 'write') and writable:
         return pat
     if hasattr(pat, 'read') and 'r' in mode:
@@ -694,6 +700,8 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
         for chunk in patch.diff(repo, prev, node, opts=opts):
             fp.write(chunk)
 
+        fp.flush()
+
     for seqno, rev in enumerate(revs):
         single(rev, seqno + 1, fp)
 
@@ -796,7 +804,6 @@ class changeset_printer(object):
         branch = ctx.branch()
         # don't show the default branch name
         if branch != 'default':
-            branch = encoding.tolocal(branch)
             self.ui.write(_("branch:      %s\n") % branch,
                           label='log.branch')
         for tag in self.repo.nodetags(changenode):
@@ -1352,8 +1359,7 @@ def commitforceeditor(repo, ctx, subs):
     if ctx.p2():
         edittext.append(_("HG: branch merge"))
     if ctx.branch():
-        edittext.append(_("HG: branch '%s'")
-                        % encoding.tolocal(ctx.branch()))
+        edittext.append(_("HG: branch '%s'") % ctx.branch())
     edittext.extend([_("HG: subrepo %s") % s for s in subs])
     edittext.extend([_("HG: added %s") % f for f in added])
     edittext.extend([_("HG: changed %s") % f for f in modified])

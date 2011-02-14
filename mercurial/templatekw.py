@@ -145,10 +145,12 @@ def getrenamedfn(repo, endrev=None):
 def showauthor(repo, ctx, templ, **args):
     return ctx.user()
 
+def showbranch(**args):
+    return args['ctx'].branch()
+
 def showbranches(**args):
     branch = args['ctx'].branch()
     if branch != 'default':
-        branch = encoding.tolocal(branch)
         return showlist('branch', [branch], plural='branches', **args)
 
 def showchildren(**args):
@@ -163,9 +165,8 @@ def showdescription(repo, ctx, templ, **args):
     return ctx.description().strip()
 
 def showdiffstat(repo, ctx, templ, **args):
-    diff = patch.diff(repo, ctx.parents()[0].node(), ctx.node())
     files, adds, removes = 0, 0, 0
-    for i in patch.diffstatdata(util.iterlines(diff)):
+    for i in patch.diffstatdata(util.iterlines(ctx.diff())):
         files += 1
         adds += i[1]
         removes += i[2]
@@ -249,6 +250,7 @@ def showtags(**args):
 # revcache - a cache dictionary for the current revision
 keywords = {
     'author': showauthor,
+    'branch': showbranch,
     'branches': showbranches,
     'children': showchildren,
     'date': showdate,

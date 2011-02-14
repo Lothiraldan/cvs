@@ -214,7 +214,7 @@ test pushkeys and bookmarks
   $ hg debugpushkey --config ui.ssh="python ../dummyssh" ssh://user@dummy/remote bookmarks
   foo	1160648e36cec0054048a7edc4110c6f84fde594
   $ hg book -f foo
-  $ hg push
+  $ hg push --traceback
   pushing to ssh://user@dummy/remote
   searching for changes
   no changes found
@@ -233,6 +233,9 @@ test pushkeys and bookmarks
   importing bookmark foo
   $ hg book -d foo
   $ hg push -B foo
+  pushing to ssh://user@dummy/remote
+  searching for changes
+  no changes found
   deleting remote bookmark foo
 
 a bad, evil hook that prints to stdout
@@ -277,8 +280,6 @@ push should succeed even though it has an unexpected response
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R local serve --stdio
   Got arguments 1:user@dummy 2:hg -R $TESTTMP/local serve --stdio
-  Got arguments 1:user@dummy 2:hg -R remote serve --stdio
-  Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
