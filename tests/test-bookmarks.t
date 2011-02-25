@@ -1,6 +1,3 @@
-  $ echo "[extensions]" >> $HGRCPATH
-  $ echo "bookmarks=" >> $HGRCPATH
-
   $ hg init
 
 no bookmarks
@@ -225,6 +222,15 @@ invalid bookmark
   abort: bookmark 'foo:bar' contains illegal character
   [255]
 
+the bookmark extension should be ignored now that it is part of core
+
+  $ echo "[extensions]" >> $HGRCPATH
+  $ echo "bookmarks=" >> $HGRCPATH
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+   * Z                         2:db815d6d32e6
+     x  y                      2:db815d6d32e6
 test summary
 
   $ hg summary
@@ -234,3 +240,7 @@ test summary
   commit: (clean)
   update: 1 new changesets, 2 branch heads (merge)
 
+test id
+
+  $ hg id
+  db815d6d32e6 tip Y/Z/x  y
