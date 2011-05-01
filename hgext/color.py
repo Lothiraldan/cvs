@@ -100,7 +100,7 @@ disable color.
 
 '''
 
-import os
+import os, sys
 
 from mercurial import commands, dispatch, extensions, ui as uimod, util
 from mercurial.i18n import _
@@ -301,17 +301,22 @@ def uisetup(ui):
     global _terminfo_params
     if ui.plain():
         return
+
+    formatted = (os.environ.get('TERM') != 'dumb' and ui.formatted())
     mode = ui.config('color', 'mode', 'auto')
     if mode == 'auto':
         if os.name == 'nt' and 'TERM' not in os.environ:
             # looks line a cmd.exe console, use win32 API or nothing
             mode = w32effects and 'win32' or 'none'
         else:
-            _terminfosetup(ui)
-            if not _terminfo_params:
-                mode = 'ansi'
+            if not formatted:
+                _terminfo_params = False
             else:
-                mode = 'terminfo'
+                _terminfosetup(ui)
+                if not _terminfo_params:
+                    mode = 'ansi'
+                else:
+                    mode = 'terminfo'
     if mode == 'win32':
         if w32effects is None:
             # only warn if color.mode is explicitly set to win32
@@ -329,8 +334,7 @@ def uisetup(ui):
         auto = coloropt == 'auto'
         always = util.parsebool(coloropt)
         if (always or
-            (always is None and
-             (auto and (os.environ.get('TERM') != 'dumb' and ui_.formatted())))):
+            (always is None and auto and formatted)):
             colorui._colormode = mode
             colorui.__bases__ = (ui_.__class__,)
             ui_.__class__ = colorui

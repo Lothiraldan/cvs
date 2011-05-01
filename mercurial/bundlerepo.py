@@ -15,7 +15,7 @@ from node import nullid
 from i18n import _
 import os, struct, tempfile, shutil
 import changegroup, util, mdiff, discovery
-import localrepo, changelog, manifest, filelog, revlog, error, url
+import localrepo, changelog, manifest, filelog, revlog, error
 
 class bundlerevlog(revlog.revlog):
     def __init__(self, opener, indexfile, bundle,
@@ -274,7 +274,7 @@ def instance(ui, path, create):
             cwd = os.path.join(cwd,'')
             if parentpath.startswith(cwd):
                 parentpath = parentpath[len(cwd):]
-    u = url.url(path)
+    u = util.url(path)
     path = u.localpath()
     if u.scheme == 'bundle':
         s = path.split("+", 1)
@@ -287,9 +287,8 @@ def instance(ui, path, create):
     return bundlerepository(ui, repopath, bundlename)
 
 def getremotechanges(ui, repo, other, revs=None, bundlename=None,
-                     force=False, usecommon=False):
-    tmp = discovery.findcommonincoming(repo, other, heads=revs, force=force,
-                                       commononly=usecommon)
+                     force=False):
+    tmp = discovery.findcommonincoming(repo, other, heads=revs, force=force)
     common, incoming, rheads = tmp
     if not incoming:
         try:
@@ -305,7 +304,7 @@ def getremotechanges(ui, repo, other, revs=None, bundlename=None,
         if revs is None and other.capable('changegroupsubset'):
             revs = rheads
 
-        if usecommon:
+        if other.capable('getbundle'):
             cg = other.getbundle('incoming', common=common, heads=revs)
         elif revs is None:
             cg = other.changegroup(incoming, "incoming")

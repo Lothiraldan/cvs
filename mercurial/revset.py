@@ -13,6 +13,8 @@ from i18n import _
 
 elements = {
     "(": (20, ("group", 1, ")"), ("func", 1, ")")),
+    "~": (18, None, ("ancestor", 18)),
+    "^": (18, None, ("parent", 18), ("parentpost", 18)),
     "-": (5, ("negate", 19), ("minus", 5)),
     "::": (17, ("dagrangepre", 17), ("dagrange", 17),
            ("dagrangepost", 17)),
@@ -47,7 +49,7 @@ def tokenize(program):
         elif c == '.' and program[pos:pos + 2] == '..': # look ahead carefully
             yield ('..', None, pos)
             pos += 1 # skip ahead
-        elif c in "():,-|&+!": # handle simple operators
+        elif c in "():,-|&+!~^": # handle simple operators
             yield (c, None, pos)
         elif (c in '"\'' or c == 'r' and
               program[pos:pos + 2] in ("r'", 'r"')): # handle quoted strings
@@ -208,6 +210,22 @@ def ancestors(repo, subset, x):
         return []
     s = set(repo.changelog.ancestors(*args)) | set(args)
     return [r for r in subset if r in s]
+
+def ancestorspec(repo, subset, x, n):
+    """``set~n``
+    Changesets that are the Nth ancestor (first parents only) of a changeset in set.
+    """
+    try:
+        n = int(n[1])
+    except ValueError:
+        raise error.ParseError(_("~ expects a number"))
+    ps = set()
+    cl = repo.changelog
+    for r in getset(repo, subset, x):
+        for i in range(n):
+            r = cl.parentrevs(r)[0]
+        ps.add(r)
+    return [r for r in subset if r in ps]
 
 def author(repo, subset, x):
     """``author(string)``
@@ -452,6 +470,20 @@ def limit(repo, subset, x):
         raise error.ParseError(_("limit expects a number"))
     return getset(repo, subset, l[0])[:lim]
 
+def last(repo, subset, x):
+    """``last(set, n)``
+    Last n members of set.
+    """
+    # i18n: "last" is a keyword
+    l = getargs(x, 2, 2, _("last requires two arguments"))
+    try:
+        # i18n: "last" is a keyword
+        lim = int(getstring(l[1], _("last requires a number")))
+    except ValueError:
+        # i18n: "last" is a keyword
+        raise error.ParseError(_("last expects a number"))
+    return getset(repo, subset, l[0])[-lim:]
+
 def maxrev(repo, subset, x):
     """``max(set)``
     Changeset with highest revision number in set.
@@ -522,10 +554,10 @@ def outgoing(repo, subset, x):
         revs = [repo.lookup(rev) for rev in revs]
     other = hg.repository(hg.remoteui(repo, {}), dest)
     repo.ui.pushbuffer()
-    o = discovery.findoutgoing(repo, other)
+    common, _anyinc, _heads = discovery.findcommonincoming(repo, other)
     repo.ui.popbuffer()
     cl = repo.changelog
-    o = set([cl.rev(r) for r in repo.changelog.nodesbetween(o, revs)[0]])
+    o = set([cl.rev(r) for r in repo.changelog.findmissing(common, revs)])
     return [r for r in subset if r in o]
 
 def p1(repo, subset, x):
@@ -572,6 +604,31 @@ def parents(repo, subset, x):
     cl = repo.changelog
     for r in getset(repo, range(len(repo)), x):
         ps.update(cl.parentrevs(r))
+    return [r for r in subset if r in ps]
+
+def parentspec(repo, subset, x, n):
+    """``set^0``
+    The set.
+    ``set^1`` (or ``set^``), ``set^2``
+    First or second parent, respectively, of all changesets in set.
+    """
+    try:
+        n = int(n[1])
+        if n not in (0, 1, 2):
+            raise ValueError
+    except ValueError:
+        raise error.ParseError(_("^ expects a number 0, 1, or 2"))
+    ps = set()
+    cl = repo.changelog
+    for r in getset(repo, subset, x):
+        if n == 0:
+            ps.add(r)
+        elif n == 1:
+            ps.add(cl.parentrevs(r)[0])
+        elif n == 2:
+            parents = cl.parentrevs(r)
+            if len(parents) > 1:
+                ps.add(parents[1])
     return [r for r in subset if r in ps]
 
 def present(repo, subset, x):
@@ -724,6 +781,7 @@ symbols = {
     "head": head,
     "heads": heads,
     "keyword": keyword,
+    "last": last,
     "limit": limit,
     "max": maxrev,
     "min": minrev,
@@ -754,6 +812,9 @@ methods = {
     "not": notset,
     "list": listset,
     "func": func,
+    "ancestor": ancestorspec,
+    "parent": parentspec,
+    "parentpost": p1,
 }
 
 def optimize(x, small):
@@ -799,9 +860,12 @@ def optimize(x, small):
     elif op == 'not':
         o = optimize(x[1], not small)
         return o[0], (op, o[1])
+    elif op == 'parentpost':
+        o = optimize(x[1], small)
+        return o[0], (op, o[1])
     elif op == 'group':
         return optimize(x[1], small)
-    elif op in 'range list':
+    elif op in 'range list parent ancestorspec':
         wa, ta = optimize(x[1], small)
         wb, tb = optimize(x[2], small)
         return wa + wb, (op, ta, tb)
@@ -825,14 +889,89 @@ def optimize(x, small):
         return w + wa, (op, x[1], ta)
     return 1, x
 
+class revsetalias(object):
+    funcre = re.compile('^([^(]+)\(([^)]+)\)$')
+    args = ()
+
+    def __init__(self, token, value):
+        '''Aliases like:
+
+        h = heads(default)
+        b($1) = ancestors($1) - ancestors(default)
+        '''
+        if isinstance(token, tuple):
+            self.type, self.name = token
+        else:
+            m = self.funcre.search(token)
+            if m:
+                self.type = 'func'
+                self.name = m.group(1)
+                self.args = [x.strip() for x in m.group(2).split(',')]
+            else:
+                self.type = 'symbol'
+                self.name = token
+
+        if isinstance(value, str):
+            for arg in self.args:
+                value = value.replace(arg, repr(arg))
+            self.replacement, pos = parse(value)
+            if pos != len(value):
+                raise error.ParseError('invalid token', pos)
+        else:
+            self.replacement = value
+
+    def match(self, tree):
+        if not tree:
+            return False
+        if tree == (self.type, self.name):
+            return True
+        if tree[0] != self.type:
+            return False
+        if len(tree) > 1 and tree[1] != ('symbol', self.name):
+            return False
+        # 'func' + funcname + args
+        if ((self.args and len(tree) != 3) or
+            (len(self.args) == 1 and tree[2][0] == 'list') or
+            (len(self.args) > 1 and (tree[2][0] != 'list' or
+                                     len(tree[2]) - 1 != len(self.args)))):
+            raise error.ParseError('invalid amount of arguments', len(tree) - 2)
+        return True
+
+    def replace(self, tree):
+        if tree == (self.type, self.name):
+            return self.replacement
+        result = self.replacement
+        def getsubtree(i):
+            if tree[2][0] == 'list':
+                return tree[2][i + 1]
+            return tree[i + 2]
+        for i, v in enumerate(self.args):
+            valalias = revsetalias(('string', v), getsubtree(i))
+            result = valalias.process(result)
+        return result
+
+    def process(self, tree):
+        if self.match(tree):
+            return self.replace(tree)
+        if isinstance(tree, tuple):
+            return tuple(map(self.process, tree))
+        return tree
+
+def findaliases(ui, tree):
+    for k, v in ui.configitems('revsetalias'):
+        alias = revsetalias(k, v)
+        tree = alias.process(tree)
+    return tree
+
 parse = parser.parser(tokenize, elements).parse
 
-def match(spec):
+def match(ui, spec):
     if not spec:
         raise error.ParseError(_("empty query"))
     tree, pos = parse(spec)
     if (pos != len(spec)):
         raise error.ParseError("invalid token", pos)
+    tree = findaliases(ui, tree)
     weight, tree = optimize(tree, True)
     def mfunc(repo, subset):
         return getset(repo, subset, tree)

@@ -2,7 +2,7 @@
   $ export HGENCODING
 
   $ try() {
-  >   hg debugrevspec --debug $@
+  >   hg debugrevspec --debug "$@"
   > }
 
   $ log() {
@@ -374,3 +374,64 @@ or operator should preserve ordering:
   4
   2
   9
+
+parentrevspec
+
+  $ log 'merge()^0'
+  6
+  $ log 'merge()^'
+  5
+  $ log 'merge()^1'
+  5
+  $ log 'merge()^2'
+  4
+  $ log 'merge()^^'
+  3
+  $ log 'merge()^1^'
+  3
+  $ log 'merge()^^^'
+  1
+
+  $ log 'merge()~0'
+  6
+  $ log 'merge()~1'
+  5
+  $ log 'merge()~2'
+  3
+  $ log 'merge()~2^1'
+  1
+  $ log 'merge()~3'
+  1
+
+  $ log '(-3:tip)^'
+  4
+  6
+  8
+
+  $ log 'tip^foo'
+  hg: parse error: ^ expects a number 0, 1, or 2
+  [255]
+
+aliases:
+
+  $ echo '[revsetalias]' >> .hg/hgrc
+  $ echo 'm = merge()' >> .hg/hgrc
+  $ echo 'd($1) = reverse(sort($1, date))' >> .hg/hgrc
+  $ echo 'rs(ARG1, ARG2) = reverse(sort(ARG1, ARG2))' >> .hg/hgrc
+
+  $ try m
+  ('symbol', 'm')
+  ('func', ('symbol', 'merge'), None)
+  6
+  $ try 'd(2:5)'
+  ('func', ('symbol', 'd'), ('range', ('symbol', '2'), ('symbol', '5')))
+  ('func', ('symbol', 'reverse'), ('func', ('symbol', 'sort'), ('list', ('range', ('symbol', '2'), ('symbol', '5')), ('symbol', 'date'))))
+  4
+  5
+  3
+  2
+  $ try 'rs(2 or 3, date)'
+  ('func', ('symbol', 'rs'), ('list', ('or', ('symbol', '2'), ('symbol', '3')), ('symbol', 'date')))
+  ('func', ('symbol', 'reverse'), ('func', ('symbol', 'sort'), ('list', ('or', ('symbol', '2'), ('symbol', '3')), ('symbol', 'date'))))
+  3
+  2

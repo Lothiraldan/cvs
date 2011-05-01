@@ -1393,3 +1393,38 @@ Do not crash or produce strange graphs if history is buggy
   | | |  date:        Thu Jan 01 00:00:32 1970 +0000
   | | |  summary:     (32) expand
   | | |
+
+Test log -G options
+
+  $ hg log -G -u 'something nice'
+  $ hg log -G -b 'something nice'
+  abort: unknown revision 'something nice'!
+  [255]
+  $ hg log -G -k 'something nice'
+  $ hg log -G --only-branch 'something nice'
+  abort: unknown revision 'something nice'!
+  [255]
+  $ hg log -G --include 'some file' --exclude 'another file'
+  $ hg log -G --follow  --template 'nodetag {rev}\n' | grep nodetag | wc -l
+  \s*36 (re)
+  $ hg log -G --removed --template 'nodetag {rev}\n' | grep nodetag | wc -l
+  \s*0 (re)
+  $ hg log -G --only-merges --template 'nodetag {rev}\n' | grep nodetag | wc -l
+  \s*28 (re)
+  $ hg log -G --no-merges --template 'nodetag {rev}\n' | grep nodetag | wc -l
+  \s*9 (re)
+  $ hg log -G -d 'brace ) in a date'
+  abort: invalid date: 'brace ) in a date'
+  [255]
+  $ hg log -G -P 32 --template '{rev}\n'
+  @  36
+  |
+  o  35
+  |
+  o  34
+  |
+  | o  33
+  | |
+  $ hg log -G --follow a
+  abort: -G/--graph option is incompatible with --follow with file argument
+  [255]

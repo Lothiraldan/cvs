@@ -9,7 +9,7 @@
 
 from i18n import _
 import changelog, byterange, url, error
-import localrepo, manifest, util, store
+import localrepo, manifest, util, scmutil, store
 import urllib, urllib2, errno
 
 class httprangereader(object):
@@ -67,17 +67,17 @@ def build_opener(ui, authinfo):
     urlopener = url.opener(ui, authinfo)
     urlopener.add_handler(byterange.HTTPRangeHandler())
 
-    def opener(base):
-        """return a function that opens files over http"""
-        p = base
-        def o(path, mode="r", atomictemp=None):
+    class statichttpopener(scmutil.abstractopener):
+        def __init__(self, base):
+            self.base = base
+
+        def __call__(self, path, mode="r", atomictemp=None):
             if mode not in ('r', 'rb'):
                 raise IOError('Permission denied')
-            f = "/".join((p, urllib.quote(path)))
+            f = "/".join((self.base, urllib.quote(path)))
             return httprangereader(f, urlopener)
-        return o
 
-    return opener
+    return statichttpopener
 
 class statichttprepository(localrepo.localrepository):
     def __init__(self, ui, path):
@@ -85,7 +85,7 @@ class statichttprepository(localrepo.localrepository):
         self.ui = ui
 
         self.root = path
-        u = url.url(path.rstrip('/') + "/.hg")
+        u = util.url(path.rstrip('/') + "/.hg")
         self.path, authinfo = u.authinfo()
 
         opener = build_opener(ui, authinfo)

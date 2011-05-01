@@ -10,7 +10,7 @@ from lock import release
 from i18n import _, gettext
 import os, re, sys, difflib, time, tempfile
 import hg, scmutil, util, revlog, extensions, copies, error, bookmarks
-import patch, help, mdiff, url, encoding, templatekw, discovery
+import patch, help, url, encoding, templatekw, discovery
 import archival, changegroup, cmdutil, sshserver, hbisect, hgweb, hgweb.server
 import merge as mergemod
 import minirst, revset, templatefilters
@@ -696,48 +696,20 @@ def bundle(ui, repo, fname, dest=None, **opts):
         if dest:
             raise util.Abort(_("--base is incompatible with specifying "
                                "a destination"))
-        base = [repo.lookup(rev) for rev in base]
-        # create the right base
-        # XXX: nodesbetween / changegroup* should be "fixed" instead
-        o = []
-        has = set((nullid,))
-        for n in base:
-            has.update(repo.changelog.reachable(n))
-        if revs:
-            revs = [repo.lookup(rev) for rev in revs]
-            visit = revs[:]
-            has.difference_update(visit)
-        else:
-            visit = repo.changelog.heads()
-        seen = {}
-        while visit:
-            n = visit.pop(0)
-            parents = [p for p in repo.changelog.parents(n) if p not in has]
-            if len(parents) == 0:
-                if n not in has:
-                    o.append(n)
-            else:
-                for p in parents:
-                    if p not in seen:
-                        seen[p] = 1
-                        visit.append(p)
+        common = [repo.lookup(rev) for rev in base]
     else:
         dest = ui.expandpath(dest or 'default-push', dest or 'default')
         dest, branches = hg.parseurl(dest, opts.get('branch'))
         other = hg.repository(hg.remoteui(repo, opts), dest)
         revs, checkout = hg.addbranchrevs(repo, other, branches, revs)
-        if revs:
-            revs = [repo.lookup(rev) for rev in revs]
-        o = discovery.findoutgoing(repo, other, force=opts.get('force'))
+        inc = discovery.findcommonincoming(repo, other, force=opts.get('force'))
+        common, _anyinc, _heads = inc
 
-    if not o:
+    nodes = revs and map(repo.lookup, revs) or revs
+    cg = repo.getbundle('bundle', common=common, heads=nodes)
+    if not cg:
         ui.status(_("no changes found\n"))
         return 1
-
-    if revs:
-        cg = repo.changegroupsubset(o, revs, 'bundle')
-    else:
-        cg = repo.changegroup(o, 'bundle')
 
     bundletype = opts.get('type', 'bzip2').lower()
     btypes = {'none': 'HG10UN', 'bzip2': 'HG10BZ', 'gzip': 'HG10GZ'}
@@ -1324,7 +1296,10 @@ def debugrevspec(ui, repo, expr):
     if ui.verbose:
         tree = revset.parse(expr)[0]
         ui.note(tree, "\n")
-    func = revset.match(expr)
+        newtree = revset.findaliases(ui, tree)
+        if newtree != tree:
+            ui.note(newtree, "\n")
+    func = revset.match(ui, expr)
     for c in func(repo, range(len(repo))):
         ui.write("%s\n" % c)
 
@@ -2635,7 +2610,7 @@ def incoming(ui, repo, source="default", **opts):
         if 'bookmarks' not in other.listkeys('namespaces'):
             ui.warn(_("remote doesn't support bookmarks\n"))
             return 0
-        ui.status(_('comparing with %s\n') % url.hidepassword(source))
+        ui.status(_('comparing with %s\n') % util.hidepassword(source))
         return bookmarks.diff(ui, repo, other)
 
     ret = hg.incoming(ui, repo, source, opts)
@@ -2922,7 +2897,7 @@ def outgoing(ui, repo, dest=None, **opts):
         if 'bookmarks' not in other.listkeys('namespaces'):
             ui.warn(_("remote doesn't support bookmarks\n"))
             return 0
-        ui.status(_('comparing with %s\n') % url.hidepassword(dest))
+        ui.status(_('comparing with %s\n') % util.hidepassword(dest))
         return bookmarks.diff(ui, other, repo)
 
     ret = hg.outgoing(ui, repo, dest, opts)
@@ -2996,13 +2971,13 @@ def paths(ui, repo, search=None):
     if search:
         for name, path in ui.configitems("paths"):
             if name == search:
-                ui.write("%s\n" % url.hidepassword(path))
+                ui.write("%s\n" % util.hidepassword(path))
                 return
         ui.warn(_("not found!\n"))
         return 1
     else:
         for name, path in ui.configitems("paths"):
-            ui.write("%s = %s\n" % (name, url.hidepassword(path)))
+            ui.write("%s = %s\n" % (name, util.hidepassword(path)))
 
 def postincoming(ui, repo, modheads, optupdate, checkout):
     if modheads == 0:
@@ -3045,7 +3020,7 @@ def pull(ui, repo, source="default", **opts):
     """
     source, branches = hg.parseurl(ui.expandpath(source), opts.get('branch'))
     other = hg.repository(hg.remoteui(repo, opts), source)
-    ui.status(_('pulling from %s\n') % url.hidepassword(source))
+    ui.status(_('pulling from %s\n') % util.hidepassword(source))
     revs, checkout = hg.addbranchrevs(repo, other, branches, opts.get('rev'))
 
     if opts.get('bookmark'):
@@ -3128,7 +3103,7 @@ def push(ui, repo, dest=None, **opts):
 
     dest = ui.expandpath(dest or 'default-push', dest or 'default')
     dest, branches = hg.parseurl(dest, opts.get('branch'))
-    ui.status(_('pushing to %s\n') % url.hidepassword(dest))
+    ui.status(_('pushing to %s\n') % util.hidepassword(dest))
     revs, checkout = hg.addbranchrevs(repo, repo, branches, opts.get('rev'))
     other = hg.repository(hg.remoteui(repo, opts), dest)
     if revs:
@@ -3947,7 +3922,7 @@ def summary(ui, repo, **opts):
         source, branches = hg.parseurl(ui.expandpath('default'))
         other = hg.repository(hg.remoteui(repo, {}), source)
         revs, checkout = hg.addbranchrevs(repo, other, branches, opts.get('rev'))
-        ui.debug('comparing with %s\n' % url.hidepassword(source))
+        ui.debug('comparing with %s\n' % util.hidepassword(source))
         repo.ui.pushbuffer()
         common, incoming, rheads = discovery.findcommonincoming(repo, other)
         repo.ui.popbuffer()
@@ -3957,11 +3932,11 @@ def summary(ui, repo, **opts):
         dest, branches = hg.parseurl(ui.expandpath('default-push', 'default'))
         revs, checkout = hg.addbranchrevs(repo, repo, branches, None)
         other = hg.repository(hg.remoteui(repo, {}), dest)
-        ui.debug('comparing with %s\n' % url.hidepassword(dest))
+        ui.debug('comparing with %s\n' % util.hidepassword(dest))
         repo.ui.pushbuffer()
-        o = discovery.findoutgoing(repo, other)
+        common, _anyinc, _heads = discovery.findcommonincoming(repo, other)
         repo.ui.popbuffer()
-        o = repo.changelog.nodesbetween(o, None)[0]
+        o = repo.changelog.findmissing(common=common)
         if o:
             t.append(_('%d outgoing') % len(o))
         if 'bookmarks' in other.listkeys('namespaces'):

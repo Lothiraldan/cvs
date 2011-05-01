@@ -214,36 +214,50 @@ def get_revs(repo, rev_opt):
     else:
         return (len(repo) - 1, 0)
 
-def check_unsupported_flags(opts):
+def check_unsupported_flags(pats, opts):
     for op in ["follow_first", "copies", "newest_first"]:
         if op in opts and opts[op]:
             raise util.Abort(_("-G/--graph option is incompatible with --%s")
                              % op.replace("_", "-"))
+    if pats and opts.get('follow'):
+        raise util.Abort(_("-G/--graph option is incompatible with --follow "
+                           "with file argument"))
 
 def revset(pats, opts):
     """Return revset str built of revisions, log options and file patterns.
     """
-    opt2revset = dict(only_merges='merge',
-                      only_branch='branch',
-                      no_merges='not merge',
-                      include='file',
-                      exclude='not file',
-                      prune='not follow')
+    opt2revset = {
+        'follow': (0, 'follow()'),
+        'no_merges': (0, 'not merge()'),
+        'only_merges': (0, 'merge()'),
+        'removed': (0, 'removes("*")'),
+        'date': (1, 'date($)'),
+        'branch': (2, 'branch($)'),
+        'exclude': (2, 'not file($)'),
+        'include': (2, 'file($)'),
+        'keyword': (2, 'keyword($)'),
+        'only_branch': (2, 'branch($)'),
+        'prune': (2, 'not ($ or ancestors($))'),
+        'user': (2, 'user($)'),
+        }
     revset = []
     for op, val in opts.iteritems():
         if not val:
             continue
-        revop = opt2revset.get(op, op)
-        if op in ('follow', 'only_merges', 'no_merges'):
-            revset.append('%s()' % revop)
-        elif op in ("date", "keyword", "remove", "user", "branch",
-                    "only_branch", "prune"):
-            revset.append('%s(%s)' % (op, val))
-        elif op in ('include', 'exclude'):
-            for f in val:
-                revset.append('%s(%r)' % (op, f))
-        elif op == 'rev':
+        if op == 'rev':
+            # Already a revset
             revset.extend(val)
+        if op not in opt2revset:
+            continue
+        arity, revop = opt2revset[op]
+        revop = revop.replace('$', '%(val)r')
+        if arity == 0:
+            revset.append(revop)
+        elif arity == 1:
+            revset.append(revop % {'val': val})
+        else:
+            for f in val:
+                revset.append(revop % {'val': f})
 
     for path in pats:
         revset.append('file(%r)' % path)
@@ -275,7 +289,7 @@ def graphlog(ui, repo, *pats, **opts):
     directory.
     """
 
-    check_unsupported_flags(opts)
+    check_unsupported_flags(pats, opts)
 
     revs = revrange(repo, [revset(pats, opts)])
     revdag = graphmod.dagwalker(repo, revs)
@@ -301,7 +315,7 @@ def goutgoing(ui, repo, dest=None, **opts):
     directory.
     """
 
-    check_unsupported_flags(opts)
+    check_unsupported_flags([], opts)
     o = hg._outgoing(ui, repo, dest, opts)
     if o is None:
         return
@@ -323,7 +337,7 @@ def gincoming(ui, repo, source="default", **opts):
     def subreporecurse():
         return 1
 
-    check_unsupported_flags(opts)
+    check_unsupported_flags([], opts)
     def display(other, chlist, displayer):
         revdag = graphrevs(other, chlist, opts)
         showparents = [ctx.node() for ctx in repo[None].parents()]

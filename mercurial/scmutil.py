@@ -17,19 +17,42 @@ def checkfilename(f):
 def checkportable(ui, f):
     '''Check if filename f is portable and warn or abort depending on config'''
     checkfilename(f)
-    val = ui.config('ui', 'portablefilenames', 'warn')
-    lval = val.lower()
-    abort = os.name == 'nt' or lval == 'abort'
-    bval = util.parsebool(val)
-    if abort or lval == 'warn' or bval:
+    if showportabilityalert(ui):
         msg = util.checkwinfilename(f)
         if msg:
-            if abort:
-                raise util.Abort("%s: %r" % (msg, f))
-            ui.warn(_("warning: %s: %r\n") % (msg, f))
-    elif bval is None and lval != 'ignore':
+            portabilityalert(ui, "%s: %r" % (msg, f))
+
+def checkcasecollision(ui, f, files):
+    if f.lower() in files and files[f.lower()] != f:
+        portabilityalert(ui, _('possible case-folding collision for %s') % f)
+    files[f.lower()] = f
+
+def checkportabilityalert(ui):
+    '''check if the user's config requests nothing, a warning, or abort for
+    non-portable filenames'''
+    val = ui.config('ui', 'portablefilenames', 'warn')
+    lval = val.lower()
+    bval = util.parsebool(val)
+    abort = os.name == 'nt' or lval == 'abort'
+    warn = bval or lval == 'warn'
+    if bval is None and not (warn or abort or lval == 'ignore'):
         raise error.ConfigError(
             _("ui.portablefilenames value is invalid ('%s')") % val)
+    return abort, warn
+
+def showportabilityalert(ui):
+    '''check if the user wants any notification of portability problems'''
+    abort, warn = checkportabilityalert(ui)
+    return abort or warn
+
+def portabilityalert(ui, msg):
+    if not msg:
+        return
+    abort, warn = checkportabilityalert(ui)
+    if abort:
+        raise util.Abort("%s" % msg)
+    elif warn:
+        ui.warn(_("warning: %s\n") % msg)
 
 class path_auditor(object):
     '''ensure that a filesystem path contains no banned components.
@@ -106,7 +129,28 @@ class path_auditor(object):
         # want to add "foo/bar/baz" before checking if there's a "foo/.hg"
         self.auditeddir.update(prefixes)
 
-class opener(object):
+class abstractopener(object):
+    """Abstract base class; cannot be instantiated"""
+
+    def __init__(self, *args, **kwargs):
+        '''Prevent instantiation; don't call this from subclasses.'''
+        raise NotImplementedError('attempted instantiating ' + str(type(self)))
+
+    def read(self, *args, **kwargs):
+        fp = self(*args, **kwargs)
+        try:
+            return fp.read()
+        finally:
+            fp.close()
+
+    def write(self, data, *args, **kwargs):
+        fp = self(*args, **kwargs)
+        try:
+            return fp.write(data)
+        finally:
+            fp.close()
+
+class opener(abstractopener):
     '''Open files relative to a base directory
 
     This class is used to hide the details of COW semantics and
@@ -200,6 +244,16 @@ class opener(object):
             f.write(src)
             f.close()
             self._fixfilemode(dst)
+
+class filteropener(abstractopener):
+    '''Wrapper opener for filtering filenames with a function.'''
+
+    def __init__(self, opener, filter):
+        self._filter = filter
+        self._orig = opener
+
+    def __call__(self, path, *args, **kwargs):
+        return self._orig(self._filter(path), *args, **kwargs)
 
 def canonpath(root, cwd, myname, auditor=None):
     '''return the canonical path of myname, given cwd and root'''

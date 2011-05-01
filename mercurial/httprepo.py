@@ -28,7 +28,7 @@ class httprepository(wireproto.wirerepository):
         self.path = path
         self.caps = None
         self.handler = None
-        u = url.url(path)
+        u = util.url(path)
         if u.query or u.fragment:
             raise util.Abort(_('unsupported URL component: "%s"') %
                              (u.query or u.fragment))
@@ -76,7 +76,26 @@ class httprepository(wireproto.wirerepository):
         data = args.pop('data', None)
         headers = args.pop('headers', {})
         self.ui.debug("sending %s command\n" % cmd)
-        q = [('cmd', cmd)] + sorted(args.items())
+        q = [('cmd', cmd)]
+        headersize = 0
+        if len(args) > 0:
+            httpheader = self.capable('httpheader')
+            if httpheader:
+                headersize = int(httpheader.split(',')[0])
+        if headersize > 0:
+            # The headers can typically carry more data than the URL.
+            encargs = urllib.urlencode(sorted(args.items()))
+            headerfmt = 'X-HgArg-%s'
+            contentlen = headersize - len(headerfmt % '000' + ': \r\n')
+            headernum = 0
+            for i in xrange(0, len(encargs), contentlen):
+                headernum += 1
+                header = headerfmt % str(headernum)
+                headers[header] = encargs[i:i + contentlen]
+            varyheaders = [headerfmt % str(h) for h in range(1, headernum + 1)]
+            headers['Vary'] = ','.join(varyheaders)
+        else:
+            q += sorted(args.items())
         qs = '?%s' % urllib.urlencode(q)
         cu = "%s%s" % (self._url, qs)
         req = urllib2.Request(cu, data, headers)
@@ -111,12 +130,12 @@ class httprepository(wireproto.wirerepository):
         except AttributeError:
             proto = resp.headers['content-type']
 
-        safeurl = url.hidepassword(self._url)
+        safeurl = util.hidepassword(self._url)
         # accept old "text/plain" and "application/hg-changegroup" for now
         if not (proto.startswith('application/mercurial-') or
                 proto.startswith('text/plain') or
                 proto.startswith('application/hg-changegroup')):
-            self.ui.debug("requested URL: '%s'\n" % url.hidepassword(cu))
+            self.ui.debug("requested URL: '%s'\n" % util.hidepassword(cu))
             raise error.RepoError(
                 _("'%s' does not appear to be an hg repository:\n"
                   "---%%<--- (%s)\n%s\n---%%<---\n")
@@ -147,19 +166,18 @@ class httprepository(wireproto.wirerepository):
         # have to stream bundle to a temp file because we do not have
         # http 1.1 chunked transfer.
 
-        type = ""
         types = self.capable('unbundle')
-        # servers older than d1b16a746db6 will send 'unbundle' as a
-        # boolean capability
         try:
             types = types.split(',')
         except AttributeError:
+            # servers older than d1b16a746db6 will send 'unbundle' as a
+            # boolean capability. They only support headerless/uncompressed
+            # bundles.
             types = [""]
-        if types:
-            for x in types:
-                if x in changegroup.bundletypes:
-                    type = x
-                    break
+        for x in types:
+            if x in changegroup.bundletypes:
+                type = x
+                break
 
         tempname = changegroup.writebundle(cg, None, type)
         fp = url.httpsendfile(self.ui, tempname, "rb")

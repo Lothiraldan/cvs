@@ -14,7 +14,6 @@ import scmutil, util, extensions, hook, error
 import match as matchmod
 import merge as mergemod
 import tags as tagsmod
-import url as urlmod
 from lock import release
 import weakref, errno, os, time, inspect
 propertycache = util.propertycache
@@ -190,7 +189,7 @@ class localrepository(repo.repository):
         warned = [0]
         def validate(node):
             try:
-                r = self.changelog.rev(node)
+                self.changelog.rev(node)
                 return node
             except error.LookupError:
                 if not warned[0]:
@@ -1327,9 +1326,8 @@ class localrepository(repo.repository):
     def pull(self, remote, heads=None, force=False):
         lock = self.lock()
         try:
-            usecommon = remote.capable('getbundle')
             tmp = discovery.findcommonincoming(self, remote, heads=heads,
-                                               force=force, commononly=usecommon)
+                                               force=force)
             common, fetch, rheads = tmp
             if not fetch:
                 self.ui.status(_("no changes found\n"))
@@ -1341,7 +1339,7 @@ class localrepository(repo.repository):
                     # issue1320, avoid a race if remote changed after discovery
                     heads = rheads
 
-                if usecommon:
+                if remote.capable('getbundle'):
                     cg = remote.getbundle('pull', common=common,
                                           heads=heads or rheads)
                 elif heads is None:
@@ -1475,6 +1473,8 @@ class localrepository(repo.repository):
         if not heads:
             heads = cl.heads()
         common, missing = cl.findcommonmissing(common, heads)
+        if not missing:
+            return None
         return self._changegroupsubset(common, missing, heads, source)
 
     def _changegroupsubset(self, commonrevs, csets, heads, source):
@@ -1694,7 +1694,7 @@ class localrepository(repo.repository):
         cl.delayupdate()
         oldheads = cl.heads()
 
-        tr = self.transaction("\n".join([srctype, urlmod.hidepassword(url)]))
+        tr = self.transaction("\n".join([srctype, util.hidepassword(url)]))
         try:
             trp = weakref.proxy(tr)
             # pull off the changeset group
@@ -1918,10 +1918,18 @@ class localrepository(repo.repository):
         return self.pull(remote, heads)
 
     def pushkey(self, namespace, key, old, new):
-        return pushkey.push(self, namespace, key, old, new)
+        self.hook('prepushkey', throw=True, namespace=namespace, key=key,
+                  old=old, new=new)
+        ret = pushkey.push(self, namespace, key, old, new)
+        self.hook('pushkey', namespace=namespace, key=key, old=old, new=new,
+                  ret=ret)
+        return ret
 
     def listkeys(self, namespace):
-        return pushkey.list(self, namespace)
+        self.hook('prelistkeys', throw=True, namespace=namespace)
+        values = pushkey.list(self, namespace)
+        self.hook('listkeys', namespace=namespace, values=values)
+        return values
 
     def debugwireargs(self, one, two, three=None, four=None, five=None):
         '''used to test argument passing over the wire'''
@@ -1936,7 +1944,7 @@ def aftertrans(files):
     return a
 
 def instance(ui, path, create):
-    return localrepository(ui, urlmod.localpath(path), create)
+    return localrepository(ui, util.localpath(path), create)
 
 def islocal(path):
     return True

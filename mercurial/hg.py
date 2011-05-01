@@ -8,16 +8,16 @@
 
 from i18n import _
 from lock import release
-from node import hex, nullid, nullrev, short
+from node import hex, nullid
 import localrepo, bundlerepo, httprepo, sshrepo, statichttprepo, bookmarks
-import lock, util, extensions, error, encoding, node
-import cmdutil, discovery, url
+import lock, util, extensions, error, node
+import cmdutil, discovery
 import merge as mergemod
 import verify as verifymod
 import errno, os, shutil
 
 def _local(path):
-    path = util.expandpath(url.localpath(path))
+    path = util.expandpath(util.localpath(path))
     return (os.path.isfile(path) and bundlerepo or localrepo)
 
 def addbranchrevs(lrepo, repo, branches, revs):
@@ -54,7 +54,7 @@ def addbranchrevs(lrepo, repo, branches, revs):
 def parseurl(path, branches=None):
     '''parse url#branch, returning (url, (branch, branches))'''
 
-    u = url.url(path)
+    u = util.url(path)
     branch = None
     if u.fragment:
         branch = u.fragment
@@ -71,7 +71,7 @@ schemes = {
 }
 
 def _lookup(path):
-    u = url.url(path)
+    u = util.url(path)
     scheme = u.scheme or 'file'
     thing = schemes.get(scheme) or schemes['file']
     try:
@@ -221,8 +221,8 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     else:
         dest = ui.expandpath(dest)
 
-    dest = url.localpath(dest)
-    source = url.localpath(source)
+    dest = util.localpath(dest)
+    source = util.localpath(source)
 
     if os.path.exists(dest):
         if not os.path.isdir(dest):
@@ -248,7 +248,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
         abspath = origsource
         copy = False
         if src_repo.cancopy() and islocal(dest):
-            abspath = os.path.abspath(url.localpath(origsource))
+            abspath = os.path.abspath(util.localpath(origsource))
             copy = not pull and not rev
 
         if copy:
@@ -421,24 +421,19 @@ def _incoming(displaychlist, subreporecurse, ui, repo, source,
     """
     source, branches = parseurl(ui.expandpath(source), opts.get('branch'))
     other = repository(remoteui(repo, opts), source)
-    ui.status(_('comparing with %s\n') % url.hidepassword(source))
+    ui.status(_('comparing with %s\n') % util.hidepassword(source))
     revs, checkout = addbranchrevs(repo, other, branches, opts.get('rev'))
 
     if revs:
         revs = [other.lookup(rev) for rev in revs]
-    usecommon = other.capable('getbundle')
-    other, common, incoming, bundle = bundlerepo.getremotechanges(ui, repo, other,
-                                       revs, opts["bundle"], opts["force"],
-                                       usecommon=usecommon)
-    if not incoming:
+    other, common, anyinc, bundle = bundlerepo.getremotechanges(ui, repo, other,
+                                     revs, opts["bundle"], opts["force"])
+    if not anyinc:
         ui.status(_("no changes found\n"))
         return subreporecurse()
 
     try:
-        if usecommon:
-            chlist = other.changelog.findmissing(common, revs)
-        else:
-            chlist = other.changelog.nodesbetween(incoming, revs)[0]
+        chlist = other.changelog.findmissing(common, revs)
         displayer = cmdutil.show_changeset(ui, other, opts, buffered)
 
         # XXX once graphlog extension makes it into core,
@@ -482,18 +477,19 @@ def incoming(ui, repo, source, opts):
 def _outgoing(ui, repo, dest, opts):
     dest = ui.expandpath(dest or 'default-push', dest or 'default')
     dest, branches = parseurl(dest, opts.get('branch'))
-    ui.status(_('comparing with %s\n') % url.hidepassword(dest))
+    ui.status(_('comparing with %s\n') % util.hidepassword(dest))
     revs, checkout = addbranchrevs(repo, repo, branches, opts.get('rev'))
     if revs:
         revs = [repo.lookup(rev) for rev in revs]
 
     other = repository(remoteui(repo, opts), dest)
-    o = discovery.findoutgoing(repo, other, force=opts.get('force'))
+    inc = discovery.findcommonincoming(repo, other, force=opts.get('force'))
+    common, _anyinc, _heads = inc
+    o = repo.changelog.findmissing(common, revs)
     if not o:
         ui.status(_("no changes found\n"))
         return None
-
-    return repo.changelog.nodesbetween(o, revs)[0]
+    return o
 
 def outgoing(ui, repo, dest, opts):
     def recurse():
