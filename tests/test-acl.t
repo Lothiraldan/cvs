@@ -82,7 +82,9 @@ Extension disabled for lack of a hook
   hgrc = """
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -135,7 +137,9 @@ Extension disabled for lack of acl.sources
   pretxnchangegroup.acl = python:hgext.acl.hook
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   3 changesets found
   list of changesets:
@@ -192,7 +196,9 @@ No [acl.allow]/[acl.deny]
   sources = push
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   3 changesets found
   list of changesets:
@@ -258,7 +264,9 @@ Empty [acl.allow]
   [acl.allow]
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   3 changesets found
   list of changesets:
@@ -322,7 +330,9 @@ fred is allowed inside foo/
   foo/** = fred
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -390,7 +400,9 @@ Empty [acl.deny]
   [acl.deny]
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -455,7 +467,9 @@ fred is allowed inside foo/, but not foo/bar/ (case matters)
   foo/bar/** = fred
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -525,7 +539,9 @@ fred is allowed inside foo/, but not foo/Bar/
   foo/Bar/** = fred
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -592,7 +608,9 @@ fred is allowed inside foo/, but not foo/Bar/
   foo/Bar/** = fred
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -661,7 +679,9 @@ barney is allowed everywhere
   ** = barney
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -733,7 +753,9 @@ wilma can change files with a .txt extension
   **/*.txt = wilma
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   3 changesets found
   list of changesets:
@@ -810,7 +832,9 @@ file specified by acl.config does not exist
   config = ../acl.config
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -880,7 +904,9 @@ betty is allowed inside foo/ by a acl.config file
   foo/** = betty
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -962,7 +988,9 @@ acl.config can set only [acl.allow]/[acl.deny]
   changegroup.acl = false
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -1035,7 +1063,9 @@ fred is always allowed
   ** = fred
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   3 changesets found
   list of changesets:
@@ -1105,7 +1135,9 @@ no one is allowed inside foo/Bar/
   foo/Bar/** = *
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   3 changesets found
   list of changesets:
@@ -1178,7 +1210,9 @@ OS-level groups
   ** = @group1
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   3 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
@@ -1248,7 +1282,9 @@ OS-level groups
   foo/Bar/** = @group1
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   3 changesets found
   list of changesets:
@@ -1359,13 +1395,15 @@ No branch acls specified
   [extensions]
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   4 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  4ea792ff64284af438188103a0ee8aca1724fb8c
+  e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
   adding changesets
   bundling: 1 changesets
   bundling: 2 changesets
@@ -1386,7 +1424,7 @@ No branch acls specified
   changesets: 3 chunks
   add changeset 911600dab2ae
   changesets: 4 chunks
-  add changeset 4ea792ff6428
+  add changeset e8fc755d4d82
   adding manifests
   manifests: 1/4 chunks (25.00%)
   manifests: 2/4 chunks (50.00%)
@@ -1413,13 +1451,13 @@ No branch acls specified
   acl: allowing changeset f9cafe1212c8
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: allowing changeset 911600dab2ae
-  acl: branch access granted: "4ea792ff6428" on branch "foobar"
-  acl: allowing changeset 4ea792ff6428
+  acl: branch access granted: "e8fc755d4d82" on branch "foobar"
+  acl: allowing changeset e8fc755d4d82
   updating the branch cache
   checking for updated bookmarks
   repository tip rolled back to revision 2 (undo push)
   working directory now based on revision 2
-  2:07e028174695
+  2:fb35475503ef
   
 
 Branch acl deny test
@@ -1436,14 +1474,16 @@ Branch acl deny test
   foobar = *
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   4 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  4ea792ff64284af438188103a0ee8aca1724fb8c
+  e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
   adding changesets
   bundling: 1 changesets
   bundling: 2 changesets
@@ -1464,7 +1504,7 @@ Branch acl deny test
   changesets: 3 chunks
   add changeset 911600dab2ae
   changesets: 4 chunks
-  add changeset 4ea792ff6428
+  add changeset e8fc755d4d82
   adding manifests
   manifests: 1/4 chunks (25.00%)
   manifests: 2/4 chunks (50.00%)
@@ -1491,12 +1531,12 @@ Branch acl deny test
   acl: allowing changeset f9cafe1212c8
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: allowing changeset 911600dab2ae
-  error: pretxnchangegroup.acl hook failed: acl: user "astro" denied on branch "foobar" (changeset "4ea792ff6428")
+  error: pretxnchangegroup.acl hook failed: acl: user "astro" denied on branch "foobar" (changeset "e8fc755d4d82")
   transaction abort!
   rollback completed
-  abort: acl: user "astro" denied on branch "foobar" (changeset "4ea792ff6428")
+  abort: acl: user "astro" denied on branch "foobar" (changeset "e8fc755d4d82")
   no rollback information available
-  2:07e028174695
+  2:fb35475503ef
   
 
 Branch acl empty allow test
@@ -1512,13 +1552,15 @@ Branch acl empty allow test
   [acl.allow.branches]
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   4 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  4ea792ff64284af438188103a0ee8aca1724fb8c
+  e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
   adding changesets
   bundling: 1 changesets
   bundling: 2 changesets
@@ -1539,7 +1581,7 @@ Branch acl empty allow test
   changesets: 3 chunks
   add changeset 911600dab2ae
   changesets: 4 chunks
-  add changeset 4ea792ff6428
+  add changeset e8fc755d4d82
   adding manifests
   manifests: 1/4 chunks (25.00%)
   manifests: 2/4 chunks (50.00%)
@@ -1565,7 +1607,7 @@ Branch acl empty allow test
   rollback completed
   abort: acl: user "astro" not allowed on branch "default" (changeset "ef1ea85a6374")
   no rollback information available
-  2:07e028174695
+  2:fb35475503ef
   
 
 Branch acl allow other
@@ -1583,13 +1625,15 @@ Branch acl allow other
   * = george
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   4 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  4ea792ff64284af438188103a0ee8aca1724fb8c
+  e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
   adding changesets
   bundling: 1 changesets
   bundling: 2 changesets
@@ -1610,7 +1654,7 @@ Branch acl allow other
   changesets: 3 chunks
   add changeset 911600dab2ae
   changesets: 4 chunks
-  add changeset 4ea792ff6428
+  add changeset e8fc755d4d82
   adding manifests
   manifests: 1/4 chunks (25.00%)
   manifests: 2/4 chunks (50.00%)
@@ -1636,7 +1680,7 @@ Branch acl allow other
   rollback completed
   abort: acl: user "astro" not allowed on branch "default" (changeset "ef1ea85a6374")
   no rollback information available
-  2:07e028174695
+  2:fb35475503ef
   
   $ do_push george
   Pushing as user george
@@ -1648,13 +1692,15 @@ Branch acl allow other
   * = george
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   4 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  4ea792ff64284af438188103a0ee8aca1724fb8c
+  e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
   adding changesets
   bundling: 1 changesets
   bundling: 2 changesets
@@ -1675,7 +1721,7 @@ Branch acl allow other
   changesets: 3 chunks
   add changeset 911600dab2ae
   changesets: 4 chunks
-  add changeset 4ea792ff6428
+  add changeset e8fc755d4d82
   adding manifests
   manifests: 1/4 chunks (25.00%)
   manifests: 2/4 chunks (50.00%)
@@ -1702,13 +1748,13 @@ Branch acl allow other
   acl: allowing changeset f9cafe1212c8
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: allowing changeset 911600dab2ae
-  acl: branch access granted: "4ea792ff6428" on branch "foobar"
-  acl: allowing changeset 4ea792ff6428
+  acl: branch access granted: "e8fc755d4d82" on branch "foobar"
+  acl: allowing changeset e8fc755d4d82
   updating the branch cache
   checking for updated bookmarks
   repository tip rolled back to revision 2 (undo push)
   working directory now based on revision 2
-  2:07e028174695
+  2:fb35475503ef
   
 
 Branch acl conflicting allow
@@ -1730,14 +1776,16 @@ push foobar into the remote
   * = george
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   4 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  4ea792ff64284af438188103a0ee8aca1724fb8c
+  e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
   adding changesets
   bundling: 1 changesets
   bundling: 2 changesets
@@ -1758,7 +1806,7 @@ push foobar into the remote
   changesets: 3 chunks
   add changeset 911600dab2ae
   changesets: 4 chunks
-  add changeset 4ea792ff6428
+  add changeset e8fc755d4d82
   adding manifests
   manifests: 1/4 chunks (25.00%)
   manifests: 2/4 chunks (50.00%)
@@ -1785,13 +1833,13 @@ push foobar into the remote
   acl: allowing changeset f9cafe1212c8
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: allowing changeset 911600dab2ae
-  acl: branch access granted: "4ea792ff6428" on branch "foobar"
-  acl: allowing changeset 4ea792ff6428
+  acl: branch access granted: "e8fc755d4d82" on branch "foobar"
+  acl: allowing changeset e8fc755d4d82
   updating the branch cache
   checking for updated bookmarks
   repository tip rolled back to revision 2 (undo push)
   working directory now based on revision 2
-  2:07e028174695
+  2:fb35475503ef
   
 Branch acl conflicting deny
 
@@ -1812,14 +1860,16 @@ Branch acl conflicting deny
   * = george
   """
   pushing to ../b
+  query 1; heads
   searching for changes
+  all remote heads known locally
   invalidating branch cache (tip differs)
   4 changesets found
   list of changesets:
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  4ea792ff64284af438188103a0ee8aca1724fb8c
+  e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
   adding changesets
   bundling: 1 changesets
   bundling: 2 changesets
@@ -1840,7 +1890,7 @@ Branch acl conflicting deny
   changesets: 3 chunks
   add changeset 911600dab2ae
   changesets: 4 chunks
-  add changeset 4ea792ff6428
+  add changeset e8fc755d4d82
   adding manifests
   manifests: 1/4 chunks (25.00%)
   manifests: 2/4 chunks (50.00%)
@@ -1866,5 +1916,5 @@ Branch acl conflicting deny
   rollback completed
   abort: acl: user "george" denied on branch "default" (changeset "ef1ea85a6374")
   no rollback information available
-  2:07e028174695
+  2:fb35475503ef
   
