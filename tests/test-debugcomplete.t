@@ -75,6 +75,7 @@ Show debug commands if there are no other candidates
   debugdag
   debugdata
   debugdate
+  debugdiscovery
   debugfsinfo
   debuggetbundle
   debugignore
@@ -211,7 +212,7 @@ Show all commands + options
   cat: output, rev, decode, include, exclude
   copy: after, force, include, exclude, dry-run
   debugancestor: 
-  debugbuilddag: mergeable-file, appended-file, overwritten-file, new-file
+  debugbuilddag: mergeable-file, overwritten-file, new-file
   debugbundle: all
   debugcheckstate: 
   debugcommands: 
@@ -219,6 +220,7 @@ Show all commands + options
   debugdag: tags, branches, dots, spaces
   debugdata: 
   debugdate: extended
+  debugdiscovery: old, nonheads, ssh, remotecmd, insecure
   debugfsinfo: 
   debuggetbundle: head, common, type
   debugignore: 
