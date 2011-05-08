@@ -44,7 +44,7 @@ def sshargs(sshcmd, host, user, port):
     args = user and ("%s@%s" % (user, host)) or host
     return port and ("%s -p %s" % (args, port)) or args
 
-def is_exec(f):
+def isexec(f):
     """check whether a file is executable"""
     return (os.lstat(f).st_mode & 0100 != 0)
 
@@ -221,7 +221,7 @@ def isowner(st):
     """Return True if the stat object st is from the current user."""
     return st.st_uid == os.getuid()
 
-def find_exe(command):
+def findexe(command):
     '''Find executable for command searching like which does.
     If command is a basename then PATH is searched for command.
     PATH isn't searched if command is an absolute or relative path.
@@ -262,10 +262,6 @@ def statfiles(files):
 def getuser():
     '''return name of current user'''
     return getpass.getuser()
-
-def expand_glob(pats):
-    '''On Windows, expand the implicit globs in a list of patterns'''
-    return list(pats)
 
 def username(uid=None):
     """Return the name of the user with the given uid.
