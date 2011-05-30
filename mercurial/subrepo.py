@@ -79,9 +79,8 @@ def state(ctx, ui):
 
 def writestate(repo, state):
     """rewrite .hgsubstate in (outer) repo with these subrepo states"""
-    repo.wwrite('.hgsubstate',
-                ''.join(['%s %s\n' % (state[s][1], s)
-                         for s in sorted(state)]), '')
+    lines = ['%s %s\n' % (state[s][1], s) for s in sorted(state)]
+    repo.wwrite('.hgsubstate', ''.join(lines), '')
 
 def submerge(repo, wctx, mctx, actx, overwrite):
     """delegated from merge.applyupdates: merging of .hgsubstate file
@@ -137,6 +136,10 @@ def submerge(repo, wctx, mctx, actx, overwrite):
         elif ld == a: # remote removed, local unchanged
             debug(s, "remote removed, remove")
             wctx.sub(s).remove()
+        elif a == nullstate: # not present in remote or ancestor
+            debug(s, "local added, keep")
+            sm[s] = l
+            continue
         else:
             if repo.ui.promptchoice(
                 _(' local changed subrepository %s which remote removed\n'
@@ -757,6 +760,9 @@ class gitsubrepo(abstractsubrepo):
         base = self._gitcommand(['merge-base', r1, r2])
         return base == r1
 
+    def _gitisbare(self):
+        return self._gitcommand(['config', '--bool', 'core.bare']) == 'true'
+
     def _gitbranchmap(self):
         '''returns 2 things:
         a map from git branch to revision
@@ -819,6 +825,8 @@ class gitsubrepo(abstractsubrepo):
     def dirty(self, ignoreupdate=False):
         if self._gitmissing():
             return True
+        if self._gitisbare():
+            return True
         if not ignoreupdate and self._state[1] != self._gitstate():
             # different version checked out
             return True
@@ -830,7 +838,7 @@ class gitsubrepo(abstractsubrepo):
         source, revision, kind = state
         self._fetch(source, revision)
         # if the repo was set to be bare, unbare it
-        if self._gitcommand(['config', '--bool', 'core.bare']) == 'true':
+        if self._gitisbare():
             self._gitcommand(['config', 'core.bare', 'false'])
             if self._gitstate() == revision:
                 self._gitcommand(['reset', '--hard', 'HEAD'])

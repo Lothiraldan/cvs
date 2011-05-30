@@ -733,11 +733,9 @@ def runone(options, test):
     else:
         return None # not a supported test, don't record
 
-    if options.blacklist:
-        filename = options.blacklist.get(test)
-        if filename is not None:
-            skip("blacklisted")
-            return None
+    if options.blacklist and filename in options.blacklist:
+        skip("blacklisted")
+        return None
 
     if options.retest and not os.path.exists(test + ".err"):
         ignore("not retesting")
@@ -921,7 +919,11 @@ def runchildren(options, tests):
 
     optcopy = dict(options.__dict__)
     optcopy['jobs'] = 1
+
+    blacklist = optcopy['blacklist'] or []
     del optcopy['blacklist']
+    blacklisted = []
+
     if optcopy['with_hg'] is None:
         optcopy['with_hg'] = os.path.join(BINDIR, "hg")
     optcopy.pop('anycoverage', None)
@@ -943,7 +945,11 @@ def runchildren(options, tests):
         for job in jobs:
             if not tests:
                 break
-            job.append(tests.pop())
+            test = tests.pop()
+            if test in blacklist:
+                blacklisted.append(test)
+            else:
+                job.append(test)
     fps = {}
 
     for j, job in enumerate(jobs):
@@ -981,9 +987,12 @@ def runchildren(options, tests):
         vlog('pid %d exited, status %d' % (pid, status))
         failures |= status
     print
+    skipped += len(blacklisted)
     if not options.noskips:
         for s in skips:
             print "Skipped %s: %s" % (s[0], s[1])
+        for s in blacklisted:
+            print "Skipped %s: blacklisted" % s
     for s in fails:
         print "Failed %s: %s" % (s[0], s[1])
 

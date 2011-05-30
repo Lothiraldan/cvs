@@ -620,7 +620,7 @@ class queue(object):
         files = {}
         try:
             fuzz = patchmod.patch(self.ui, repo, patchfile, strip=1,
-                                  cwd=repo.root, files=files, eolmode=None)
+                                  files=files, eolmode=None)
             return (True, list(files), fuzz)
         except Exception, inst:
             self.ui.note(str(inst) + '\n')
@@ -735,10 +735,9 @@ class queue(object):
         if not keep:
             r = self.qrepo()
             if r:
-                r[None].remove(patches, True)
-            else:
-                for p in patches:
-                    os.unlink(self.join(p))
+                r[None].forget(patches)
+            for p in patches:
+                os.unlink(self.join(p))
 
         if numrevs:
             qfinished = self.applied[:numrevs]
@@ -873,6 +872,14 @@ class queue(object):
                 raise util.Abort(_('"%s" cannot be used in the name of a patch')
                                  % c)
 
+    def checkpatchname(self, name, force=False):
+        self.check_reserved_name(name)
+        if not force and os.path.exists(self.join(name)):
+            if os.path.isdir(self.join(name)):
+                raise util.Abort(_('"%s" already exists as a directory')
+                                 % name)
+            else:
+                raise util.Abort(_('patch "%s" already exists') % name)
 
     def new(self, repo, patchfn, *pats, **opts):
         """options:
@@ -884,14 +891,8 @@ class queue(object):
         if date:
             date = util.parsedate(date)
         diffopts = self.diffopts({'git': opts.get('git')})
-        self.check_reserved_name(patchfn)
-        if os.path.exists(self.join(patchfn)):
-            if os.path.isdir(self.join(patchfn)):
-                raise util.Abort(_('"%s" already exists as a directory')
-                                 % patchfn)
-            else:
-                raise util.Abort(_('patch "%s" already exists') % patchfn)
-
+        if opts.get('checkname', True):
+            self.checkpatchname(patchfn)
         inclsubs = self.check_substate(repo)
         if inclsubs:
             inclsubs.append('.hgsubstate')
@@ -1300,7 +1301,7 @@ class queue(object):
                     except OSError, e:
                         if e.errno != errno.ENOENT:
                             raise
-                    repo.dirstate.forget(f)
+                    repo.dirstate.drop(f)
                 for f in m + r:
                     fctx = ctx[f]
                     repo.wwrite(f, fctx.data(), fctx.flags())
@@ -1478,7 +1479,7 @@ class queue(object):
                 for f in mm:
                     repo.dirstate.normallookup(f)
                 for f in forget:
-                    repo.dirstate.forget(f)
+                    repo.dirstate.drop(f)
 
                 if not msg:
                     if not ph.message:
@@ -1739,10 +1740,6 @@ class queue(object):
             if patchname in self.series:
                 raise util.Abort(_('patch %s is already in the series file')
                                  % patchname)
-        def checkfile(patchname):
-            if not force and os.path.exists(self.join(patchname)):
-                raise util.Abort(_('patch "%s" already exists')
-                                 % patchname)
 
         if rev:
             if files:
@@ -1790,9 +1787,8 @@ class queue(object):
 
                 if not patchname:
                     patchname = normname('%d.diff' % r)
-                self.check_reserved_name(patchname)
                 checkseries(patchname)
-                checkfile(patchname)
+                self.checkpatchname(patchname, force)
                 self.full_series.insert(0, patchname)
 
                 patchf = self.opener(patchname, "w")
@@ -1819,8 +1815,7 @@ class queue(object):
                     raise util.Abort(_("patch %s does not exist") % filename)
 
                 if patchname:
-                    self.check_reserved_name(patchname)
-                    checkfile(patchname)
+                    self.checkpatchname(patchname, force)
 
                     self.ui.write(_('renaming %s to %s\n')
                                         % (filename, patchname))
@@ -1829,11 +1824,13 @@ class queue(object):
                     patchname = filename
 
             else:
+                if filename == '-' and not patchname:
+                    raise util.Abort(_('need --name to import a patch from -'))
+                elif not patchname:
+                    patchname = normname(os.path.basename(filename.rstrip('/')))
+                self.checkpatchname(patchname, force)
                 try:
                     if filename == '-':
-                        if not patchname:
-                            raise util.Abort(
-                                _('need --name to import a patch from -'))
                         text = sys.stdin.read()
                     else:
                         fp = url.open(self.ui, filename)
@@ -1841,10 +1838,6 @@ class queue(object):
                         fp.close()
                 except (OSError, IOError):
                     raise util.Abort(_("unable to read file %s") % filename)
-                if not patchname:
-                    patchname = normname(os.path.basename(filename))
-                self.check_reserved_name(patchname)
-                checkfile(patchname)
                 patchf = self.opener(patchname, "w")
                 patchf.write(text)
                 patchf.close()
@@ -2599,12 +2592,7 @@ def rename(ui, repo, patch, name=None, **opts):
     if os.path.isdir(absdest):
         name = normname(os.path.join(name, os.path.basename(patch)))
         absdest = q.join(name)
-    if os.path.exists(absdest):
-        raise util.Abort(_('%s already exists') % absdest)
-
-    if name in q.series:
-        raise util.Abort(
-            _('A patch named %s already exists in the series file') % name)
+    q.checkpatchname(name)
 
     ui.note(_('renaming %s to %s\n') % (patch, name))
     i = q.find_series(patch)
@@ -2628,13 +2616,13 @@ def rename(ui, repo, patch, name=None, **opts):
         wlock = r.wlock()
         try:
             if r.dirstate[patch] == 'a':
-                r.dirstate.forget(patch)
+                r.dirstate.drop(patch)
                 r.dirstate.add(name)
             else:
                 if r.dirstate[name] == 'r':
                     wctx.undelete([name])
                 wctx.copy(patch, name)
-                wctx.remove([patch], False)
+                wctx.forget([patch])
         finally:
             wlock.release()
 
@@ -3281,7 +3269,7 @@ def uisetup(ui):
     entry = extensions.wrapcommand(commands.table, 'init', mqinit)
     entry[1].extend(mqopt)
 
-    nowrap = set(commands.norepo.split(" ") + ['qrecord'])
+    nowrap = set(commands.norepo.split(" "))
 
     def dotable(cmdtable):
         for cmd in cmdtable.keys():

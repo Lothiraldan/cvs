@@ -8,7 +8,7 @@
 from node import hex, bin, nullid, nullrev, short
 from lock import release
 from i18n import _, gettext
-import os, re, sys, difflib, time, tempfile
+import os, re, sys, difflib, time, tempfile, errno
 import hg, scmutil, util, revlog, extensions, copies, error, bookmarks
 import patch, help, url, encoding, templatekw, discovery
 import archival, changegroup, cmdutil, sshserver, hbisect, hgweb, hgweb.server
@@ -2269,7 +2269,7 @@ def forget(ui, repo, *pats, **opts):
         if ui.verbose or not m.exact(f):
             ui.status(_('removing %s\n') % m.rel(f))
 
-    repo[None].remove(forget, unlink=False)
+    repo[None].forget(forget)
     return errs
 
 @command('grep',
@@ -3105,8 +3105,8 @@ def import_(ui, repo, patch1, *patches, **opts):
                 repo.dirstate.setbranch(branch or 'default')
 
             files = {}
-            patch.patch(ui, repo, tmpname, strip=strip, cwd=repo.root,
-                        files=files, eolmode=None, similarity=sim / 100.0)
+            patch.patch(ui, repo, tmpname, strip=strip, files=files,
+                        eolmode=None, similarity=sim / 100.0)
             files = list(files)
             if opts.get('no_commit'):
                 if message:
@@ -3392,9 +3392,10 @@ def log(ui, repo, *pats, **opts):
     displayer.close()
 
 @command('manifest',
-    [('r', 'rev', '', _('revision to display'), _('REV'))],
+    [('r', 'rev', '', _('revision to display'), _('REV')),
+     ('', 'all', False, _("list files from all revisions"))],
     _('[-r REV]'))
-def manifest(ui, repo, node=None, rev=None):
+def manifest(ui, repo, node=None, rev=None, **opts):
     """output the current or given revision of the project manifest
 
     Print a list of version controlled files for the given revision.
@@ -3404,8 +3405,30 @@ def manifest(ui, repo, node=None, rev=None):
     With -v, print file permissions, symlink and executable bits.
     With --debug, print file revision hashes.
 
+    If option --all is specified, the list of all files from all revisions
+    is printed. This includes deleted and renamed files.
+
     Returns 0 on success.
     """
+    if opts.get('all'):
+        if rev or node:
+            raise util.Abort(_("can't specify a revision with --all"))
+
+        res = []
+        prefix = "data/"
+        suffix = ".i"
+        plen = len(prefix)
+        slen = len(suffix)
+        lock = repo.lock()
+        try:
+            for fn, b, size in repo.store.datafiles():
+                if size != 0 and fn[-slen:] == suffix and fn[:plen] == prefix:
+                    res.append(fn[plen:-slen])
+        finally:
+            lock.release()
+        for f in sorted(res):
+            ui.write("%s\n" % f)
+        return
 
     if rev and node:
         raise util.Abort(_("please specify just one revision"))
@@ -3871,6 +3894,9 @@ def remove(ui, repo, *pats, **opts):
       -A     W  W  W  R
       -Af    R  R  R  R
 
+    Note that remove never deletes files in Added [A] state from the
+    working directory, not even if option --force is specified.
+
     This command schedules the files to be removed at the next commit.
     To undo a remove before that, see :hg:`revert`.
 
@@ -3892,15 +3918,15 @@ def remove(ui, repo, *pats, **opts):
             ret = 1
 
     if force:
-        remove, forget = modified + deleted + clean, added
+        list = modified + deleted + clean + added
     elif after:
-        remove, forget = deleted, []
+        list = deleted
         for f in modified + added + clean:
             ui.warn(_('not removing %s: file still exists (use -f'
                       ' to force removal)\n') % m.rel(f))
             ret = 1
     else:
-        remove, forget = deleted + clean, []
+        list = deleted + clean
         for f in modified:
             ui.warn(_('not removing %s: file is modified (use -f'
                       ' to force removal)\n') % m.rel(f))
@@ -3910,12 +3936,25 @@ def remove(ui, repo, *pats, **opts):
                       ' to force removal)\n') % m.rel(f))
             ret = 1
 
-    for f in sorted(remove + forget):
+    for f in sorted(list):
         if ui.verbose or not m.exact(f):
             ui.status(_('removing %s\n') % m.rel(f))
 
-    repo[None].forget(forget)
-    repo[None].remove(remove, unlink=not after)
+    wlock = repo.wlock()
+    try:
+        if not after:
+            for f in list:
+                if f in added:
+                    continue # we never unlink added files on remove
+                try:
+                    util.unlinkpath(repo.wjoin(f))
+                except OSError, inst:
+                    if inst.errno != errno.ENOENT:
+                        raise
+        repo[None].forget(list)
+    finally:
+        wlock.release()
+
     return ret
 
 @command('rename|move|mv',
@@ -4238,7 +4277,7 @@ def revert(ui, repo, *pats, **opts):
             audit_path = scmutil.pathauditor(repo.root)
             for f in remove[0]:
                 if repo.dirstate[f] == 'a':
-                    repo.dirstate.forget(f)
+                    repo.dirstate.drop(f)
                     continue
                 audit_path(f)
                 try:

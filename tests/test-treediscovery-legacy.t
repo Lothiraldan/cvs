@@ -1,13 +1,17 @@
 Tests discovery against servers without getbundle support:
 
-  $ CAP=getbundle
-  $ . "$TESTDIR/notcapable"
   $ cat >> $HGRCPATH <<EOF
   > [ui]
   > logtemplate="{rev} {node|short}: {desc} {branches}\n"
   > [extensions]
   > graphlog=
   > EOF
+  $ cp $HGRCPATH $HGRCPATH-withcap
+
+  $ CAP="getbundle known changegroupsubset"
+  $ . "$TESTDIR/notcapable"
+  $ cp $HGRCPATH $HGRCPATH-nocap
+  $ cp $HGRCPATH-withcap $HGRCPATH
 
 Setup HTTP server control:
 
@@ -17,11 +21,13 @@ Setup HTTP server control:
   >   echo '[web]' > $1/.hg/hgrc
   >   echo 'push_ssl = false' >> $1/.hg/hgrc
   >   echo 'allow_push = *' >> $1/.hg/hgrc
+  >   cp $HGRCPATH-nocap $HGRCPATH
   >   hg serve -R $1 -p $HGPORT -d --pid-file=hg.pid -E errors.log
   >   cat hg.pid >> $DAEMON_PIDS
   > }
   $ stop() {
   >   "$TESTDIR/killdaemons.py"
+  >   cp $HGRCPATH-withcap $HGRCPATH
   > }
 
 Both are empty:
@@ -107,6 +113,10 @@ Full clone:
 Local is empty:
 
   $ cd empty1
+  $ hg incoming $remote --rev name1
+  comparing with http://localhost:$HGPORT/
+  abort: cannot look up remote changes; remote repository does not support the 'changegroupsubset' capability!
+  [255]
   $ hg incoming $remote
   comparing with http://localhost:$HGPORT/
   0 d57206cc072a: r0 
@@ -145,6 +155,7 @@ Local is empty:
 
 Local is subset:
 
+  $ cp $HGRCPATH-withcap $HGRCPATH
   $ hg clone main subset --rev name2 ; cd subset
   adding changesets
   adding manifests
@@ -152,6 +163,7 @@ Local is subset:
   added 6 changesets with 12 changes to 2 files
   updating to branch name2
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cp $HGRCPATH-nocap $HGRCPATH
   $ hg incoming $remote
   comparing with http://localhost:$HGPORT/
   searching for changes
@@ -281,42 +293,17 @@ Partial pull:
 
   $ stop ; start main
   $ hg clone $remote partial --rev name2
-  adding changesets
-  adding manifests
-  adding file changes
-  added 6 changesets with 12 changes to 2 files
-  updating to branch name2
-  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  $ cd partial
-  $ hg incoming $remote
+  abort: partial pull cannot be done because other repository doesn't support changegroupsubset.
+  [255]
+  $ hg init partial; cd partial
+  $ hg incoming $remote --rev name2
   comparing with http://localhost:$HGPORT/
-  searching for changes
-  6 a7892891da29: r2 name1
-  7 2c8d5d5ec612: r3 name1
-  8 e71dbbc70e03: r4 name1
-  9 025829e08038: r9 both
-  10 8b6bad1512e1: r10 both
-  11 a19bfa7e7328: r11 both
-  $ hg incoming $remote --rev name1
-  comparing with http://localhost:$HGPORT/
-  searching for changes
-  6 a7892891da29: r2 name1
-  7 2c8d5d5ec612: r3 name1
-  8 e71dbbc70e03: r4 name1
-  $ hg pull $remote --rev name1
+  abort: cannot look up remote changes; remote repository does not support the 'changegroupsubset' capability!
+  [255]
+  $ hg pull $remote --rev name2
   pulling from http://localhost:$HGPORT/
-  searching for changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 3 changesets with 6 changes to 2 files (+1 heads)
-  (run 'hg heads' to see heads)
-  $ hg incoming $remote
-  comparing with http://localhost:$HGPORT/
-  searching for changes
-  9 025829e08038: r9 both
-  10 8b6bad1512e1: r10 both
-  11 a19bfa7e7328: r11 both
+  abort: partial pull cannot be done because other repository doesn't support changegroupsubset.
+  [255]
   $ cd ..
 
   $ stop

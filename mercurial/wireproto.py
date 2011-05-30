@@ -139,7 +139,7 @@ class wirerepository(repo.repository):
         remote server as a bundle. Return an integer indicating the
         result of the push (see localrepository.addchangegroup()).'''
 
-        if self.capable('unbundlehash'):
+        if heads != ['force'] and self.capable('unbundlehash'):
             heads = encodelist(['hashed',
                                 util.sha1(''.join(sorted(heads))).digest()])
         else:
@@ -288,7 +288,7 @@ def lookup(repo, proto, key):
         success = 0
     return "%s %s\n" % (success, r)
 
-def known(repo, proto, nodes):
+def known(repo, proto, nodes, others):
     return ''.join(b and "1" or "0" for b in repo.known(decodelist(nodes)))
 
 def pushkey(repo, proto, namespace, key, old, new):
@@ -412,7 +412,7 @@ commands = {
     'getbundle': (getbundle, '*'),
     'heads': (heads, ''),
     'hello': (hello, ''),
-    'known': (known, 'nodes'),
+    'known': (known, 'nodes *'),
     'listkeys': (listkeys, 'namespace'),
     'lookup': (lookup, 'key'),
     'pushkey': (pushkey, 'namespace key old new'),

@@ -296,13 +296,14 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             if f != fd and move:
                 moves.append(f)
 
+    audit = scmutil.pathauditor(repo.root)
+
     # remove renamed files after safely stored
     for f in moves:
         if os.path.lexists(repo.wjoin(f)):
             repo.ui.debug("removing %s\n" % f)
+            audit(f)
             os.unlink(repo.wjoin(f))
-
-    audit_path = scmutil.pathauditor(repo.root)
 
     numupdates = len(action)
     for i, a in enumerate(action):
@@ -313,7 +314,7 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             continue
         if m == "r": # remove
             repo.ui.note(_("removing %s\n") % f)
-            audit_path(f)
+            audit(f)
             if f == '.hgsubstate': # subrepo states need updating
                 subrepo.submerge(repo, wctx, mctx, wctx, overwrite)
             try:
@@ -328,6 +329,7 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
                 subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx), overwrite)
                 continue
             f2, fd, flags, move = a[2:]
+            repo.wopener.audit(fd)
             r = ms.resolve(fd, wctx, mctx)
             if r is not None and r > 0:
                 unresolved += 1
@@ -340,6 +342,7 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             if (move and repo.dirstate.normalize(fd) != f
                 and os.path.lexists(repo.wjoin(f))):
                 repo.ui.debug("removing %s\n" % f)
+                audit(f)
                 os.unlink(repo.wjoin(f))
         elif m == "g": # get
             flags = a[2]
@@ -354,6 +357,7 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             f2, fd, flags = a[2:]
             if f:
                 repo.ui.note(_("moving %s to %s\n") % (f, fd))
+                audit(f)
                 t = wctx.filectx(f).data()
                 repo.wwrite(fd, t, flags)
                 util.unlinkpath(repo.wjoin(f))
@@ -370,6 +374,7 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
                 repo.ui.warn(" %s\n" % nf)
         elif m == "e": # exec
             flags = a[2]
+            repo.wopener.audit(f)
             util.setflags(repo.wjoin(f), 'l' in flags, 'x' in flags)
     ms.commit()
     u.progress(_('updating'), None, total=numupdates, unit=_('files'))
@@ -385,12 +390,12 @@ def recordupdates(repo, action, branchmerge):
             if branchmerge:
                 repo.dirstate.remove(f)
             else:
-                repo.dirstate.forget(f)
+                repo.dirstate.drop(f)
         elif m == "a": # re-add
             if not branchmerge:
                 repo.dirstate.add(f)
         elif m == "f": # forget
-            repo.dirstate.forget(f)
+            repo.dirstate.drop(f)
         elif m == "e": # exec change
             repo.dirstate.normallookup(f)
         elif m == "g": # get
@@ -420,7 +425,7 @@ def recordupdates(repo, action, branchmerge):
                 if f2 == fd: # file not locally copied/moved
                     repo.dirstate.normallookup(fd)
                 if move:
-                    repo.dirstate.forget(f)
+                    repo.dirstate.drop(f)
         elif m == "d": # directory rename
             f2, fd, flag = a[2:]
             if not f2 and f not in repo.dirstate:
@@ -436,7 +441,7 @@ def recordupdates(repo, action, branchmerge):
             else:
                 repo.dirstate.normal(fd)
                 if f:
-                    repo.dirstate.forget(f)
+                    repo.dirstate.drop(f)
 
 def update(repo, node, branchmerge, force, partial, ancestor=None):
     """

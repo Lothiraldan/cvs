@@ -383,3 +383,61 @@ Consecutive import with renames (issue2459)
   a   0         -1 unset               b
   $ hg ci -m done
   $ cd ..
+
+Renames and strip
+
+  $ hg init renameandstrip
+  $ cd renameandstrip
+  $ echo a > a
+  $ hg ci -Am adda
+  adding a
+  $ hg import --no-commit -p2 - <<EOF
+  > diff --git a/foo/a b/foo/b
+  > rename from foo/a
+  > rename to foo/b
+  > EOF
+  applying patch from stdin
+  $ hg st --copies
+  A b
+    a
+  R a
+  $ cd ..
+
+Pure copy with existing destination
+
+  $ hg init copytoexisting
+  $ cd copytoexisting
+  $ echo a > a
+  $ echo b > b
+  $ hg ci -Am add
+  adding a
+  adding b
+  $ hg import --no-commit - <<EOF
+  > diff --git a/a b/b
+  > copy from a
+  > copy to b
+  > EOF
+  applying patch from stdin
+  abort: cannot create b: destination already exists
+  [255]
+  $ cat b
+  b
+
+Copy and changes with existing destination
+
+  $ hg import --no-commit - <<EOF
+  > diff --git a/a b/b
+  > copy from a
+  > copy to b
+  > --- a/a
+  > +++ b/b
+  > @@ -1,1 +1,2 @@
+  > a
+  > +b
+  > EOF
+  applying patch from stdin
+  abort: cannot create b: destination already exists
+  [255]
+  $ cat b
+  b
+  $ cd ..

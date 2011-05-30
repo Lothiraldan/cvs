@@ -835,14 +835,16 @@ class workingctx(changectx):
         finally:
             wlock.release()
 
-    def forget(self, list):
+    def forget(self, files):
         wlock = self._repo.wlock()
         try:
-            for f in list:
+            for f in files:
                 if self._repo.dirstate[f] != 'a':
-                    self._repo.ui.warn(_("%s not added!\n") % f)
+                    self._repo.dirstate.remove(f)
+                elif f not in self._repo.dirstate:
+                    self._repo.ui.warn(_("%s not tracked!\n") % f)
                 else:
-                    self._repo.dirstate.forget(f)
+                    self._repo.dirstate.drop(f)
         finally:
             wlock.release()
 
@@ -852,20 +854,18 @@ class workingctx(changectx):
             yield changectx(self._repo, a)
 
     def remove(self, list, unlink=False):
-        if unlink:
-            for f in list:
-                try:
-                    util.unlinkpath(self._repo.wjoin(f))
-                except OSError, inst:
-                    if inst.errno != errno.ENOENT:
-                        raise
         wlock = self._repo.wlock()
         try:
+            if unlink:
+                for f in list:
+                    try:
+                        util.unlinkpath(self._repo.wjoin(f))
+                    except OSError, inst:
+                        if inst.errno != errno.ENOENT:
+                            raise
             for f in list:
-                if unlink and os.path.lexists(self._repo.wjoin(f)):
-                    self._repo.ui.warn(_("%s still exists!\n") % f)
-                elif self._repo.dirstate[f] == 'a':
-                    self._repo.dirstate.forget(f)
+                if self._repo.dirstate[f] == 'a':
+                    self._repo.dirstate.drop(f)
                 elif f not in self._repo.dirstate:
                     self._repo.ui.warn(_("%s not tracked!\n") % f)
                 else:
