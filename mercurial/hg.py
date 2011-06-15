@@ -70,7 +70,7 @@ schemes = {
     'static-http': statichttprepo,
 }
 
-def _lookup(path):
+def _peerlookup(path):
     u = util.url(path)
     scheme = u.scheme or 'file'
     thing = schemes.get(scheme) or schemes['file']
@@ -83,20 +83,25 @@ def islocal(repo):
     '''return true if repo or path is local'''
     if isinstance(repo, str):
         try:
-            return _lookup(repo).islocal(repo)
+            return _peerlookup(repo).islocal(repo)
         except AttributeError:
             return False
     return repo.local()
 
 def repository(ui, path='', create=False):
     """return a repository object for the specified path"""
-    repo = _lookup(path).instance(ui, path, create)
+    repo = _peerlookup(path).instance(ui, path, create)
     ui = getattr(repo, "ui", ui)
     for name, module in extensions.extensions():
         hook = getattr(module, 'reposetup', None)
         if hook:
             hook(ui, repo)
     return repo
+
+def peer(ui, opts, path, create=False):
+    '''return a repository peer for the specified path'''
+    rui = remoteui(ui, opts)
+    return _peerlookup(path).instance(rui, path, create)
 
 def defaultdest(source):
     '''return default destination of clone if none is given'''
@@ -169,8 +174,8 @@ def share(ui, source, dest=None, update=True):
                 continue
         _update(r, uprev)
 
-def clone(ui, source, dest=None, pull=False, rev=None, update=True,
-          stream=False, branch=None):
+def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
+          update=True, stream=False, branch=None):
     """Make a copy of an existing repository.
 
     Create a copy of an existing repository in a new directory.  The
@@ -209,7 +214,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
     if isinstance(source, str):
         origsource = ui.expandpath(source)
         source, branch = parseurl(origsource, branch)
-        srcrepo = repository(ui, source)
+        srcrepo = repository(remoteui(ui, peeropts), source)
     else:
         srcrepo = source
         branch = (None, branch or [])
@@ -303,12 +308,13 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
 
             # we need to re-init the repo after manually copying the data
             # into it
-            destrepo = repository(ui, dest)
+            destrepo = repository(remoteui(ui, peeropts), dest)
             srcrepo.hook('outgoing', source='clone',
                           node=node.hex(node.nullid))
         else:
             try:
-                destrepo = repository(ui, dest, create=True)
+                destrepo = repository(remoteui(ui, peeropts), dest,
+                                      create=True)
             except OSError, inst:
                 if inst.errno == errno.EEXIST:
                     dircleanup.close()
@@ -318,7 +324,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
 
             revs = None
             if rev:
-                if 'lookup' not in srcrepo.capabilities:
+                if not srcrepo.capable('lookup'):
                     raise util.Abort(_("src repository does not support "
                                        "revision lookup and so doesn't "
                                        "support clone by revision"))
@@ -423,7 +429,7 @@ def _incoming(displaychlist, subreporecurse, ui, repo, source,
     and is supposed to contain only code that can't be unified.
     """
     source, branches = parseurl(ui.expandpath(source), opts.get('branch'))
-    other = repository(remoteui(repo, opts), source)
+    other = peer(repo, opts, source)
     ui.status(_('comparing with %s\n') % util.hidepassword(source))
     revs, checkout = addbranchrevs(repo, other, branches, opts.get('rev'))
 
@@ -481,7 +487,7 @@ def _outgoing(ui, repo, dest, opts):
     if revs:
         revs = [repo.lookup(rev) for rev in revs]
 
-    other = repository(remoteui(repo, opts), dest)
+    other = peer(repo, opts, dest)
     common, outheads = discovery.findcommonoutgoing(repo, other, revs,
                                                     force=opts.get('force'))
     o = repo.changelog.findmissing(common, outheads)

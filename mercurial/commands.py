@@ -891,7 +891,7 @@ def bundle(ui, repo, fname, dest=None, **opts):
     else:
         dest = ui.expandpath(dest or 'default-push', dest or 'default')
         dest, branches = hg.parseurl(dest, opts.get('branch'))
-        other = hg.repository(hg.remoteui(repo, opts), dest)
+        other = hg.peer(repo, opts, dest)
         revs, checkout = hg.addbranchrevs(repo, other, branches, revs)
         heads = revs and map(repo.lookup, revs) or revs
         common, outheads = discovery.findcommonoutgoing(repo, other,
@@ -1026,7 +1026,7 @@ def clone(ui, source, dest=None, **opts):
     if opts.get('noupdate') and opts.get('updaterev'):
         raise util.Abort(_("cannot specify both --noupdate and --updaterev"))
 
-    r = hg.clone(hg.remoteui(ui, opts), source, dest,
+    r = hg.clone(ui, opts, source, dest,
                  pull=opts.get('pull'),
                  stream=opts.get('uncompressed'),
                  rev=opts.get('rev'),
@@ -1542,7 +1542,7 @@ def debugdate(ui, date, range=None, **opts):
 def debugdiscovery(ui, repo, remoteurl="default", **opts):
     """runs the changeset discovery protocol in isolation"""
     remoteurl, branches = hg.parseurl(ui.expandpath(remoteurl), opts.get('branch'))
-    remote = hg.repository(hg.remoteui(repo, opts), remoteurl)
+    remote = hg.peer(repo, opts, remoteurl)
     ui.status(_('comparing with %s\n') % util.hidepassword(remoteurl))
 
     # make sure tests are repeatable
@@ -1603,6 +1603,10 @@ def debugfileset(ui, repo, expr):
     if ui.verbose:
         tree = fileset.parse(expr)[0]
         ui.note(tree, "\n")
+    matcher = lambda x: scmutil.match(repo, x, default='glob')
+
+    for f in fileset.getfileset(repo[None], matcher, expr):
+        ui.write("%s\n" % f)
 
 @command('debugfsinfo', [], _('[PATH]'))
 def debugfsinfo(ui, path = "."):
@@ -1625,7 +1629,7 @@ def debuggetbundle(ui, repopath, bundlepath, head=None, common=None, **opts):
     Every ID must be a full-length hex node id string. Saves the bundle to the
     given file.
     """
-    repo = hg.repository(ui, repopath)
+    repo = hg.peer(ui, opts, repopath)
     if not repo.capable('getbundle'):
         raise util.Abort("getbundle() not supported by target repository")
     args = {}
@@ -1800,14 +1804,14 @@ def debugknown(ui, repopath, *ids, **opts):
     Every ID must be a full-length hex node id string. Returns a list of 0s and 1s
     indicating unknown/known.
     """
-    repo = hg.repository(ui, repopath)
+    repo = hg.peer(ui, opts, repopath)
     if not repo.capable('known'):
         raise util.Abort("known() not supported by target repository")
     flags = repo.known([bin(s) for s in ids])
     ui.write("%s\n" % ("".join([f and "1" or "0" for f in flags])))
 
 @command('debugpushkey', [], _('REPO NAMESPACE [KEY OLD NEW]'))
-def debugpushkey(ui, repopath, namespace, *keyinfo):
+def debugpushkey(ui, repopath, namespace, *keyinfo, **opts):
     '''access the pushkey key/value protocol
 
     With two args, list the keys in the given namespace.
@@ -1816,7 +1820,7 @@ def debugpushkey(ui, repopath, namespace, *keyinfo):
     Reports success or failure.
     '''
 
-    target = hg.repository(ui, repopath)
+    target = hg.peer(ui, {}, repopath)
     if keyinfo:
         key, old, new = keyinfo
         r = target.pushkey(namespace, key, old, new)
@@ -2113,7 +2117,7 @@ def debugwalk(ui, repo, *pats, **opts):
     ] + remoteopts,
     _('REPO [OPTIONS]... [ONE [TWO]]'))
 def debugwireargs(ui, repopath, *vals, **opts):
-    repo = hg.repository(hg.remoteui(ui, opts), repopath)
+    repo = hg.peer(ui, opts, repopath)
     for opt in remoteopts:
         del opts[opt[1]]
     args = {}
@@ -2268,8 +2272,9 @@ def forget(ui, repo, *pats, **opts):
 
     for f in m.files():
         if f not in repo.dirstate and not os.path.isdir(m.rel(f)):
-            ui.warn(_('not removing %s: file is already untracked\n')
-                    % m.rel(f))
+            if os.path.exists(m.rel(f)):
+                ui.warn(_('not removing %s: file is already untracked\n')
+                        % m.rel(f))
             errs = 1
 
     for f in forget:
@@ -2910,7 +2915,7 @@ def identify(ui, repo, source=None, rev=None,
 
     if source:
         source, branches = hg.parseurl(ui.expandpath(source))
-        repo = hg.repository(ui, source)
+        repo = hg.peer(ui, {}, source)
         revs, checkout = hg.addbranchrevs(repo, repo, branches, None)
 
     if not repo.local():
@@ -2997,6 +3002,8 @@ def identify(ui, repo, source=None, rev=None,
     ('f', 'force', None, _('skip check for outstanding uncommitted changes')),
     ('', 'no-commit', None,
      _("don't commit, just update the working directory")),
+    ('', 'bypass', None,
+     _("apply patch without touching the working directory")),
     ('', 'exact', None,
      _('apply patch to the nodes from which it was generated')),
     ('', 'import-branch', None,
@@ -3030,6 +3037,11 @@ def import_(ui, repo, patch1, *patches, **opts):
     the patch. This may happen due to character set problems or other
     deficiencies in the text patch format.
 
+    Use --bypass to apply and commit patches directly to the
+    repository, not touching the working directory. Without --exact,
+    patches will be applied on top of the working directory parent
+    revision.
+
     With -s/--similarity, hg will attempt to discover renames and
     copies in the patch in the same way as 'addremove'.
 
@@ -3045,14 +3057,19 @@ def import_(ui, repo, patch1, *patches, **opts):
     if date:
         opts['date'] = util.parsedate(date)
 
+    update = not opts.get('bypass')
+    if not update and opts.get('no_commit'):
+        raise util.Abort(_('cannot use --no-commit with --bypass'))
     try:
         sim = float(opts.get('similarity') or 0)
     except ValueError:
         raise util.Abort(_('similarity must be a number'))
     if sim < 0 or sim > 100:
         raise util.Abort(_('similarity must be between 0 and 100'))
+    if sim and not update:
+        raise util.Abort(_('cannot use --similarity with --bypass'))
 
-    if opts.get('exact') or not opts.get('force'):
+    if (opts.get('exact') or not opts.get('force')) and update:
         cmdutil.bailifchanged(repo)
 
     d = opts["base"]
@@ -3060,7 +3077,12 @@ def import_(ui, repo, patch1, *patches, **opts):
     wlock = lock = None
     msgs = []
 
-    def tryone(ui, hunk):
+    def checkexact(repo, n, nodeid):
+        if opts.get('exact') and hex(n) != nodeid:
+            repo.rollback()
+            raise util.Abort(_('patch is damaged or loses information'))
+
+    def tryone(ui, hunk, parents):
         tmpname, message, user, date, branch, nodeid, p1, p2 = \
             patch.extract(ui, hunk)
 
@@ -3081,53 +3103,77 @@ def import_(ui, repo, patch1, *patches, **opts):
                 message = None
             ui.debug('message:\n%s\n' % message)
 
-            wp = repo.parents()
+            if len(parents) == 1:
+                parents.append(repo[nullid])
             if opts.get('exact'):
                 if not nodeid or not p1:
                     raise util.Abort(_('not a Mercurial patch'))
-                p1 = repo.lookup(p1)
-                p2 = repo.lookup(p2 or hex(nullid))
-
-                if p1 != wp[0].node():
-                    hg.clean(repo, p1)
-                repo.dirstate.setparents(p1, p2)
+                p1 = repo[p1]
+                p2 = repo[p2 or nullid]
             elif p2:
                 try:
-                    p1 = repo.lookup(p1)
-                    p2 = repo.lookup(p2)
-                    if p1 == wp[0].node():
-                        repo.dirstate.setparents(p1, p2)
+                    p1 = repo[p1]
+                    p2 = repo[p2]
                 except error.RepoError:
-                    pass
-            if opts.get('exact') or opts.get('import_branch'):
-                repo.dirstate.setbranch(branch or 'default')
-
-            files = {}
-            patch.patch(ui, repo, tmpname, strip=strip, files=files,
-                        eolmode=None, similarity=sim / 100.0)
-            files = list(files)
-            if opts.get('no_commit'):
-                if message:
-                    msgs.append(message)
+                    p1, p2 = parents
             else:
-                if opts.get('exact'):
-                    m = None
-                else:
-                    m = scmutil.matchfiles(repo, files or [])
-                n = repo.commit(message, opts.get('user') or user,
-                                opts.get('date') or date, match=m,
-                                editor=cmdutil.commiteditor)
-                if opts.get('exact'):
-                    if hex(n) != nodeid:
-                        repo.rollback()
-                        raise util.Abort(_('patch is damaged'
-                                           ' or loses information'))
-                # Force a dirstate write so that the next transaction
-                # backups an up-do-date file.
-                repo.dirstate.write()
-                if n:
-                    commitid = short(n)
+                p1, p2 = parents
 
+            n = None
+            if update:
+                if opts.get('exact') and p1 != parents[0]:
+                    hg.clean(repo, p1.node())
+                if p1 != parents[0] and p2 != parents[1]:
+                    repo.dirstate.setparents(p1.node(), p2.node())
+
+                if opts.get('exact') or opts.get('import_branch'):
+                    repo.dirstate.setbranch(branch or 'default')
+
+                files = set()
+                patch.patch(ui, repo, tmpname, strip=strip, files=files,
+                            eolmode=None, similarity=sim / 100.0)
+                files = list(files)
+                if opts.get('no_commit'):
+                    if message:
+                        msgs.append(message)
+                else:
+                    if opts.get('exact'):
+                        m = None
+                    else:
+                        m = scmutil.matchfiles(repo, files or [])
+                    n = repo.commit(message, opts.get('user') or user,
+                                    opts.get('date') or date, match=m,
+                                    editor=cmdutil.commiteditor)
+                    checkexact(repo, n, nodeid)
+                    # Force a dirstate write so that the next transaction
+                    # backups an up-to-date file.
+                    repo.dirstate.write()
+            else:
+                if opts.get('exact') or opts.get('import_branch'):
+                    branch = branch or 'default'
+                else:
+                    branch = p1.branch()
+                store = patch.filestore()
+                try:
+                    files = set()
+                    try:
+                        patch.patchrepo(ui, repo, p1, store, tmpname, strip,
+                                        files, eolmode=None)
+                    except patch.PatchError, e:
+                        raise util.Abort(str(e))
+                    memctx = patch.makememctx(repo, (p1.node(), p2.node()),
+                                              message,
+                                              opts.get('user') or user,
+                                              opts.get('date') or date,
+                                              branch, files, store,
+                                              editor=cmdutil.commiteditor)
+                    repo.savecommitmessage(memctx.description())
+                    n = memctx.commit()
+                    checkexact(repo, n, nodeid)
+                finally:
+                    store.close()
+            if n:
+                commitid = short(n)
             return commitid
         finally:
             os.unlink(tmpname)
@@ -3135,6 +3181,7 @@ def import_(ui, repo, patch1, *patches, **opts):
     try:
         wlock = repo.wlock()
         lock = repo.lock()
+        parents = repo.parents()
         lastcommit = None
         for p in patches:
             pf = os.path.join(d, p)
@@ -3148,12 +3195,16 @@ def import_(ui, repo, patch1, *patches, **opts):
 
             haspatch = False
             for hunk in patch.split(pf):
-                commitid = tryone(ui, hunk)
+                commitid = tryone(ui, hunk, parents)
                 if commitid:
                     haspatch = True
                     if lastcommit:
                         ui.status(_('applied %s\n') % lastcommit)
                     lastcommit = commitid
+                if update or opts.get('exact'):
+                    parents = repo.parents()
+                else:
+                    parents = [repo[commitid]]
 
             if not haspatch:
                 raise util.Abort(_('no diffs found'))
@@ -3195,7 +3246,7 @@ def incoming(ui, repo, source="default", **opts):
     if opts.get('bookmarks'):
         source, branches = hg.parseurl(ui.expandpath(source),
                                        opts.get('branch'))
-        other = hg.repository(hg.remoteui(repo, opts), source)
+        other = hg.peer(repo, opts, source)
         if 'bookmarks' not in other.listkeys('namespaces'):
             ui.warn(_("remote doesn't support bookmarks\n"))
             return 0
@@ -3223,7 +3274,7 @@ def init(ui, dest=".", **opts):
 
     Returns 0 on success.
     """
-    hg.repository(hg.remoteui(ui, opts), ui.expandpath(dest), create=True)
+    hg.peer(ui, opts, ui.expandpath(dest), create=True)
 
 @command('locate',
     [('r', 'rev', '', _('search the repository as it is in REV'), _('REV')),
@@ -3557,7 +3608,7 @@ def outgoing(ui, repo, dest=None, **opts):
     if opts.get('bookmarks'):
         dest = ui.expandpath(dest or 'default-push', dest or 'default')
         dest, branches = hg.parseurl(dest, opts.get('branch'))
-        other = hg.repository(hg.remoteui(repo, opts), dest)
+        other = hg.peer(repo, opts, dest)
         if 'bookmarks' not in other.listkeys('namespaces'):
             ui.warn(_("remote doesn't support bookmarks\n"))
             return 0
@@ -3709,7 +3760,7 @@ def pull(ui, repo, source="default", **opts):
     Returns 0 on success, 1 if an update had unresolved files.
     """
     source, branches = hg.parseurl(ui.expandpath(source), opts.get('branch'))
-    other = hg.repository(hg.remoteui(repo, opts), source)
+    other = hg.peer(repo, opts, source)
     ui.status(_('pulling from %s\n') % util.hidepassword(source))
     revs, checkout = hg.addbranchrevs(repo, other, branches, opts.get('rev'))
 
@@ -3806,7 +3857,7 @@ def push(ui, repo, dest=None, **opts):
     dest, branches = hg.parseurl(dest, opts.get('branch'))
     ui.status(_('pushing to %s\n') % util.hidepassword(dest))
     revs, checkout = hg.addbranchrevs(repo, repo, branches, opts.get('rev'))
-    other = hg.repository(hg.remoteui(repo, opts), dest)
+    other = hg.peer(repo, opts, dest)
     if revs:
         revs = [repo.lookup(rev) for rev in revs]
 
@@ -3913,7 +3964,8 @@ def remove(ui, repo, *pats, **opts):
 
     for f in m.files():
         if f not in repo.dirstate and not os.path.isdir(m.rel(f)):
-            ui.warn(_('not removing %s: file is untracked\n') % m.rel(f))
+            if os.path.exists(m.rel(f)):
+                ui.warn(_('not removing %s: file is untracked\n') % m.rel(f))
             ret = 1
 
     if force:
@@ -4086,43 +4138,28 @@ def resolve(ui, repo, *pats, **opts):
     ] + walkopts + dryrunopts,
     _('[OPTION]... [-r REV] [NAME]...'))
 def revert(ui, repo, *pats, **opts):
-    """restore individual files or directories to an earlier state
+    """restore files to their checkout state
 
     .. note::
-       This command is most likely not what you are looking for.
-       Revert will partially overwrite content in the working
-       directory without changing the working directory parents. Use
-       :hg:`update -r rev` to check out earlier revisions, or
-       :hg:`update --clean .` to undo a merge which has added another
-       parent.
+       To check out earlier revisions, you should use :hg:`update REV`.
+       To cancel a merge (and lose your changes), use :hg:`update --clean .`.
 
-    With no revision specified, revert the named files or directories
-    to the contents they had in the parent of the working directory.
-    This restores the contents of the affected files to an unmodified
-    state and unschedules adds, removes, copies, and renames. If the
-    working directory has two parents, you must explicitly specify a
-    revision.
+    With no revision specified, revert the specified files or directories
+    to the state they had in the first parent of the working directory.
+    This restores the contents of files to an unmodified
+    state and unschedules adds, removes, copies, and renames.
 
-    Using the -r/--rev option, revert the given files or directories
-    to their contents as of a specific revision. This can be helpful
-    to "roll back" some or all of an earlier change. See :hg:`help
-    dates` for a list of formats valid for -d/--date.
-
-    Revert modifies the working directory. It does not commit any
-    changes, or change the parent of the working directory. If you
-    revert to a revision other than the parent of the working
-    directory, the reverted files will thus appear modified
-    afterwards.
-
-    If a file has been deleted, it is restored. Files scheduled for
-    addition are just unscheduled and left as they are. If the
-    executable mode of a file was changed, it is reset.
-
-    If names are given, all files matching the names are reverted.
-    If no arguments are given, no files are reverted.
+    Using the -r/--rev or -d/--date options, revert the given files or
+    directories to their states as of a specific revision. Because
+    revert does not change the working directory parents, this will
+    cause these files to appear modified. This can be helpful to "back
+    out" some or all of an earlier change. See :hg:`backout` for a
+    related method.
 
     Modified files are saved with a .orig suffix before reverting.
     To disable these backups, use --no-backup.
+
+    See :hg:`help dates` for a list of formats valid for -d/--date.
 
     Returns 0 on success.
     """
@@ -4133,13 +4170,10 @@ def revert(ui, repo, *pats, **opts):
         opts["rev"] = cmdutil.finddate(ui, repo, opts["date"])
 
     parent, p2 = repo.dirstate.parents()
-    if not opts.get('rev') and p2 != nullid:
-        raise util.Abort(_('uncommitted merge - '
-                           'use "hg update", see "hg help revert"'))
 
     if not pats and not opts.get('all'):
-        raise util.Abort(_('no files or directories specified; '
-                           'use --all to revert the whole repo'))
+        raise util.Abort(_('no files or directories specified'),
+                         hint=_('use --all to revert all files'))
 
     ctx = scmutil.revsingle(repo, opts.get('rev'))
     node = ctx.node()
@@ -4756,7 +4790,7 @@ def summary(ui, repo, **opts):
     if opts.get('remote'):
         t = []
         source, branches = hg.parseurl(ui.expandpath('default'))
-        other = hg.repository(hg.remoteui(repo, {}), source)
+        other = hg.peer(repo, {}, source)
         revs, checkout = hg.addbranchrevs(repo, other, branches, opts.get('rev'))
         ui.debug('comparing with %s\n' % util.hidepassword(source))
         repo.ui.pushbuffer()
@@ -4769,7 +4803,7 @@ def summary(ui, repo, **opts):
         dest, branches = hg.parseurl(ui.expandpath('default-push', 'default'))
         revs, checkout = hg.addbranchrevs(repo, repo, branches, None)
         if source != dest:
-            other = hg.repository(hg.remoteui(repo, {}), dest)
+            other = hg.peer(repo, {}, dest)
             commoninc = None
             ui.debug('comparing with %s\n' % util.hidepassword(dest))
         repo.ui.pushbuffer()

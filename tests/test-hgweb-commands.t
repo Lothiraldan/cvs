@@ -352,6 +352,35 @@ Logs and changes
    <th class="files">files</th>
    <td class="files"><a href="/file/2ef0ac749a14/da/foo">da/foo</a> <a href="/file/2ef0ac749a14/foo">foo</a> </td>
   </tr>
+  <tr>
+    <th class="diffstat">diffstat</th>
+    <td class="diffstat">
+       2 files changed, 2 insertions(+), 0 deletions(-)
+  
+      <a id="diffstatexpand" href="javascript:showDiffstat()"/>[<tt>+</tt>]</a>
+      <div id="diffstatdetails" style="display:none;">
+        <a href="javascript:hideDiffstat()"/>[<tt>-</tt>]</a>
+        <p>
+        <table>  <tr class="parity0">
+      <td class="diffstat-file"><a href="#l1.1">da/foo</a></td>
+      <td class="diffstat-total" align="right">1</td>
+      <td class="diffstat-graph">
+        <span class="diffstat-add" style="width:100.0%;">&nbsp;</span>
+        <span class="diffstat-remove" style="width:0.0%;">&nbsp;</span>
+      </td>
+    </tr>
+    <tr class="parity1">
+      <td class="diffstat-file"><a href="#l2.1">foo</a></td>
+      <td class="diffstat-total" align="right">1</td>
+      <td class="diffstat-graph">
+        <span class="diffstat-add" style="width:100.0%;">&nbsp;</span>
+        <span class="diffstat-remove" style="width:0.0%;">&nbsp;</span>
+      </td>
+    </tr>
+  </table>
+      </div>
+    </td>
+  </tr>
   </table>
   
   <div class="overflow">
@@ -952,7 +981,7 @@ capabilities
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '?cmd=capabilities'; echo
   200 Script output follows
   
-  lookup changegroupsubset branchmap pushkey known getbundle unbundlehash unbundle=HG10GZ,HG10BZ,HG10UN httpheader=1024
+  lookup changegroupsubset branchmap pushkey known getbundle unbundlehash batch unbundle=HG10GZ,HG10BZ,HG10UN httpheader=1024
 
 heads
 

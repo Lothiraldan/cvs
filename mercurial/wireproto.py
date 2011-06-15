@@ -12,6 +12,110 @@ import changegroup as changegroupmod
 import repo, error, encoding, util, store
 import pushkey as pushkeymod
 
+# abstract batching support
+
+class future(object):
+    '''placeholder for a value to be set later'''
+    def set(self, value):
+        if hasattr(self, 'value'):
+            raise error.RepoError("future is already set")
+        self.value = value
+
+class batcher(object):
+    '''base class for batches of commands submittable in a single request
+
+    All methods invoked on instances of this class are simply queued and return a
+    a future for the result. Once you call submit(), all the queued calls are
+    performed and the results set in their respective futures.
+    '''
+    def __init__(self):
+        self.calls = []
+    def __getattr__(self, name):
+        def call(*args, **opts):
+            resref = future()
+            self.calls.append((name, args, opts, resref,))
+            return resref
+        return call
+    def submit(self):
+        pass
+
+class localbatch(batcher):
+    '''performs the queued calls directly'''
+    def __init__(self, local):
+        batcher.__init__(self)
+        self.local = local
+    def submit(self):
+        for name, args, opts, resref in self.calls:
+            resref.set(getattr(self.local, name)(*args, **opts))
+
+class remotebatch(batcher):
+    '''batches the queued calls; uses as few roundtrips as possible'''
+    def __init__(self, remote):
+        '''remote must support _submitbatch(encbatch) and _submitone(op, encargs)'''
+        batcher.__init__(self)
+        self.remote = remote
+    def submit(self):
+        req, rsp = [], []
+        for name, args, opts, resref in self.calls:
+            mtd = getattr(self.remote, name)
+            if hasattr(mtd, 'batchable'):
+                batchable = getattr(mtd, 'batchable')(mtd.im_self, *args, **opts)
+                encargsorres, encresref = batchable.next()
+                if encresref:
+                    req.append((name, encargsorres,))
+                    rsp.append((batchable, encresref, resref,))
+                else:
+                    resref.set(encargsorres)
+            else:
+                if req:
+                    self._submitreq(req, rsp)
+                    req, rsp = [], []
+                resref.set(mtd(*args, **opts))
+        if req:
+            self._submitreq(req, rsp)
+    def _submitreq(self, req, rsp):
+        encresults = self.remote._submitbatch(req)
+        for encres, r in zip(encresults, rsp):
+            batchable, encresref, resref = r
+            encresref.set(encres)
+            resref.set(batchable.next())
+
+def batchable(f):
+    '''annotation for batchable methods
+
+    Such methods must implement a coroutine as follows:
+
+    @batchable
+    def sample(self, one, two=None):
+        # Handle locally computable results first:
+        if not one:
+            yield "a local result", None
+        # Build list of encoded arguments suitable for your wire protocol:
+        encargs = [('one', encode(one),), ('two', encode(two),)]
+        # Create future for injection of encoded result:
+        encresref = future()
+        # Return encoded arguments and future:
+        yield encargs, encresref
+        # Assuming the future to be filled with the result from the batched request
+        # now. Decode it:
+        yield decode(encresref.value)
+
+    The decorator returns a function which wraps this coroutine as a plain method,
+    but adds the original method as an attribute called "batchable", which is
+    used by remotebatch to split the call into separate encoding and decoding
+    phases.
+    '''
+    def plain(*args, **opts):
+        batchable = f(*args, **opts)
+        encargsorres, encresref = batchable.next()
+        if not encresref:
+            return encargsorres # a local result in this case
+        self = args[0]
+        encresref.set(self._submitone(f.func_name, encargsorres))
+        return batchable.next()
+    setattr(plain, 'batchable', f)
+    return plain
+
 # list of nodes encoding / decoding
 
 def decodelist(l, sep=' '):
@@ -22,34 +126,77 @@ def decodelist(l, sep=' '):
 def encodelist(l, sep=' '):
     return sep.join(map(hex, l))
 
+# batched call argument encoding
+
+def escapearg(plain):
+    return (plain
+            .replace(':', '::')
+            .replace(',', ':,')
+            .replace(';', ':;')
+            .replace('=', ':='))
+
+def unescapearg(escaped):
+    return (escaped
+            .replace(':=', '=')
+            .replace(':;', ';')
+            .replace(':,', ',')
+            .replace('::', ':'))
+
 # client side
 
+def todict(**args):
+    return args
+
 class wirerepository(repo.repository):
+
+    def batch(self):
+        return remotebatch(self)
+    def _submitbatch(self, req):
+        cmds = []
+        for op, argsdict in req:
+            args = ','.join('%s=%s' % p for p in argsdict.iteritems())
+            cmds.append('%s %s' % (op, args))
+        rsp = self._call("batch", cmds=';'.join(cmds))
+        return rsp.split(';')
+    def _submitone(self, op, args):
+        return self._call(op, **args)
+
+    @batchable
     def lookup(self, key):
         self.requirecap('lookup', _('look up remote revision'))
-        d = self._call("lookup", key=encoding.fromlocal(key))
+        f = future()
+        yield todict(key=encoding.fromlocal(key)), f
+        d = f.value
         success, data = d[:-1].split(" ", 1)
         if int(success):
-            return bin(data)
+            yield bin(data)
         self._abort(error.RepoError(data))
 
+    @batchable
     def heads(self):
-        d = self._call("heads")
+        f = future()
+        yield {}, f
+        d = f.value
         try:
-            return decodelist(d[:-1])
+            yield decodelist(d[:-1])
         except ValueError:
             self._abort(error.ResponseError(_("unexpected response:"), d))
 
+    @batchable
     def known(self, nodes):
-        n = encodelist(nodes)
-        d = self._call("known", nodes=n)
+        f = future()
+        yield todict(nodes=encodelist(nodes)), f
+        d = f.value
         try:
-            return [bool(int(f)) for f in d]
+            yield [bool(int(f)) for f in d]
         except ValueError:
             self._abort(error.ResponseError(_("unexpected response:"), d))
 
+    @batchable
     def branchmap(self):
-        d = self._call("branchmap")
+        f = future()
+        yield {}, f
+        d = f.value
         try:
             branchmap = {}
             for branchpart in d.splitlines():
@@ -57,7 +204,7 @@ class wirerepository(repo.repository):
                 branchname = encoding.tolocal(urllib.unquote(branchname))
                 branchheads = decodelist(branchheads)
                 branchmap[branchname] = branchheads
-            return branchmap
+            yield branchmap
         except TypeError:
             self._abort(error.ResponseError(_("unexpected response:"), d))
 
@@ -82,30 +229,35 @@ class wirerepository(repo.repository):
                 self._abort(error.ResponseError(_("unexpected response:"), d))
         return r
 
+    @batchable
     def pushkey(self, namespace, key, old, new):
         if not self.capable('pushkey'):
-            return False
-        d = self._call("pushkey",
-                       namespace=encoding.fromlocal(namespace),
-                       key=encoding.fromlocal(key),
-                       old=encoding.fromlocal(old),
-                       new=encoding.fromlocal(new))
+            yield False, None
+        f = future()
+        yield todict(namespace=encoding.fromlocal(namespace),
+                     key=encoding.fromlocal(key),
+                     old=encoding.fromlocal(old),
+                     new=encoding.fromlocal(new)), f
+        d = f.value
         try:
             d = bool(int(d))
         except ValueError:
             raise error.ResponseError(
                 _('push failed (unexpected response):'), d)
-        return d
+        yield d
 
+    @batchable
     def listkeys(self, namespace):
         if not self.capable('pushkey'):
-            return {}
-        d = self._call("listkeys", namespace=encoding.fromlocal(namespace))
+            yield {}, None
+        f = future()
+        yield todict(namespace=encoding.fromlocal(namespace)), f
+        d = f.value
         r = {}
         for l in d.splitlines():
             k, v = l.split('\t')
             r[encoding.tolocal(k)] = encoding.tolocal(v)
-        return r
+        yield r
 
     def stream_out(self):
         return self._callstream('stream_out')
@@ -198,6 +350,34 @@ def options(cmd, keys, others):
                          % (cmd, ",".join(others)))
     return opts
 
+def batch(repo, proto, cmds, others):
+    res = []
+    for pair in cmds.split(';'):
+        op, args = pair.split(' ', 1)
+        vals = {}
+        for a in args.split(','):
+            if a:
+                n, v = a.split('=')
+                vals[n] = unescapearg(v)
+        func, spec = commands[op]
+        if spec:
+            keys = spec.split()
+            data = {}
+            for k in keys:
+                if k == '*':
+                    star = {}
+                    for key in vals.keys():
+                        if key not in keys:
+                            star[key] = vals[key]
+                    data['*'] = star
+                else:
+                    data[k] = vals[k]
+            result = func(repo, proto, *[data[k] for k in keys])
+        else:
+            result = func(repo, proto)
+        res.append(escapearg(result))
+    return ';'.join(res)
+
 def between(repo, proto, pairs):
     pairs = [decodelist(p, '-') for p in pairs.split(" ")]
     r = []
@@ -223,7 +403,7 @@ def branches(repo, proto, nodes):
 
 def capabilities(repo, proto):
     caps = ('lookup changegroupsubset branchmap pushkey known getbundle '
-            'unbundlehash').split()
+            'unbundlehash batch').split()
     if _allowstream(repo.ui):
         requiredformats = repo.requirements & repo.supportedformats
         # if our local revlogs are just revlogv1, add 'stream' cap
@@ -402,6 +582,7 @@ def unbundle(repo, proto, heads):
         os.unlink(tempname)
 
 commands = {
+    'batch': (batch, 'cmds *'),
     'between': (between, 'pairs'),
     'branchmap': (branchmap, ''),
     'branches': (branches, 'nodes'),

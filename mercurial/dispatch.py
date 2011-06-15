@@ -12,10 +12,15 @@ import cmdutil, encoding
 import ui as uimod
 
 class request(object):
-    def __init__(self, args, ui=None, repo=None):
+    def __init__(self, args, ui=None, repo=None, fin=None, fout=None, ferr=None):
         self.args = args
         self.ui = ui
         self.repo = repo
+
+        # input/output/error streams
+        self.fin = fin
+        self.fout = fout
+        self.ferr = ferr
 
 def run():
     "run the command in sys.argv"
@@ -23,23 +28,39 @@ def run():
 
 def dispatch(req):
     "run the command specified in req.args"
+    if req.ferr:
+        ferr = req.ferr
+    elif req.ui:
+        ferr = req.ui.ferr
+    else:
+        ferr = sys.stderr
+
     try:
         if not req.ui:
             req.ui = uimod.ui()
         if '--traceback' in req.args:
             req.ui.setconfig('ui', 'traceback', 'on')
+
+        # set ui streams from the request
+        if req.fin:
+            req.ui.fin = req.fin
+        if req.fout:
+            req.ui.fout = req.fout
+        if req.ferr:
+            req.ui.ferr = req.ferr
     except util.Abort, inst:
-        sys.stderr.write(_("abort: %s\n") % inst)
+        ferr.write(_("abort: %s\n") % inst)
         if inst.hint:
-            sys.stderr.write(_("(%s)\n") % inst.hint)
+            ferr.write(_("(%s)\n") % inst.hint)
         return -1
     except error.ParseError, inst:
         if len(inst.args) > 1:
-            sys.stderr.write(_("hg: parse error at %s: %s\n") %
+            ferr.write(_("hg: parse error at %s: %s\n") %
                              (inst.args[1], inst.args[0]))
         else:
-            sys.stderr.write(_("hg: parse error: %s\n") % inst.args[0])
+            ferr.write(_("hg: parse error: %s\n") % inst.args[0])
         return -1
+
     return _runcatch(req)
 
 def _runcatch(req):
@@ -572,16 +593,20 @@ def _dispatch(req):
         atexit.register(print_time)
 
     if options['verbose'] or options['debug'] or options['quiet']:
-        ui.setconfig('ui', 'verbose', str(bool(options['verbose'])))
-        ui.setconfig('ui', 'debug', str(bool(options['debug'])))
-        ui.setconfig('ui', 'quiet', str(bool(options['quiet'])))
+        for ui_ in (ui, lui):
+            ui_.setconfig('ui', 'verbose', str(bool(options['verbose'])))
+            ui_.setconfig('ui', 'debug', str(bool(options['debug'])))
+            ui_.setconfig('ui', 'quiet', str(bool(options['quiet'])))
     if options['traceback']:
-        ui.setconfig('ui', 'traceback', 'on')
+        for ui_ in (ui, lui):
+            ui_.setconfig('ui', 'traceback', 'on')
     if options['noninteractive']:
-        ui.setconfig('ui', 'interactive', 'off')
+        for ui_ in (ui, lui):
+            ui_.setconfig('ui', 'interactive', 'off')
 
     if cmdoptions.get('insecure', False):
-        ui.setconfig('web', 'cacerts', '')
+        for ui_ in (ui, lui):
+            ui_.setconfig('web', 'cacerts', '')
 
     if options['help']:
         return commands.help_(ui, cmd, options['version'])
