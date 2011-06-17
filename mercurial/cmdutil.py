@@ -76,7 +76,7 @@ def bailifchanged(repo):
     if modified or added or removed or deleted:
         raise util.Abort(_("outstanding uncommitted changes"))
 
-def logmessage(opts):
+def logmessage(ui, opts):
     """ get the log message according to -m and -l option """
     message = opts.get('message')
     logfile = opts.get('logfile')
@@ -87,7 +87,7 @@ def logmessage(opts):
     if not message and logfile:
         try:
             if logfile == '-':
-                message = sys.stdin.read()
+                message = ui.fin.read()
             else:
                 message = '\n'.join(util.readfile(logfile).splitlines())
         except IOError, inst:
@@ -160,8 +160,23 @@ def makefileobj(repo, pat, node=None, total=None,
     writable = mode not in ('r', 'rb')
 
     if not pat or pat == '-':
-        fp = writable and sys.stdout or sys.stdin
-        return os.fdopen(os.dup(fp.fileno()), mode)
+        fp = writable and repo.ui.fout or repo.ui.fin
+        if hasattr(fp, 'fileno'):
+            return os.fdopen(os.dup(fp.fileno()), mode)
+        else:
+            # if this fp can't be duped properly, return
+            # a dummy object that can be closed
+            class wrappedfileobj(object):
+                noop = lambda x: None
+                def __init__(self, f):
+                    self.f = f
+                def __getattr__(self, attr):
+                    if attr == 'close':
+                        return self.noop
+                    else:
+                        return getattr(self.f, attr)
+
+            return wrappedfileobj(fp)
     if hasattr(pat, 'write') and writable:
         return pat
     if hasattr(pat, 'read') and 'r' in mode:
@@ -1163,7 +1178,7 @@ def commit(ui, repo, commitfunc, pats, opts):
     date = opts.get('date')
     if date:
         opts['date'] = util.parsedate(date)
-    message = logmessage(opts)
+    message = logmessage(ui, opts)
 
     # extract addremove carefully -- this function can be called from a command
     # that doesn't support addremove

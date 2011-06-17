@@ -48,7 +48,7 @@ from mercurial.lock import release
 from mercurial import commands, cmdutil, hg, scmutil, util, revset
 from mercurial import repair, extensions, url, error
 from mercurial import patch as patchmod
-import os, sys, re, errno, shutil
+import os, re, errno, shutil
 
 commands.norepo += " qclone"
 
@@ -1831,7 +1831,7 @@ class queue(object):
                 self.checkpatchname(patchname, force)
                 try:
                     if filename == '-':
-                        text = sys.stdin.read()
+                        text = self.ui.fin.read()
                     else:
                         fp = url.open(self.ui, filename)
                         text = fp.read()
@@ -2211,7 +2211,7 @@ def new(ui, repo, patch, *args, **opts):
 
     Returns 0 on successful creation of a new patch.
     """
-    msg = cmdutil.logmessage(opts)
+    msg = cmdutil.logmessage(ui, opts)
     def getmsg():
         return ui.edit(msg, opts.get('user') or ui.username())
     q = repo.mq
@@ -2262,7 +2262,7 @@ def refresh(ui, repo, *pats, **opts):
     Returns 0 on success.
     """
     q = repo.mq
-    message = cmdutil.logmessage(opts)
+    message = cmdutil.logmessage(ui, opts)
     if opts.get('edit'):
         if not q.applied:
             ui.write(_("no patches applied\n"))
@@ -2332,7 +2332,7 @@ def fold(ui, repo, *files, **opts):
         raise util.Abort(_('no patches applied'))
     q.checklocalchanges(repo)
 
-    message = cmdutil.logmessage(opts)
+    message = cmdutil.logmessage(ui, opts)
     if opts.get('edit'):
         if message:
             raise util.Abort(_('option "-e" incompatible with "-m" or "-l"'))
@@ -2661,7 +2661,7 @@ def save(ui, repo, **opts):
 
     This command is deprecated, use :hg:`rebase` instead."""
     q = repo.mq
-    message = cmdutil.logmessage(opts)
+    message = cmdutil.logmessage(ui, opts)
     ret = q.save(repo, msg=message)
     if ret:
         return ret
