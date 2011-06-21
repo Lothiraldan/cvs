@@ -228,7 +228,7 @@ def unresolved(mctx, x):
     return [f for f in mctx.subset if f in ms and ms[f] == 'u']
 
 def hgignore(mctx, x):
-    """``resolved()``
+    """``hgignore()``
     File that matches the active .hgignore pattern.
     """
     getargs(x, 0, 0, _("hgignore takes no arguments"))
@@ -305,7 +305,7 @@ def size(mctx, x):
     elif expr[0].isdigit or expr[0] == '.':
         a = _sizetoint(expr)
         b = _sizetomax(expr)
-        m = lambda x: x >=a and x <= b
+        m = lambda x: x >= a and x <= b
     else:
         raise error.ParseError(_("couldn't parse size"), expr)
 
@@ -402,7 +402,7 @@ def _intree(funcs, tree):
 def getfileset(ctx, expr):
     tree, pos = parse(expr)
     if (pos != len(expr)):
-        raise error.ParseError("invalid token", pos)
+        raise error.ParseError(_("invalid token"), pos)
 
     # do we need status info?
     if _intree(['modified', 'added', 'removed', 'deleted',
