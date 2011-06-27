@@ -73,8 +73,8 @@ class channeledinput(object):
             s = self._read(size, self.channel)
             buf = s
             while s:
-                buf += s
                 s = self._read(size, self.channel)
+                buf += s
 
             return buf
         else:
@@ -104,8 +104,8 @@ class channeledinput(object):
             # keep asking for more until there's either no more or
             # we got a full line
             while s and s[-1] != '\n':
-                buf += s
                 s = self._read(size, 'L')
+                buf += s
 
             return buf
         else:
@@ -205,8 +205,12 @@ class server(object):
                     'getencoding' : getencoding}
 
     def serve(self):
-        self.cout.write('capabilities: %s' % ' '.join(self.capabilities.keys()))
-        self.cout.write('encoding: %s' % encoding.encoding)
+        hellomsg = 'capabilities: ' + ' '.join(self.capabilities.keys())
+        hellomsg += '\n'
+        hellomsg += 'encoding: ' + encoding.encoding
+
+        # write the hello msg in -one- chunk
+        self.cout.write(hellomsg)
 
         try:
             while self.serveone():
