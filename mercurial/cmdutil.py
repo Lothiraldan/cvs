@@ -109,12 +109,13 @@ def loglimit(opts):
         limit = None
     return limit
 
-def makefilename(repo, pat, node,
+def makefilename(repo, pat, node, desc=None,
                   total=None, seqno=None, revwidth=None, pathname=None):
     node_expander = {
         'H': lambda: hex(node),
         'R': lambda: str(repo.changelog.rev(node)),
         'h': lambda: short(node),
+        'm': lambda: re.sub('[^\w]', '_', str(desc))
         }
     expander = {
         '%': lambda: '%',
@@ -154,14 +155,14 @@ def makefilename(repo, pat, node,
         raise util.Abort(_("invalid format spec '%%%s' in output filename") %
                          inst.args[0])
 
-def makefileobj(repo, pat, node=None, total=None,
+def makefileobj(repo, pat, node=None, desc=None, total=None,
                 seqno=None, revwidth=None, mode='wb', pathname=None):
 
     writable = mode not in ('r', 'rb')
 
     if not pat or pat == '-':
         fp = writable and repo.ui.fout or repo.ui.fin
-        if hasattr(fp, 'fileno'):
+        if util.safehasattr(fp, 'fileno'):
             return os.fdopen(os.dup(fp.fileno()), mode)
         else:
             # if this fp can't be duped properly, return
@@ -177,11 +178,11 @@ def makefileobj(repo, pat, node=None, total=None,
                         return getattr(self.f, attr)
 
             return wrappedfileobj(fp)
-    if hasattr(pat, 'write') and writable:
+    if util.safehasattr(pat, 'write') and writable:
         return pat
-    if hasattr(pat, 'read') and 'r' in mode:
+    if util.safehasattr(pat, 'read') and 'r' in mode:
         return pat
-    return open(makefilename(repo, pat, node, total, seqno, revwidth,
+    return open(makefilename(repo, pat, node, desc, total, seqno, revwidth,
                               pathname),
                 mode)
 
@@ -516,11 +517,13 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
 
         shouldclose = False
         if not fp:
-            fp = makefileobj(repo, template, node, total=total, seqno=seqno,
-                             revwidth=revwidth, mode='ab')
+            desc_lines = ctx.description().rstrip().split('\n')
+            desc = desc_lines[0]    #Commit always has a first line.
+            fp = makefileobj(repo, template, node, desc=desc, total=total,
+                             seqno=seqno, revwidth=revwidth, mode='ab')
             if fp != template:
                 shouldclose = True
-        if fp != sys.stdout and hasattr(fp, 'name'):
+        if fp != sys.stdout and util.safehasattr(fp, 'name'):
             repo.ui.note("%s\n" % fp.name)
 
         fp.write("# HG changeset patch\n")

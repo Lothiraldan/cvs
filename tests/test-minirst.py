@@ -231,3 +231,14 @@ Empty comment above
 """
 
 debugformat('comments', comments, 30)
+
+
+data = [['a', 'b', 'c'],
+         ['1', '2', '3'],
+         ['foo', 'bar', 'baz this list is very very very long man']]
+
+table = minirst.maketable(data, 2, True)
+
+print table
+
+debugformat('table', table, 30)

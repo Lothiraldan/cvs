@@ -119,6 +119,10 @@ diffopts2 = [
     ('', 'stat', None, _('output diffstat-style summary of changes')),
 ]
 
+mergetoolopts = [
+    ('t', 'tool', '', _('specify merge tool')),
+]
+
 similarityopts = [
     ('s', 'similarity', '',
      _('guess renamed files by similarity (0<=s<=100)'), _('SIMILARITY'))
@@ -303,6 +307,18 @@ def archive(ui, repo, dest, **opts):
     The archive type is automatically detected based on file
     extension (or override using -t/--type).
 
+    .. container:: verbose
+
+      Examples:
+
+      - create a zip file containing the 1.0 release::
+
+          hg archive -r 1.0 project-1.0.zip
+
+      - create a tarball excluding .hg files::
+
+          hg archive project.tar.gz -X ".hg*"
+
     Valid types are:
 
     :``files``: a directory full of files (default)
@@ -349,9 +365,8 @@ def archive(ui, repo, dest, **opts):
 @command('backout',
     [('', 'merge', None, _('merge with old dirstate parent after backout')),
     ('', 'parent', '', _('parent to choose when backing out merge'), _('REV')),
-    ('t', 'tool', '', _('specify merge tool')),
     ('r', 'rev', '', _('revision to backout'), _('REV')),
-    ] + walkopts + commitopts + commitopts2,
+    ] + mergetoolopts + walkopts + commitopts + commitopts2,
     _('[OPTION]... [-r] REV'))
 def backout(ui, repo, node=None, rev=None, **opts):
     '''reverse effect of earlier changeset
@@ -485,6 +500,54 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
     status 0 means good, 125 means to skip the revision, 127
     (command not found) will abort the bisection, and any other
     non-zero exit status means the revision is bad.
+
+    .. container:: verbose
+
+      Some examples:
+
+      - start a bisection with known bad revision 12, and good revision 34::
+
+          hg bisect --bad 34
+          hg bisect --good 12
+
+      - advance the current bisection by marking current revision as good or
+        bad::
+
+          hg bisect --good
+          hg bisect --bad
+
+      - mark the current revision, or a known revision, to be skipped (eg. if
+        that revision is not usable because of another issue)::
+
+          hg bisect --skip
+          hg bisect --skip 23
+
+      - forget the current bisection::
+
+          hg bisect --reset
+
+      - use 'make && make tests' to automatically find the first broken
+        revision::
+
+          hg bisect --reset
+          hg bisect --bad 34
+          hg bisect --good 12
+          hg bisect --command 'make && make tests'
+
+      - see all changesets whose states are already known in the current
+        bisection::
+
+          hg log -r "bisect(pruned)"
+
+      - see all changesets that took part in the current bisection::
+
+          hg log -r "bisect(range)"
+
+      - with the graphlog extension, you can even get a nice graph::
+
+          hg log --graph -r "bisect(range)"
+
+      See :hg:`help revsets` for more about the `bisect()` keyword.
 
     Returns 0 on success.
     """
@@ -977,56 +1040,84 @@ def clone(ui, source, dest=None, **opts):
     The location of the source is added to the new repository's
     ``.hg/hgrc`` file, as the default to be used for future pulls.
 
-    See :hg:`help urls` for valid source format details.
+    Only local paths and ``ssh://`` URLs are supported as
+    destinations. For ``ssh://`` destinations, no working directory or
+    ``.hg/hgrc`` will be created on the remote side.
 
-    It is possible to specify an ``ssh://`` URL as the destination, but no
-    ``.hg/hgrc`` and working directory will be created on the remote side.
-    Please see :hg:`help urls` for important details about ``ssh://`` URLs.
+    To pull only a subset of changesets, specify one or more revisions
+    identifiers with -r/--rev or branches with -b/--branch. The
+    resulting clone will contain only the specified changesets and
+    their ancestors. These options (or 'clone src#rev dest') imply
+    --pull, even for local source repositories. Note that specifying a
+    tag will include the tagged changeset but not the changeset
+    containing the tag.
 
-    A set of changesets (tags, or branch names) to pull may be specified
-    by listing each changeset (tag, or branch name) with -r/--rev.
-    If -r/--rev is used, the cloned repository will contain only a subset
-    of the changesets of the source repository. Only the set of changesets
-    defined by all -r/--rev options (including all their ancestors)
-    will be pulled into the destination repository.
-    No subsequent changesets (including subsequent tags) will be present
-    in the destination.
+    To check out a particular version, use -u/--update, or
+    -U/--noupdate to create a clone with no working directory.
 
-    Using -r/--rev (or 'clone src#rev dest') implies --pull, even for
-    local source repositories.
+    .. container:: verbose
 
-    For efficiency, hardlinks are used for cloning whenever the source
-    and destination are on the same filesystem (note this applies only
-    to the repository data, not to the working directory). Some
-    filesystems, such as AFS, implement hardlinking incorrectly, but
-    do not report errors. In these cases, use the --pull option to
-    avoid hardlinking.
+      For efficiency, hardlinks are used for cloning whenever the
+      source and destination are on the same filesystem (note this
+      applies only to the repository data, not to the working
+      directory). Some filesystems, such as AFS, implement hardlinking
+      incorrectly, but do not report errors. In these cases, use the
+      --pull option to avoid hardlinking.
 
-    In some cases, you can clone repositories and the working directory
-    using full hardlinks with ::
+      In some cases, you can clone repositories and the working
+      directory using full hardlinks with ::
 
-      $ cp -al REPO REPOCLONE
+        $ cp -al REPO REPOCLONE
 
-    This is the fastest way to clone, but it is not always safe. The
-    operation is not atomic (making sure REPO is not modified during
-    the operation is up to you) and you have to make sure your editor
-    breaks hardlinks (Emacs and most Linux Kernel tools do so). Also,
-    this is not compatible with certain extensions that place their
-    metadata under the .hg directory, such as mq.
+      This is the fastest way to clone, but it is not always safe. The
+      operation is not atomic (making sure REPO is not modified during
+      the operation is up to you) and you have to make sure your
+      editor breaks hardlinks (Emacs and most Linux Kernel tools do
+      so). Also, this is not compatible with certain extensions that
+      place their metadata under the .hg directory, such as mq.
 
-    Mercurial will update the working directory to the first applicable
-    revision from this list:
+      Mercurial will update the working directory to the first applicable
+      revision from this list:
 
-    a) null if -U or the source repository has no changesets
-    b) if -u . and the source repository is local, the first parent of
-       the source repository's working directory
-    c) the changeset specified with -u (if a branch name, this means the
-       latest head of that branch)
-    d) the changeset specified with -r
-    e) the tipmost head specified with -b
-    f) the tipmost head specified with the url#branch source syntax
-    g) the tipmost head of the default branch
-    h) tip
+      a) null if -U or the source repository has no changesets
+      b) if -u . and the source repository is local, the first parent of
+         the source repository's working directory
+      c) the changeset specified with -u (if a branch name, this means the
+         latest head of that branch)
+      d) the changeset specified with -r
+      e) the tipmost head specified with -b
+      f) the tipmost head specified with the url#branch source syntax
+      g) the tipmost head of the default branch
+      h) tip
+
+      Examples:
+
+      - clone a remote repository to a new directory named hg/::
+
+          hg clone http://selenic.com/hg
+
+      - create a lightweight local clone::
+
+          hg clone project/ project-feature/
+
+      - clone from an absolute path on an ssh server (note double-slash)::
+
+          hg clone ssh://user@server//home/projects/alpha/
+
+      - do a high-speed clone over a LAN while checking out a
+        specified version::
+
+          hg clone --uncompressed http://server/repo -u 1.5
+
+      - create a repository without changesets after a particular revision::
+
+          hg clone -r 04e544 experimental/ good/
+
+      - clone (and track) a particular named branch::
+
+          hg clone http://selenic.com/hg#stable
+
+    See :hg:`help urls` for details on specifying URLs.
 
     Returns 0 on success.
     """
@@ -1102,8 +1193,8 @@ def commit(ui, repo, *pats, **opts):
     ctx = repo[node]
     parents = ctx.parents()
 
-    if bheads and not [x for x in parents
-                       if x.node() in bheads and x.branch() == branch]:
+    if (bheads and node not in bheads and not
+        [x for x in parents if x.node() in bheads and x.branch() == branch]):
         ui.status(_('created new head\n'))
         # The message is not printed for initial roots. For the other
         # changesets, it is printed in the following situations:
@@ -1656,8 +1747,9 @@ def debuggetbundle(ui, repopath, bundlepath, head=None, common=None, **opts):
 def debugignore(ui, repo, *values, **opts):
     """display the combined ignore pattern"""
     ignore = repo.dirstate._ignore
-    if hasattr(ignore, 'includepat'):
-        ui.write("%s\n" % ignore.includepat)
+    includepat = getattr(ignore, 'includepat', None)
+    if includepat is not None:
+        ui.write("%s\n" % includepat)
     else:
         raise util.Abort(_("no ignore patterns found"))
 
@@ -2170,6 +2262,32 @@ def diff(ui, repo, *pats, **opts):
     Use the -g/--git option to generate diffs in the git extended diff
     format. For more information, read :hg:`help diffs`.
 
+    .. container:: verbose
+
+      Examples:
+
+      - compare a file in the current working directory to its parent::
+
+          hg diff foo.c
+
+      - compare two historical versions of a directory, with rename info::
+
+          hg diff --git -r 1.0:1.2 lib/
+
+      - get change stats relative to the last change on some date::
+
+          hg diff --stat -r "date('may 2')"
+
+      - diff all newly-added files that contain a keyword::
+
+          hg diff "set:added() and grep(GNU)"
+
+      - compare a revision and its parents::
+
+          hg diff -c 9353         # compare against first parent
+          hg diff -r 9353^:9353   # same using revset syntax
+          hg diff -r 9353^2:9353  # compare against the second parent
+
     Returns 0 on success.
     """
 
@@ -2225,6 +2343,7 @@ def export(ui, repo, *changesets, **opts):
     :``%R``: changeset revision number
     :``%b``: basename of the exporting repository
     :``%h``: short-form changeset hash (12 hexadecimal digits)
+    :``%m``: first line of the commit message (only alphanumeric characters)
     :``%n``: zero-padded sequence number, starting at 1
     :``%r``: zero-padded changeset revision number
 
@@ -2237,6 +2356,25 @@ def export(ui, repo, *changesets, **opts):
 
     With the --switch-parent option, the diff will be against the
     second parent. It can be useful to review a merge.
+
+    .. container:: verbose
+
+      Examples:
+
+      - use export and import to transplant a bugfix to the current
+        branch::
+
+          hg export -r 9353 | hg import -
+
+      - export all the changesets between two revisions to a file with
+        rename information::
+
+          hg export --git -r 123:150 > changes.txt
+
+      - split outgoing changes into a series of patches with
+        descriptive names::
+
+          hg export -r "outgoing()" -o "%n-%m.patch"
 
     Returns 0 on success.
     """
@@ -2264,6 +2402,18 @@ def forget(ui, repo, *pats, **opts):
     working directory.
 
     To undo a forget before the next commit, see :hg:`add`.
+
+    .. container:: verbose
+
+      Examples:
+
+      - forget newly-added binary files::
+
+          hg forget "set:added() and binary()"
+
+      - forget files that would be excluded by .hgignore::
+
+          hg forget "set:hgignore()"
 
     Returns 0 on success.
     """
@@ -2576,7 +2726,7 @@ def heads(ui, repo, *branchrevs, **opts):
     [('e', 'extension', None, _('show only help for extensions')),
      ('c', 'command', None, _('show only help for commands'))],
     _('[-ec] [TOPIC]'))
-def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts):
+def help_(ui, name=None, unknowncmd=False, full=True, **opts):
     """show help for a given topic or a help overview
 
     With no arguments, print a list of commands with short help messages.
@@ -2586,14 +2736,64 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
 
     Returns 0 if successful.
     """
-    option_lists = []
+
     textwidth = min(ui.termwidth(), 80) - 2
 
-    def addglobalopts(aliases):
+    def optrst(options):
+        data = []
+        multioccur = False
+        for option in options:
+            if len(option) == 5:
+                shortopt, longopt, default, desc, optlabel = option
+            else:
+                shortopt, longopt, default, desc = option
+                optlabel = _("VALUE") # default label
+
+            if _("DEPRECATED") in desc and not ui.verbose:
+                continue
+
+            so = ''
+            if shortopt:
+                so = '-' + shortopt
+            lo = '--' + longopt
+            if default:
+                desc += _(" (default: %s)") % default
+
+            if isinstance(default, list):
+                lo += " %s [+]" % optlabel
+                multioccur = True
+            elif (default is not None) and not isinstance(default, bool):
+                lo += " %s" % optlabel
+
+            data.append((so, lo, desc))
+
+        rst = minirst.maketable(data, 1)
+        if multioccur:
+            rst += _("\n[+] marked option can be specified multiple times")
+
+        return rst
+
+    # list all option lists
+    def opttext(optlist, width):
+        rst = ''
+        if not optlist:
+            return ''
+
+        for title, options in optlist:
+            rst += '\n%s\n\n' % title
+            rst += optrst(options)
+            rst += '\n'
+
+        return '\n' + minirst.format(rst, width)
+
+    def addglobalopts(optlist, aliases):
+        if ui.quiet:
+            return []
+
         if ui.verbose:
-            option_lists.append((_("global options:"), globalopts))
+            optlist.append((_("global options:"), globalopts))
             if name == 'shortlist':
-                option_lists.append((_('use "hg help" for the full list '
+                optlist.append((_('use "hg help" for the full list '
                                        'of commands'), ()))
         else:
             if name == 'shortlist':
@@ -2606,13 +2806,10 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
                         'global options') % (name and " " + name or "")
             else:
                 msg = _('use "hg -v help %s" to show global options') % name
-            option_lists.append((msg, ()))
+            optlist.append((msg, ()))
 
     def helpcmd(name):
-        if with_version:
-            version_(ui)
-            ui.write('\n')
-
+        optlist = []
         try:
             aliases, entry = cmdutil.findcmd(name, table, strict=unknowncmd)
         except error.AmbiguousCommand, inst:
@@ -2620,7 +2817,7 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
             # except block, nor can be used inside a lambda. python issue4617
             prefix = inst.args[0]
             select = lambda c: c.lstrip('^').startswith(prefix)
-            helplist(_('list of commands:\n\n'), select)
+            helplist(select)
             return
 
         # check if it's an invalid alias and display its error if it is
@@ -2646,7 +2843,7 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
         doc = gettext(entry[0].__doc__)
         if not doc:
             doc = _("(no help text available)")
-        if hasattr(entry[0], 'definition'):  # aliased command
+        if util.safehasattr(entry[0], 'definition'):  # aliased command
             if entry[0].definition.startswith('!'):  # shell alias
                 doc = _('shell alias for::\n\n    %s') % entry[0].definition[1:]
             else:
@@ -2655,16 +2852,14 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
             doc = doc.splitlines()[0]
         keep = ui.verbose and ['verbose'] or []
         formatted, pruned = minirst.format(doc, textwidth, keep=keep)
-        ui.write("\n%s\n" % formatted)
+        ui.write("\n%s" % formatted)
         if pruned:
             ui.write(_('\nuse "hg -v help %s" to show verbose help\n') % name)
 
         if not ui.quiet:
             # options
             if entry[1]:
-                option_lists.append((_("options:\n"), entry[1]))
-
-            addglobalopts(False)
+                optlist.append((_("options:\n"), entry[1]))
 
         # check if this command shadows a non-trivial (multi-line)
         # extension help text
@@ -2678,7 +2873,16 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
         except KeyError:
             pass
 
-    def helplist(header, select=None):
+        addglobalopts(optlist, False)
+        ui.write(opttext(optlist, textwidth))
+
+    def helplist(select=None):
+        # list of commands
+        if name == "shortlist":
+            header = _('basic commands:\n\n')
+        else:
+            header = _('list of commands:\n\n')
+
         h = {}
         cmds = {}
         for c, e in table.iteritems():
@@ -2718,8 +2922,22 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
                                              initindent=' %-*s   ' % (m, f),
                                              hangindent=' ' * (m + 4))))
 
-        if not ui.quiet:
-            addglobalopts(True)
+        if not name:
+            text = help.listexts(_('enabled extensions:'), extensions.enabled())
+            if text:
+                ui.write("\n%s" % minirst.format(text, textwidth))
+
+            ui.write(_("\nadditional help topics:\n\n"))
+            topics = []
+            for names, header, doc in help.helptable:
+                topics.append((sorted(names, key=len, reverse=True)[0], header))
+            topics_len = max([len(s[0]) for s in topics])
+            for t, desc in topics:
+                ui.write(" %-*s  %s\n" % (topics_len, t, desc))
+
+        optlist = []
+        addglobalopts(optlist, True)
+        ui.write(opttext(optlist, textwidth))
 
     def helptopic(name):
         for names, header, doc in help.helptable:
@@ -2731,11 +2949,11 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
         # description
         if not doc:
             doc = _("(no help text available)")
-        if hasattr(doc, '__call__'):
+        if util.safehasattr(doc, '__call__'):
             doc = doc()
 
         ui.write("%s\n\n" % header)
-        ui.write("%s\n" % minirst.format(doc, textwidth, indent=4))
+        ui.write("%s" % minirst.format(doc, textwidth, indent=4))
         try:
             cmdutil.findcmd(name, table)
             ui.write(_('\nuse "hg help -c %s" to see help for '
@@ -2760,7 +2978,7 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
         ui.write(_('%s extension - %s\n\n') % (name.split('.')[-1], head))
         if tail:
             ui.write(minirst.format(tail, textwidth))
-            ui.status('\n\n')
+            ui.status('\n')
 
         if mod:
             try:
@@ -2768,7 +2986,7 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
             except AttributeError:
                 ct = {}
             modcmds = set([c.split('|', 1)[0] for c in ct])
-            helplist(_('list of commands:\n\n'), modcmds.__contains__)
+            helplist(modcmds.__contains__)
         else:
             ui.write(_('use "hg help extensions" for information on enabling '
                        'extensions\n'))
@@ -2780,7 +2998,7 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
         msg = help.listexts(_("'%s' is provided by the following "
                               "extension:") % cmd, {ext: doc}, indent=4)
         ui.write(minirst.format(msg, textwidth))
-        ui.write('\n\n')
+        ui.write('\n')
         ui.write(_('use "hg help extensions" for information on enabling '
                    'extensions\n'))
 
@@ -2803,87 +3021,12 @@ def help_(ui, name=None, with_version=False, unknowncmd=False, full=True, **opts
                 i = inst
         if i:
             raise i
-
     else:
         # program name
-        if ui.verbose or with_version:
-            version_(ui)
-        else:
-            ui.status(_("Mercurial Distributed SCM\n"))
+        ui.status(_("Mercurial Distributed SCM\n"))
         ui.status('\n')
+        helplist()
 
-        # list of commands
-        if name == "shortlist":
-            header = _('basic commands:\n\n')
-        else:
-            header = _('list of commands:\n\n')
-
-        helplist(header)
-        if name != 'shortlist':
-            text = help.listexts(_('enabled extensions:'), extensions.enabled())
-            if text:
-                ui.write("\n%s\n" % minirst.format(text, textwidth))
-
-    # list all option lists
-    opt_output = []
-    multioccur = False
-    for title, options in option_lists:
-        opt_output.append(("\n%s" % title, None))
-        for option in options:
-            if len(option) == 5:
-                shortopt, longopt, default, desc, optlabel = option
-            else:
-                shortopt, longopt, default, desc = option
-                optlabel = _("VALUE") # default label
-
-            if _("DEPRECATED") in desc and not ui.verbose:
-                continue
-            if isinstance(default, list):
-                numqualifier = " %s [+]" % optlabel
-                multioccur = True
-            elif (default is not None) and not isinstance(default, bool):
-                numqualifier = " %s" % optlabel
-            else:
-                numqualifier = ""
-            opt_output.append(("%2s%s" %
-                               (shortopt and "-%s" % shortopt,
-                                longopt and " --%s%s" %
-                                (longopt, numqualifier)),
-                               "%s%s" % (desc,
-                                         default
-                                         and _(" (default: %s)") % default
-                                         or "")))
-    if multioccur:
-        msg = _("\n[+] marked option can be specified multiple times")
-        if ui.verbose and name != 'shortlist':
-            opt_output.append((msg, None))
-        else:
-            opt_output.insert(-1, (msg, None))
-
-    if not name:
-        ui.write(_("\nadditional help topics:\n\n"))
-        topics = []
-        for names, header, doc in help.helptable:
-            topics.append((sorted(names, key=len, reverse=True)[0], header))
-        topics_len = max([len(s[0]) for s in topics])
-        for t, desc in topics:
-            ui.write(" %-*s  %s\n" % (topics_len, t, desc))
-
-    if opt_output:
-        colwidth = encoding.colwidth
-        # normalize: (opt or message, desc or None, width of opt)
-        entries = [desc and (opt, desc, colwidth(opt)) or (opt, None, 0)
-                   for opt, desc in opt_output]
-        hanging = max([e[2] for e in entries])
-        for opt, desc, width in entries:
-            if desc:
-                initindent = ' %s%s  ' % (opt, ' ' * (hanging - width))
-                hangindent = ' ' * (hanging + 3)
-                ui.write('%s\n' % (util.wrap(desc, textwidth,
-                                             initindent=initindent,
-                                             hangindent=hangindent)))
-            else:
-                ui.write("%s\n" % opt)
 
 @command('identify|id',
     [('r', 'rev', '',
@@ -2908,6 +3051,22 @@ def identify(ui, repo, source=None, rev=None,
 
     Specifying a path to a repository root or Mercurial bundle will
     cause lookup to operate on that repository/bundle.
+
+    .. container:: verbose
+
+      Examples:
+
+      - generate a build identifier for the working directory::
+
+          hg id --id > build-id.dat
+
+      - find the revision corresponding to a tag::
+
+          hg id -n -r 1.3
+
+      - check the most recent revision of a remote repository::
+
+          hg id -r tip http://selenic.com/hg/
 
     Returns 0 if successful.
     """
@@ -3056,6 +3215,27 @@ def import_(ui, repo, patch1, *patches, **opts):
     To read a patch from standard input, use "-" as the patch name. If
     a URL is specified, the patch will be downloaded from it.
     See :hg:`help dates` for a list of formats valid for -d/--date.
+
+    .. container:: verbose
+
+      Examples:
+
+      - import a traditional patch from a website and detect renames::
+
+          hg import -s 80 http://example.com/bugfix.patch
+
+      - import a changeset from an hgweb server::
+
+          hg import http://www.selenic.com/hg/rev/5ca8c111e9aa
+
+      - import all the patches in an Unix-style mbox::
+
+          hg import incoming-patches.mbox
+
+      - attempt to exactly restore an exported changeset (not always
+        possible)::
+
+          hg import --exact proposed-fix.patch
 
     Returns 0 on success.
     """
@@ -3356,18 +3536,14 @@ def log(ui, repo, *pats, **opts):
     Print the revision history of the specified files or the entire
     project.
 
+    If no revision range is specified, the default is ``tip:0`` unless
+    --follow is set, in which case the working directory parent is
+    used as the starting revision.
+
     File history is shown without following rename or copy history of
     files. Use -f/--follow with a filename to follow history across
     renames and copies. --follow without a filename will only show
-    ancestors or descendants of the starting revision. --follow-first
-    only follows the first parent of merge revisions.
-
-    If no revision range is specified, the default is ``tip:0`` unless
-    --follow is set, in which case the working directory parent is
-    used as the starting revision. You can specify a revision set for
-    log, see :hg:`help revsets` for more information.
-
-    See :hg:`help dates` for a list of formats valid for -d/--date.
+    ancestors or descendants of the starting revision.
 
     By default this command prints revision number and changeset id,
     tags, non-trivial parents, user, date and time, and a summary for
@@ -3379,6 +3555,57 @@ def log(ui, repo, *pats, **opts):
        changesets, as it will only compare the merge changeset against
        its first parent. Also, only files different from BOTH parents
        will appear in files:.
+
+    .. note::
+       for performance reasons, log FILE may omit duplicate changes
+       made on branches and will not show deletions. To see all
+       changes including duplicates and deletions, use the --removed
+       switch.
+
+    .. container:: verbose
+
+      Some examples:
+
+      - changesets with full descriptions and file lists::
+
+          hg log -v
+
+      - changesets ancestral to the working directory::
+
+          hg log -f
+
+      - last 10 commits on the current branch::
+
+          hg log -l 10 -b .
+
+      - changesets showing all modifications of a file, including removals::
+
+          hg log --removed file.c
+
+      - all changesets that touch a directory, with diffs, excluding merges::
+
+          hg log -Mp lib/
+
+      - all revision numbers that match a keyword::
+
+          hg log -k bug --template "{rev}\\n"
+
+      - check if a given changeset is included is a tagged release::
+
+          hg log -r "a21ccf and ancestor(1.9)"
+
+      - find all changesets by some user in a date range::
+
+          hg log -k alice -d "may 2008 to jul 2008"
+
+      - summary of all changesets after the last tag::
+
+          hg log -r "last(tagged())::" --template "{desc|firstline}\\n"
+
+    See :hg:`help dates` for a list of formats valid for -d/--date.
+
+    See :hg:`help revisions` and :hg:`help revsets` for more about
+    specifying revisions.
 
     Returns 0 on success.
     """
@@ -3507,10 +3734,10 @@ def manifest(ui, repo, node=None, rev=None, **opts):
 
 @command('^merge',
     [('f', 'force', None, _('force a merge with outstanding changes')),
-    ('t', 'tool', '', _('specify merge tool')),
     ('r', 'rev', '', _('revision to merge'), _('REV')),
     ('P', 'preview', None,
-     _('review revisions to merge (no merge is performed)'))],
+     _('review revisions to merge (no merge is performed)'))
+     ] + mergetoolopts,
     _('[-P] [-f] [[-r] REV]'))
 def merge(ui, repo, node=None, **opts):
     """merge working directory with another revision
@@ -3589,7 +3816,7 @@ def merge(ui, repo, node=None, **opts):
 
     try:
         # ui.forcemerge is an internal variable, do not document
-        ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+        repo.ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
         return hg.merge(repo, node, force=opts.get('force'))
     finally:
         ui.setconfig('ui', 'forcemerge', '')
@@ -3935,31 +4162,36 @@ def recover(ui, repo):
 def remove(ui, repo, *pats, **opts):
     """remove the specified files on the next commit
 
-    Schedule the indicated files for removal from the repository.
-
-    This only removes files from the current branch, not from the
-    entire project history. -A/--after can be used to remove only
-    files that have already been deleted, -f/--force can be used to
-    force deletion, and -Af can be used to remove files from the next
-    revision without deleting them from the working directory.
-
-    The following table details the behavior of remove for different
-    file states (columns) and option combinations (rows). The file
-    states are Added [A], Clean [C], Modified [M] and Missing [!] (as
-    reported by :hg:`status`). The actions are Warn, Remove (from
-    branch) and Delete (from disk)::
-
-             A  C  M  !
-      none   W  RD W  R
-      -f     R  RD RD R
-      -A     W  W  W  R
-      -Af    R  R  R  R
-
-    Note that remove never deletes files in Added [A] state from the
-    working directory, not even if option --force is specified.
+    Schedule the indicated files for removal from the current branch.
 
     This command schedules the files to be removed at the next commit.
-    To undo a remove before that, see :hg:`revert`.
+    To undo a remove before that, see :hg:`revert`. To undo added
+    files, see :hg:`forget`.
+
+    .. container:: verbose
+
+      -A/--after can be used to remove only files that have already
+      been deleted, -f/--force can be used to force deletion, and -Af
+      can be used to remove files from the next revision without
+      deleting them from the working directory.
+
+      The following table details the behavior of remove for different
+      file states (columns) and option combinations (rows). The file
+      states are Added [A], Clean [C], Modified [M] and Missing [!]
+      (as reported by :hg:`status`). The actions are Warn, Remove
+      (from branch) and Delete (from disk):
+
+      ======= == == == ==
+              A  C  M  !
+      ======= == == == ==
+      none    W  RD W  R
+      -f      R  RD RD R
+      -A      W  W  W  R
+      -Af     R  R  R  R
+      ======= == == == ==
+
+      Note that remove never deletes files in Added [A] state from the
+      working directory, not even if option --force is specified.
 
     Returns 0 on success, 1 if any warnings encountered.
     """
@@ -3994,8 +4226,8 @@ def remove(ui, repo, *pats, **opts):
                       ' to force removal)\n') % m.rel(f))
             ret = 1
         for f in added:
-            ui.warn(_('not removing %s: file has been marked for add (use -f'
-                      ' to force removal)\n') % m.rel(f))
+            ui.warn(_('not removing %s: file has been marked for add'
+                      ' (use forget to undo)\n') % m.rel(f))
             ret = 1
 
     for f in sorted(list):
@@ -4051,9 +4283,8 @@ def rename(ui, repo, *pats, **opts):
     ('l', 'list', None, _('list state of files needing merge')),
     ('m', 'mark', None, _('mark files as resolved')),
     ('u', 'unmark', None, _('mark files as unresolved')),
-    ('t', 'tool', '', _('specify merge tool')),
     ('n', 'no-status', None, _('hide status prefix'))]
-    + walkopts,
+    + mergetoolopts + walkopts,
     _('[OPTION]... [FILE]...'))
 def resolve(ui, repo, *pats, **opts):
     """redo merges or set/view the merge status of files
@@ -4145,7 +4376,7 @@ def resolve(ui, repo, *pats, **opts):
     [('a', 'all', None, _('revert all changes when no arguments given')),
     ('d', 'date', '', _('tipmost revision matching date'), _('DATE')),
     ('r', 'rev', '', _('revert to the specified revision'), _('REV')),
-    ('', 'no-backup', None, _('do not save backup copies of files')),
+    ('C', 'no-backup', None, _('do not save backup copies of files')),
     ] + walkopts + dryrunopts,
     _('[OPTION]... [-r REV] [NAME]...'))
 def revert(ui, repo, *pats, **opts):
@@ -4381,7 +4612,8 @@ def revert(ui, repo, *pats, **opts):
     finally:
         wlock.release()
 
-@command('rollback', dryrunopts)
+@command('rollback', dryrunopts +
+         [('f', 'force', False, _('ignore safety measures'))])
 def rollback(ui, repo, **opts):
     """roll back the last transaction (dangerous)
 
@@ -4402,6 +4634,12 @@ def rollback(ui, repo, **opts):
     - push (with this repository as the destination)
     - unbundle
 
+    It's possible to lose data with rollback: commit, update back to
+    an older changeset, and then rollback. The update removes the
+    changes you committed from the working directory, and rollback
+    removes them from history. To avoid data loss, you must pass
+    --force in this case.
+
     This command is not intended for use on public repositories. Once
     changes are visible for pull by other users, rolling a transaction
     back locally is ineffective (someone else may already have pulled
@@ -4411,7 +4649,8 @@ def rollback(ui, repo, **opts):
 
     Returns 0 on success, 1 if no rollback data is available.
     """
-    return repo.rollback(opts.get('dry_run'))
+    return repo.rollback(dryrun=opts.get('dry_run'),
+                         force=opts.get('force'))
 
 @command('root', [])
 def root(ui, repo):
@@ -4653,6 +4892,22 @@ def status(ui, repo, *pats, **opts):
       I = ignored
         = origin of the previous file listed as A (added)
 
+    .. container:: verbose
+
+      Examples:
+
+      - show changes in the working directory relative to a changeset:
+
+          hg status --rev 9353
+
+      - show all changes including copies in an existing changeset::
+
+          hg status --copies --change 9353
+
+      - get a NUL separated list of added files, suitable for xargs::
+
+          hg status -an0
+
     Returns 0 on success.
     """
 
@@ -4727,6 +4982,7 @@ def summary(ui, repo, **opts):
     ctx = repo[None]
     parents = ctx.parents()
     pnode = parents[0].node()
+    marks = []
 
     for p in parents:
         # label with log.changeset (instead of log.parent) since this
@@ -4735,7 +4991,7 @@ def summary(ui, repo, **opts):
                  label='log.changeset')
         ui.write(' '.join(p.tags()), label='log.tag')
         if p.bookmarks():
-            ui.write(' ' + ' '.join(p.bookmarks()), label='log.bookmark')
+            marks.extend(p.bookmarks())
         if p.rev() == -1:
             if not len(repo):
                 ui.write(_(' (empty repository)'))
@@ -4753,6 +5009,20 @@ def summary(ui, repo, **opts):
         ui.write(m, label='log.branch')
     else:
         ui.status(m, label='log.branch')
+
+    if marks:
+        current = repo._bookmarkcurrent
+        ui.write(_('bookmarks:'), label='log.bookmark')
+        if current is not None:
+            try:
+                marks.remove(current)
+                ui.write(' *' + current, label='bookmarks.current')
+            except ValueError:
+                # current bookmark not in parent ctx marks
+                pass
+        for m in marks:
+          ui.write(' ' + m, label='log.bookmark')
+        ui.write('\n', label='log.bookmark')
 
     st = list(repo.status(unknown=True))[:6]
 
@@ -4988,19 +5258,22 @@ def tags(ui, repo):
 
     for t, n in reversed(repo.tagslist()):
         if ui.quiet:
-            ui.write("%s\n" % t)
+            ui.write("%s\n" % t, label='tags.normal')
             continue
 
         hn = hexfunc(n)
         r = "%5d:%s" % (repo.changelog.rev(n), hn)
+        rev = ui.label(r, 'log.changeset')
         spaces = " " * (30 - encoding.colwidth(t))
 
+        tag = ui.label(t, 'tags.normal')
         if ui.verbose:
             if repo.tagtype(t) == 'local':
                 tagtype = " local"
+                tag = ui.label(t, 'tags.local')
             else:
                 tagtype = ""
-        ui.write("%s%s %s%s\n" % (t, spaces, r, tagtype))
+        ui.write("%s%s %s%s\n" % (tag, spaces, rev, tagtype))
 
 @command('tip',
     [('p', 'patch', None, _('show patch')),

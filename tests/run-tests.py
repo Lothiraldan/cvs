@@ -340,10 +340,7 @@ def terminate(proc):
     """Terminate subprocess (with fallback for Python versions < 2.6)"""
     vlog('# Terminating process %d' % proc.pid)
     try:
-        if hasattr(proc, 'terminate'):
-            proc.terminate()
-        else:
-            os.kill(proc.pid, signal.SIGTERM)
+        getattr(proc, 'terminate', lambda : os.kill(proc.pid, signal.SIGTERM))()
     except OSError:
         pass
 
@@ -726,6 +723,7 @@ def runone(options, test):
                     rename(testpath + ".err", testpath)
                 else:
                     rename(testpath + ".err", testpath + ".out")
+                result('p', test)
                 return
         result('f', (test, msg))
 
