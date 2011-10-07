@@ -251,7 +251,7 @@ shell aliases with global options
   $ hg --cwd .. count 'branch(default)'
   2
   $ hg echo --cwd ..
-  --cwd ..
+  
 
 
 repo specific shell aliases
@@ -305,7 +305,7 @@ invalid arguments
 
   $ hg rt foo
   hg rt: invalid arguments
-  hg rt 
+  hg rt
   
   alias for: hg root
   
