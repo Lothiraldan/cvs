@@ -4,7 +4,7 @@
   > purge=
   > rebase=
   > [largefiles]
-  > size=2
+  > minsize=2
   > patterns=glob:**.dat
   > EOF
 
@@ -342,7 +342,7 @@ Test cloning a largefiles repo.
   large22
 
 Test that old revisions of a clone have correct largefiles content.  This also
-tsts update.
+tests update.
 
   $ hg update -r 1 
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -370,6 +370,13 @@ revisions (this was a very bad bug that took a lot of work to fix).
   $ echo large6-modified > sub2/large6
   $ echo normal4-modified > sub/normal4
   $ hg commit -m "modify normal file largefile in repo d"
+  $ cd ..
+  $ hg clone d e
+  updating to branch default
+  5 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  getting changed largefiles
+  3 largefiles updated, 0 removed
+  $ cd d
   $ hg pull --rebase ../b
   pulling from ../b
   searching for changes
@@ -443,3 +450,238 @@ revisions (this was a very bad bug that took a lot of work to fix).
   large6-modified
   $ cat sub2/large7
   large7
+  $ cd ../e
+  $ hg pull ../b
+  pulling from ../b
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 2 changes to 2 files (+1 heads)
+  (run 'hg heads' to see heads, 'hg merge' to merge)
+  $ hg rebase
+  getting changed largefiles
+  1 largefiles updated, 0 removed
+  saved backup bundle to $TESTTMP/e/.hg/strip-backup/f574fb32bb45-backup.hg
+  $ hg log
+  changeset:   9:598410d3eb9a
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     modify normal file largefile in repo d
+  
+  changeset:   8:a381d2c8c80e
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     modify normal file and largefile in repo b
+  
+  changeset:   7:daea875e9014
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add/edit more largefiles
+  
+  changeset:   6:4355d653f84f
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     edit files yet again
+  
+  changeset:   5:9d5af5072dbd
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     edit files again
+  
+  changeset:   4:74c02385b94c
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     move files
+  
+  changeset:   3:9e8fbc4bce62
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     copy files
+  
+  changeset:   2:51a0ae4d5864
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     remove files
+  
+  changeset:   1:ce8896473775
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     edit files
+  
+  changeset:   0:30d30fe6a5be
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add files
+  
+  $ cat normal3
+  normal3-modified
+  $ cat sub/normal4
+  normal4-modified
+  $ cat sub/large4
+  large4-modified
+  $ cat sub2/large6
+  large6-modified
+  $ cat sub2/large7
+  large7
+
+Test rollback on largefiles
+
+  $ echo large4-modified-again > sub/large4 
+  $ hg commit -m "Modify large4 again"
+  $ hg rollback
+  repository tip rolled back to revision 9 (undo commit)
+  working directory now based on revision 9
+  $ hg st
+  M sub/large4
+  $ hg log
+  changeset:   9:598410d3eb9a
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     modify normal file largefile in repo d
+  
+  changeset:   8:a381d2c8c80e
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     modify normal file and largefile in repo b
+  
+  changeset:   7:daea875e9014
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add/edit more largefiles
+  
+  changeset:   6:4355d653f84f
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     edit files yet again
+  
+  changeset:   5:9d5af5072dbd
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     edit files again
+  
+  changeset:   4:74c02385b94c
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     move files
+  
+  changeset:   3:9e8fbc4bce62
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     copy files
+  
+  changeset:   2:51a0ae4d5864
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     remove files
+  
+  changeset:   1:ce8896473775
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     edit files
+  
+  changeset:   0:30d30fe6a5be
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add files
+  
+  $ cat sub/large4
+  large4-modified-again
+
+Test that `update --clean` leaves correct largefiles in working copy.
+
+  $ hg update --clean 
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  getting changed largefiles
+  1 largefiles updated, 0 removed
+  $ cat normal3
+  normal3-modified
+  $ cat sub/normal4
+  normal4-modified
+  $ cat sub/large4
+  large4-modified
+  $ cat sub2/large6
+  large6-modified
+  $ cat sub2/large7
+  large7
+
+Test that verify --large actaully verifies largefiles
+
+  $ hg verify --large
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  10 files, 10 changesets, 28 total revisions
+  searching 1 changesets for largefiles
+  verified existence of 3 revisions of 3 largefiles
+
+Test that merging does not revert to old versions of largefiles (this has
+also been very problematic).
+
+  $ cd ..
+  $ hg clone -r 7 e f
+  adding changesets
+  adding manifests
+  adding file changes
+  added 8 changesets with 24 changes to 10 files
+  updating to branch default
+  5 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  getting changed largefiles
+  3 largefiles updated, 0 removed
+  $ cd f
+  $ echo "large4-merge-test" > sub/large4
+  $ hg commit -m "Modify large4 to test merge"
+  $ hg pull ../e
+  pulling from ../e
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 2 changesets with 4 changes to 4 files (+1 heads)
+  (run 'hg heads' to see heads, 'hg merge' to merge)
+  $ hg merge
+  merging sub/large4
+  largefile sub/large4 has a merge conflict
+  keep (l)ocal or take (o)ther? l
+  3 files updated, 1 files merged, 0 files removed, 0 files unresolved
+  (branch merge, don't forget to commit)
+  getting changed largefiles
+  1 largefiles updated, 0 removed
+  $ hg commit -m "Merge repos e and f"
+  $ cat normal3
+  normal3-modified
+  $ cat sub/normal4
+  normal4-modified
+  $ cat sub/large4
+  large4-merge-test
+  $ cat sub2/large6
+  large6-modified
+  $ cat sub2/large7
+  large7
+  $ cd ..
+
+Verify that lfconvert adds 'largefiles' to .hg/requires
+  $ hg init bigfile-repo
+  $ cd bigfile-repo
+  $ dd if=/dev/zero bs=1k count=23k > a-large-file 2> /dev/null
+  $ hg addremove
+  adding a-large-file
+  a-large-file: up to 72 MB of RAM may be required to manage this file
+  (use 'hg revert a-large-file' to cancel the pending addition)
+  $ hg commit -m "Commit file without making it be a largefile"
+  $ find .hg/largefiles
+  .hg/largefiles
+  $ cd ..
+  $ hg lfconvert --size 10 bigfile-repo largefiles-repo
+  initializing destination largefiles-repo
+  $ cat largefiles-repo/.hg/requires
+  largefiles
+  revlogv1
+  fncache
+  store
+  dotencode
+  $ rm -rf bigfile-repo largefiles-repo
+
