@@ -87,7 +87,7 @@ def override_add(orig, ui, repo, *pats, **opts):
 
         if exact or not exists:
             abovemin = (lfsize and
-                        os.path.getsize(repo.wjoin(f)) >= lfsize * 1024 * 1024)
+                        os.lstat(repo.wjoin(f)).st_size >= lfsize * 1024 * 1024)
             if large or abovemin or (lfmatcher and lfmatcher(f)):
                 lfnames.append(f)
                 if ui.verbose or not exact:
@@ -816,4 +816,9 @@ def override_rollback(orig, ui, repo, **opts):
         else:
             lfdirstate.add(file)
     lfdirstate.write()
+    return result
+
+def override_transplant(orig, ui, repo, *revs, **opts):
+    result = orig(ui, repo, *revs, **opts)
+    lfcommands.updatelfiles(repo.ui, repo)
     return result
