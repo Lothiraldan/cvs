@@ -73,14 +73,24 @@ username = platform.username
 
 # Python compatibility
 
-def sha1(s):
+def sha1(s=''):
+    '''
+    Low-overhead wrapper around Python's SHA support
+
+    >>> f = _fastsha1
+    >>> a = sha1()
+    >>> a = f()
+    >>> a.hexdigest()
+    'da39a3ee5e6b4b0d3255bfef95601890afd80709'
+    '''
+
     return _fastsha1(s)
 
 _notset = object()
 def safehasattr(thing, attr):
     return getattr(thing, attr, _notset) is not _notset
 
-def _fastsha1(s):
+def _fastsha1(s=''):
     # This function will import sha1 from hashlib or sha (whichever is
     # available) and overwrite itself with it on the first call.
     # Subsequent calls will go directly to the imported function.
