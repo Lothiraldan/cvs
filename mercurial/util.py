@@ -622,9 +622,8 @@ def fspath(name, root):
     The root should be normcase-ed, too.
     '''
     def find(p, contents):
-        lenp = len(p)
         for n in contents:
-            if lenp == len(n) and normcase(n) == p:
+            if normcase(n) == p:
                 return n
         return None
 
@@ -641,14 +640,14 @@ def fspath(name, root):
             result.append(sep)
             continue
 
-        contents = _fspathcache.get(dir, None)
-        if contents is None:
-            contents = os.listdir(dir)
-            _fspathcache[dir] = contents
+        if dir not in _fspathcache:
+            _fspathcache[dir] = os.listdir(dir)
+        contents = _fspathcache[dir]
 
         found = find(part, contents)
         if not found:
-            # retry once for the corner case: add files after dir walking
+            # retry "once per directory" per "dirstate.walk" which
+            # may take place for each patches of "hg qpush", for example
             contents = os.listdir(dir)
             _fspathcache[dir] = contents
             found = find(part, contents)
