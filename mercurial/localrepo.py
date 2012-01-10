@@ -181,7 +181,7 @@ class localrepository(repo.repository):
 
     @propertycache
     def _phaserev(self):
-        cache = [0] * len(self)
+        cache = [phases.public] * len(self)
         for phase in phases.trackedphases:
             roots = map(self.changelog.rev, self._phaseroots[phase])
             if roots:
@@ -1253,7 +1253,8 @@ class localrepository(repo.repository):
                       parent2=xp2, pending=p)
             self.changelog.finalize(trp)
             # set the new commit is proper phase
-            targetphase = self.ui.configint('phases', 'new-commit', 1)
+            targetphase = self.ui.configint('phases', 'new-commit',
+                                            phases.draft)
             if targetphase:
                 # retract boundary do not alter parent changeset.
                 # if a parent have higher the resulting phase will
@@ -1554,7 +1555,7 @@ class localrepository(repo.repository):
             else:
                 # Remote is old or publishing all common changesets
                 # should be seen as public
-                phases.advanceboundary(self, 0, common + added)
+                phases.advanceboundary(self, phases.public, common + added)
         finally:
             lock.release()
 
@@ -1615,14 +1616,14 @@ class localrepository(repo.repository):
                 # even when we don't push, exchanging phase data is useful
                 remotephases = remote.listkeys('phases')
                 if not remotephases: # old server or public only repo
-                    phases.advanceboundary(self, 0, fut)
+                    phases.advanceboundary(self, phases.public, fut)
                     # don't push any phase data as there is nothing to push
                 else:
                     ana = phases.analyzeremotephases(self, fut, remotephases)
                     rheads, rroots = ana
                     ### Apply remote phase on local
                     if remotephases.get('publishing', False):
-                        phases.advanceboundary(self, 0, fut)
+                        phases.advanceboundary(self, phases.public, fut)
                     else: # publish = False
                         for phase, rpheads in enumerate(rheads):
                             phases.advanceboundary(self, phase, rpheads)
@@ -1631,21 +1632,60 @@ class localrepository(repo.repository):
                     # XXX If push failed we should use strict common and not
                     # future to avoir pushing phase data on unknown changeset.
                     # This is to done later.
-                    futctx = [self[n] for n in fut if n != nullid]
-                    for phase in phases.trackedphases[::-1]:
-                        prevphase = phase -1
-                        # get all candidate for head in previous phase
-                        inprev = [ctx for ctx in futctx
-                                      if ctx.phase() == prevphase]
-                        for newremotehead in  self.set('heads(%ld & (%ln::))',
-                                              inprev, rroots[phase]):
-                            r = remote.pushkey('phases',
-                                               newremotehead.hex(),
-                                               str(phase), str(prevphase))
-                            if not r:
-                                self.ui.warn(_('updating phase of %s'
-                                               'to %s failed!\n')
-                                                % (newremotehead, prevphase))
+
+                    # element we want to push
+                    topush = []
+
+                    # store details of known remote phase of several revision
+                    # /!\ set of index I holds rev where: I <= rev.phase()
+                    # /!\ public phase (index 0) is ignored
+                    remdetails = [set() for i in xrange(len(phases.allphases))]
+                    _revs = set()
+                    for relremphase in phases.trackedphases[::-1]:
+                        # we iterate backward because the list alway grows
+                        # when filled in this direction.
+                        _revs.update(self.revs('%ln::%ln',
+                                               rroots[relremphase], fut))
+                        remdetails[relremphase].update(_revs)
+
+                    for phase in phases.allphases[:-1]:
+                        # We don't need the last phase as we will never want to
+                        # move anything to it while moving phase backward.
+
+                        # Get the list of all revs on remote which are in a
+                        # phase higher than currently processed phase.
+                        relremrev = remdetails[phase + 1]
+
+                        if not relremrev:
+                            # no candidate to remote push anymore
+                            # break before any expensive revset
+                            break
+
+                        #dynamical inject appropriate phase symbol
+                        phasename = phases.phasenames[phase]
+                        odrevset = 'heads(%%ld and %s())' % phasename
+                        outdated =  self.set(odrevset, relremrev)
+                        for od in outdated:
+                            candstart = len(remdetails) - 1
+                            candstop = phase + 1
+                            candidateold = xrange(candstart, candstop, -1)
+                            for oldphase in candidateold:
+                                if od.rev() in remdetails[oldphase]:
+                                    break
+                            else: # last one: no need to search
+                                oldphase = phase + 1
+                            topush.append((oldphase, phase, od))
+
+                    # push every needed data
+                    for oldphase, newphase, newremotehead in topush:
+                        r = remote.pushkey('phases',
+                                           newremotehead.hex(),
+                                           str(oldphase), str(newphase))
+                        if not r:
+                            self.ui.warn(_('updating phase of %s '
+                                           'to %s from %s failed!\n')
+                                            % (newremotehead, newphase,
+                                               oldphase))
             finally:
                 locallock.release()
         finally:
@@ -2057,9 +2097,9 @@ class localrepository(repo.repository):
             if publishing and srctype == 'push':
                 # Old server can not push the boundary themself.
                 # This clause ensure pushed changeset are alway marked as public
-                phases.advanceboundary(self, 0, added)
+                phases.advanceboundary(self, phases.public, added)
             elif srctype != 'strip': # strip should not touch boundary at all
-                phases.retractboundary(self, 1, added)
+                phases.retractboundary(self, phases.draft, added)
 
             # make changelog see real files again
             cl.finalize(trp)

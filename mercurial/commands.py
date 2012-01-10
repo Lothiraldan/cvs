@@ -2627,7 +2627,7 @@ def graft(ui, repo, *revs, **opts):
             repo.dirstate.setparents(current.node(), nullid)
             repo.dirstate.write()
             # fix up dirstate for copies and renames
-            cmdutil.duplicatecopies(repo, ctx.rev(), current.node(), nullid)
+            cmdutil.duplicatecopies(repo, ctx.rev(), current.node())
             # report any conflicts
             if stats and stats[3] > 0:
                 # write out state for --continue
@@ -2694,7 +2694,7 @@ def grep(ui, repo, pattern, *pats, **opts):
 
     Returns 0 if a match is found, 1 otherwise.
     """
-    reflags = 0
+    reflags = re.M
     if opts.get('ignore_case'):
         reflags |= re.I
     try:
@@ -3444,7 +3444,7 @@ def import_(ui, repo, patch1=None, *patches, **opts):
     revision.
 
     With -s/--similarity, hg will attempt to discover renames and
-    copies in the patch in the same way as 'addremove'.
+    copies in the patch in the same way as :hg:`addremove`.
 
     To read a patch from standard input, use "-" as the patch name. If
     a URL is specified, the patch will be downloaded from it.
@@ -5206,18 +5206,7 @@ def status(ui, repo, *pats, **opts):
     changestates = zip(states, 'MAR!?IC', stat)
 
     if (opts.get('all') or opts.get('copies')) and not opts.get('no_status'):
-        ctxn = repo[nullid]
-        ctx1 = repo[node1]
-        ctx2 = repo[node2]
-        added = stat[1]
-        if node2 is None:
-            added = stat[0] + stat[1] # merged?
-
-        for k, v in copies.copies(repo, ctx1, ctx2, ctxn)[0].iteritems():
-            if k in added:
-                copy[k] = v
-            elif v in added:
-                copy[v] = k
+        copy = copies.pathcopies(repo[node1], repo[node2])
 
     for state, char, files in changestates:
         if state in show:
