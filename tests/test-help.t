@@ -15,6 +15,7 @@ Short help:
    init       create a new repository in the given directory
    log        show revision history of entire repository or files
    merge      merge working directory with another revision
+   phase      set or show the current phase name
    pull       pull changes from the specified source
    push       push changes to the specified destination
    remove     remove the specified files on the next commit
@@ -36,6 +37,7 @@ Short help:
    init       create a new repository in the given directory
    log        show revision history of entire repository or files
    merge      merge working directory with another revision
+   phase      set or show the current phase name
    pull       pull changes from the specified source
    push       push changes to the specified destination
    remove     remove the specified files on the next commit
@@ -81,6 +83,7 @@ Short help:
    outgoing     show changesets not found in the destination
    parents      show the parents of the working directory or revision
    paths        show aliases for remote repositories
+   phase        set or show the current phase name
    pull         pull changes from the specified source
    push         push changes to the specified destination
    recover      roll back an interrupted transaction
@@ -157,6 +160,7 @@ Short help:
    outgoing     show changesets not found in the destination
    parents      show the parents of the working directory or revision
    paths        show aliases for remote repositories
+   phase        set or show the current phase name
    pull         pull changes from the specified source
    push         push changes to the specified destination
    recover      roll back an interrupted transaction
@@ -225,6 +229,8 @@ Test short command list with verbose option
         show revision history of entire repository or files
    merge:
         merge working directory with another revision
+   phase:
+        set or show the current phase name
    pull:
         pull changes from the specified source
    push:
@@ -354,7 +360,7 @@ Test help option with version option
   Mercurial Distributed SCM (version *) (glob)
   (see http://mercurial.selenic.com for more information)
   
-  Copyright (C) 2005-2011 Matt Mackall and others
+  Copyright (C) 2005-2012 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
   warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
@@ -541,6 +547,7 @@ Test command without options
    init       create a new repository in the given directory
    log        show revision history of entire repository or files
    merge      merge working directory with another revision
+   phase      set or show the current phase name
    pull       pull changes from the specified source
    push       push changes to the specified destination
    remove     remove the specified files on the next commit
@@ -568,6 +575,7 @@ Test command without options
    init       create a new repository in the given directory
    log        show revision history of entire repository or files
    merge      merge working directory with another revision
+   phase      set or show the current phase name
    pull       pull changes from the specified source
    push       push changes to the specified destination
    remove     remove the specified files on the next commit
@@ -643,6 +651,7 @@ Test that default list of commands omits extension commands
    outgoing     show changesets not found in the destination
    parents      show the parents of the working directory or revision
    paths        show aliases for remote repositories
+   phase        set or show the current phase name
    pull         pull changes from the specified source
    push         push changes to the specified destination
    recover      roll back an interrupted transaction

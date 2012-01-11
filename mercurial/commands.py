@@ -18,6 +18,7 @@ import merge as mergemod
 import minirst, revset, fileset
 import dagparser, context, simplemerge
 import random, setdiscovery, treediscovery, dagutil
+import phases as phasesmod
 
 table = {}
 
@@ -298,6 +299,9 @@ def annotate(ui, repo, *pats, **opts):
         if pieces:
             for p, l in zip(zip(*pieces), lines):
                 ui.write("%s: %s" % ("".join(p), l[1]))
+
+            if lines and not lines[-1][1].endswith('\n'):
+                ui.write('\n')
 
 @command('archive',
     [('', 'no-decode', None, _('do not pass files through decoders')),
@@ -974,17 +978,17 @@ def bundle(ui, repo, fname, dest=None, **opts):
                                "a destination"))
         common = [repo.lookup(rev) for rev in base]
         heads = revs and map(repo.lookup, revs) or revs
+        cg = repo.getbundle('bundle', heads=heads, common=common)
     else:
         dest = ui.expandpath(dest or 'default-push', dest or 'default')
         dest, branches = hg.parseurl(dest, opts.get('branch'))
         other = hg.peer(repo, opts, dest)
         revs, checkout = hg.addbranchrevs(repo, other, branches, revs)
         heads = revs and map(repo.lookup, revs) or revs
-        common, outheads = discovery.findcommonoutgoing(repo, other,
-                                                        onlyheads=heads,
-                                                        force=opts.get('force'))
-
-    cg = repo.getbundle('bundle', common=common, heads=heads)
+        outgoing = discovery.findcommonoutgoing(repo, other,
+                                                onlyheads=heads,
+                                                force=opts.get('force'))
+        cg = repo.getlocalbundle('bundle', outgoing)
     if not cg:
         ui.status(_("no changes found\n"))
         return 1
@@ -4211,6 +4215,59 @@ def paths(ui, repo, search=None):
             else:
                 ui.write("%s = %s\n" % (name, util.hidepassword(path)))
 
+@command('^phase',
+    [('p', 'public', False, _('Set changeset to public')),
+     ('d', 'draft', False, _('Set changeset to draft')),
+     ('s', 'secret', False, _('Set changeset to secret')),
+     ('f', 'force', False, _('allow to move boundary backward')),
+     ('r', 'rev', [], _('target revision')),
+    ],
+    _('[-p|-d|-s] [-f] [-C] [-r] REV'))
+def phase(ui, repo, *revs, **opts):
+    """set or show the current phase name
+
+    With no argument, show the phase name of specified revisions.
+
+    With one of `--public`, `--draft` or `--secret`, change the phase
+    value of the specified revisions.
+
+    Unless -f/--force is specified, :hg:`phase` won't move changeset from a
+    lower phase to an higher phase. Phases are ordered as follows:
+
+        public < draft < secret
+    """
+    # search for a unique phase argument
+    targetphase = None
+    for idx, name in enumerate(phasesmod.phasenames):
+        if opts[name]:
+            if targetphase is not None:
+                raise util.Abort(_('only one phase can be specified'))
+            targetphase = idx
+
+    # look for specified revision
+    revs = list(revs)
+    revs.extend(opts['rev'])
+    if not revs:
+        raise util.Abort(_('no revisions specified!'))
+
+    lock = None
+    if targetphase is None:
+        # display
+        for ctx in repo.set('%lr', revs):
+            ui.write('%i: %s\n' % (ctx.rev(), ctx.phasestr()))
+    else:
+        lock = repo.lock()
+        try:
+            # set phase
+            nodes = [ctx.node() for ctx in repo.set('%lr', revs)]
+            if not nodes:
+                raise util.Abort(_('empty revision set'))
+            phasesmod.advanceboundary(repo, targetphase, nodes)
+            if opts['force']:
+                phasesmod.retractboundary(repo, targetphase, nodes)
+        finally:
+            lock.release()
+
 def postincoming(ui, repo, modheads, optupdate, checkout):
     if modheads == 0:
         return
@@ -5379,10 +5436,10 @@ def summary(ui, repo, **opts):
             commoninc = None
             ui.debug('comparing with %s\n' % util.hidepassword(dest))
         repo.ui.pushbuffer()
-        common, outheads = discovery.findcommonoutgoing(repo, other,
-                                                        commoninc=commoninc)
+        outgoing = discovery.findcommonoutgoing(repo, other,
+                                                commoninc=commoninc)
         repo.ui.popbuffer()
-        o = repo.changelog.findmissing(common=common, heads=outheads)
+        o = outgoing.missing
         if o:
             t.append(_('%d outgoing') % len(o))
         if 'bookmarks' in other.listkeys('namespaces'):
@@ -5687,7 +5744,7 @@ def version_(ui):
              % util.version())
     ui.status(_(
         "(see http://mercurial.selenic.com for more information)\n"
-        "\nCopyright (C) 2005-2011 Matt Mackall and others\n"
+        "\nCopyright (C) 2005-2012 Matt Mackall and others\n"
         "This is free software; see the source for copying conditions. "
         "There is NO\nwarranty; "
         "not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"

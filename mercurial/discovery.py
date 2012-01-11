@@ -7,7 +7,7 @@
 
 from node import nullid, short
 from i18n import _
-import util, setdiscovery, treediscovery
+import util, setdiscovery, treediscovery, phases
 
 def findcommonincoming(repo, remote, heads=None, force=False):
     """Return a tuple (common, anyincoming, heads) used to identify the common
@@ -46,20 +46,91 @@ def findcommonincoming(repo, remote, heads=None, force=False):
     common, anyinc, srvheads = res
     return (list(common), anyinc, heads or list(srvheads))
 
+class outgoing(object):
+    '''Represents the set of nodes present in a local repo but not in a
+    (possibly) remote one.
+
+    Members:
+
+      missing is a list of all nodes present in local but not in remote.
+      common is a list of all nodes shared between the two repos.
+      excluded is the list of missing changeset that shouldn't be sent remotely.
+      missingheads is the list of heads of missing.
+      commonheads is the list of heads of common.
+
+    The sets are computed on demand from the heads, unless provided upfront
+    by discovery.'''
+
+    def __init__(self, revlog, commonheads, missingheads):
+        self.commonheads = commonheads
+        self.missingheads = missingheads
+        self._revlog = revlog
+        self._common = None
+        self._missing = None
+        self.excluded = []
+
+    def _computecommonmissing(self):
+        sets = self._revlog.findcommonmissing(self.commonheads,
+                                              self.missingheads)
+        self._common, self._missing = sets
+
+    @util.propertycache
+    def common(self):
+        if self._common is None:
+            self._computecommonmissing()
+        return self._common
+
+    @util.propertycache
+    def missing(self):
+        if self._missing is None:
+            self._computecommonmissing()
+        return self._missing
+
 def findcommonoutgoing(repo, other, onlyheads=None, force=False, commoninc=None):
-    '''Return a tuple (common, anyoutgoing, heads) used to identify the set
-    of nodes present in repo but not in other.
+    '''Return an outgoing instance to identify the nodes present in repo but
+    not in other.
 
     If onlyheads is given, only nodes ancestral to nodes in onlyheads (inclusive)
     are included. If you already know the local repo's heads, passing them in
     onlyheads is faster than letting them be recomputed here.
 
     If commoninc is given, it must the the result of a prior call to
-    findcommonincoming(repo, other, force) to avoid recomputing it here.
+    findcommonincoming(repo, other, force) to avoid recomputing it here.'''
+    # declare an empty outgoing object to be filled later
+    og = outgoing(repo.changelog, None, None)
 
-    The returned tuple is meant to be passed to changelog.findmissing.'''
-    common, _any, _hds = commoninc or findcommonincoming(repo, other, force=force)
-    return (common, onlyheads or repo.heads())
+    # get common set if not provided
+    if commoninc is None:
+        commoninc = findcommonincoming(repo, other, force=force)
+    og.commonheads, _any, _hds = commoninc
+
+    # compute outgoing
+    if not repo._phaseroots[phases.secret]:
+        og.missingheads = onlyheads or repo.heads()
+    elif onlyheads is None:
+        # use visible heads as it should be cached
+        og.missingheads = phases.visibleheads(repo)
+        og.excluded = [ctx.node() for ctx in repo.set('secret()')]
+    else:
+        # compute common, missing and exclude secret stuff
+        sets = repo.changelog.findcommonmissing(og.commonheads, onlyheads)
+        og._common, allmissing = sets
+        og._missing = missing = []
+        og._excluded = excluded = []
+        for node in allmissing:
+            if repo[node].phase() >= phases.secret:
+                excluded.append(node)
+            else:
+                missing.append(node)
+        if excluded:
+            # update missing heads
+            rset = repo.set('heads(%ln)', missing)
+            missingheads = [ctx.node() for ctx in rset]
+        else:
+            missingheads = onlyheads
+        og.missingheads = missingheads
+
+    return og
 
 def prepush(repo, remote, force, revs, newbranch):
     '''Analyze the local and remote repositories and determine which
@@ -80,32 +151,21 @@ def prepush(repo, remote, force, revs, newbranch):
     be after push completion.
     '''
     commoninc = findcommonincoming(repo, remote, force=force)
-    common, revs = findcommonoutgoing(repo, remote, onlyheads=revs,
+    outgoing = findcommonoutgoing(repo, remote, onlyheads=revs,
                                       commoninc=commoninc, force=force)
     _common, inc, remoteheads = commoninc
 
     cl = repo.changelog
-    alloutg = cl.findmissing(common, revs)
-    outg = []
-    secret = []
-    for o in alloutg:
-        if repo[o].phase() >= 2:
-            secret.append(o)
-        else:
-            outg.append(o)
+    outg = outgoing.missing
+    common = outgoing.commonheads
 
     if not outg:
-        if secret:
+        if outgoing.excluded:
             repo.ui.status(_("no changes to push but %i secret changesets\n")
-                           % len(secret))
+                           % len(outgoing.excluded))
         else:
             repo.ui.status(_("no changes found\n"))
         return None, 1, common
-
-    if secret:
-        # recompute target revs
-        revs = [ctx.node() for ctx in repo.set('heads(::(%ld))',
-                                               map(repo.changelog.rev, outg))]
 
     if not force and remoteheads != [nullid]:
         if remote.capable('branchmap'):
@@ -204,11 +264,12 @@ def prepush(repo, remote, force, revs, newbranch):
         if unsynced:
             repo.ui.warn(_("note: unsynced remote changes!\n"))
 
-    if revs is None:
+    if revs is None and not outgoing.excluded:
+        # push everything,
         # use the fast path, no race possible on push
         cg = repo._changegroup(outg, 'push')
     else:
-        cg = repo.getbundle('push', heads=revs, common=common)
+        cg = repo.getlocalbundle('push', outgoing)
     # no need to compute outg ancestor. All node in outg have either:
     # - parents in outg
     # - parents in common
