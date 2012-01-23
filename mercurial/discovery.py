@@ -116,7 +116,7 @@ def findcommonoutgoing(repo, other, onlyheads=None, force=False, commoninc=None)
         sets = repo.changelog.findcommonmissing(og.commonheads, onlyheads)
         og._common, allmissing = sets
         og._missing = missing = []
-        og._excluded = excluded = []
+        og.excluded = excluded = []
         for node in allmissing:
             if repo[node].phase() >= phases.secret:
                 excluded.append(node)
@@ -124,8 +124,7 @@ def findcommonoutgoing(repo, other, onlyheads=None, force=False, commoninc=None)
                 missing.append(node)
         if excluded:
             # update missing heads
-            rset = repo.set('heads(%ln)', missing)
-            missingheads = [ctx.node() for ctx in rset]
+            missingheads = phases.newheads(repo, onlyheads, excluded)
         else:
             missingheads = onlyheads
         og.missingheads = missingheads

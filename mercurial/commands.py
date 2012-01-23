@@ -725,7 +725,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
     ('r', 'rev', '', _('revision'), _('REV')),
     ('d', 'delete', False, _('delete a given bookmark')),
     ('m', 'rename', '', _('rename a given bookmark'), _('NAME')),
-    ('i', 'inactive', False, _('do not mark a new bookmark active'))],
+    ('i', 'inactive', False, _('mark a bookmark inactive'))],
     _('hg bookmarks [-f] [-d] [-i] [-m NAME] [-r REV] [NAME]'))
 def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False,
              rename=None, inactive=False):
@@ -745,6 +745,11 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False,
     push` and :hg:`help pull`). This requires both the local and remote
     repositories to support bookmarks. For versions prior to 1.8, this means
     the bookmarks extension must be enabled.
+
+    With -i/--inactive, the new bookmark will not be made the active
+    bookmark. If -r/--rev is given, the new bookmark will not be made
+    active even if -i/--inactive is not given. If no NAME is given, the
+    current active bookmark will be marked inactive.
     '''
     hexfn = ui.debugflag and hex or short
     marks = repo._bookmarks
@@ -4214,7 +4219,7 @@ def phase(ui, repo, *revs, **opts):
     revs = list(revs)
     revs.extend(opts['rev'])
     if not revs:
-        raise util.Abort(_('no revisions specified!'))
+        raise util.Abort(_('no revisions specified'))
 
     lock = None
     ret = 0
@@ -5633,7 +5638,8 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
 
     Update the repository's working directory to the specified
     changeset. If no changeset is specified, update to the tip of the
-    current named branch and move the current bookmark.
+    current named branch and move the current bookmark (see :hg:`help
+    bookmarks`).
 
     If the changeset is not a descendant of the working directory's
     parent, the update is aborted. With the -c/--check option, the
