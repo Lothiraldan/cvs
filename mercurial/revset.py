@@ -745,7 +745,7 @@ def public(repo, subset, x):
     return [r for r in subset if repo._phaserev[r] == phases.public]
 
 def remote(repo, subset, x):
-    """``remote([id], [path])``
+    """``remote([id [,path]])``
     Local revision that corresponds to the given identifier in a
     remote repository, if present. Here, the '.' identifier is a
     synonym for the current local branch.
@@ -753,7 +753,7 @@ def remote(repo, subset, x):
 
     import hg # avoid start-up nasties
     # i18n: "remote" is a keyword
-    l = getargs(x, 0, 2, _("remote takes one or two arguments"))
+    l = getargs(x, 0, 2, _("remote takes one, two or no arguments"))
 
     q = '.'
     if len(l) > 0:
@@ -775,8 +775,8 @@ def remote(repo, subset, x):
     n = other.lookup(q)
     if n in repo:
         r = repo[n].rev()
-    if r in subset:
-        return [r]
+        if r in subset:
+            return [r]
     return []
 
 def removes(repo, subset, x):

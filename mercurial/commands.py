@@ -4603,7 +4603,8 @@ def resolve(ui, repo, *pats, **opts):
     setting, or a command-line merge tool like ``diff3``. The resolve
     command is used to manage the files involved in a merge, after
     :hg:`merge` has been run, and before :hg:`commit` is run (i.e. the
-    working directory must have two parents).
+    working directory must have two parents). See :hg:`help
+    merge-tools` for information on configuring merge tools.
 
     The resolve command can be used in the following ways:
 
@@ -5718,7 +5719,8 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
         ret = hg.update(repo, rev)
 
     if not ret and movemarkfrom:
-        bookmarks.update(repo, [movemarkfrom], repo['.'].node())
+        if bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
+            ui.status(_("updating bookmark %s\n") % repo._bookmarkcurrent)
     elif brev in repo._bookmarks:
         bookmarks.setcurrent(repo, brev)
 
