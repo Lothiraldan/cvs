@@ -1268,8 +1268,7 @@ class localrepository(repo.repository):
                       parent2=xp2, pending=p)
             self.changelog.finalize(trp)
             # set the new commit is proper phase
-            targetphase = self.ui.configint('phases', 'new-commit',
-                                            phases.draft)
+            targetphase = phases.newcommitphase(self.ui)
             if targetphase:
                 # retract boundary do not alter parent changeset.
                 # if a parent have higher the resulting phase will
@@ -1592,7 +1591,8 @@ class localrepository(repo.repository):
     def push(self, remote, force=False, revs=None, newbranch=False):
         '''Push outgoing changesets (limited by revs) from the current
         repository to remote. Return an integer:
-          - 0 means HTTP error *or* nothing to push
+          - None means nothing to push
+          - 0 means HTTP error
           - 1 means we pushed and remote head count is unchanged *or*
             we have outgoing changesets but refused to push
           - other values as described by addchangegroup()
@@ -1626,7 +1626,7 @@ class localrepository(repo.repository):
                 if not outgoing.missing:
                     # nothing to push
                     scmutil.nochangesfound(self.ui, outgoing.excluded)
-                    ret = 1
+                    ret = None
                 else:
                     # something to push
                     if not force:
@@ -1679,13 +1679,13 @@ class localrepository(repo.repository):
                     # We can pick:
                     # * missingheads part of comon (::commonheads)
                     common = set(outgoing.common)
-                    cheads = [n for node in revs if n in common]
+                    cheads = [node for node in revs if node in common]
                     # and 
                     # * commonheads parents on missing
-                    rvset = repo.revset('%ln and parents(roots(%ln))',
-                                        outgoing.commonheads,
-                                        outgoing.missing)
-                    cheads.extend(c.node() for c in rvset)
+                    revset = self.set('%ln and parents(roots(%ln))',
+                                     outgoing.commonheads,
+                                     outgoing.missing)
+                    cheads.extend(c.node() for c in revset)
                 # even when we don't push, exchanging phase data is useful
                 remotephases = remote.listkeys('phases')
                 if not remotephases: # old server or public only repo

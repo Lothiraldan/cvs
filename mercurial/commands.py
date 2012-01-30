@@ -4226,17 +4226,20 @@ def phase(ui, repo, *revs, **opts):
     if not revs:
         raise util.Abort(_('no revisions specified'))
 
+    revs = scmutil.revrange(repo, revs)
+
     lock = None
     ret = 0
     if targetphase is None:
         # display
-        for ctx in repo.set('%lr', revs):
+        for r in revs:
+            ctx = repo[r]
             ui.write('%i: %s\n' % (ctx.rev(), ctx.phasestr()))
     else:
         lock = repo.lock()
         try:
             # set phase
-            nodes = [ctx.node() for ctx in repo.set('%lr', revs)]
+            nodes = [ctx.node() for ctx in repo.set('%ld', revs)]
             if not nodes:
                 raise util.Abort(_('empty revision set'))
             olddata = repo._phaserev[:]
@@ -4260,11 +4263,16 @@ def postincoming(ui, repo, modheads, optupdate, checkout):
     if modheads == 0:
         return
     if optupdate:
+        movemarkfrom = repo['.'].node()
         try:
-            return hg.update(repo, checkout)
+            ret = hg.update(repo, checkout)
         except util.Abort, inst:
             ui.warn(_("not updating: %s\n" % str(inst)))
             return 0
+        if not ret and not checkout:
+            if bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
+                ui.status(_("updating bookmark %s\n") % repo._bookmarkcurrent)
+        return ret
     if modheads > 1:
         currentbranchheads = len(repo.branchheads())
         if currentbranchheads == modheads:
@@ -4414,14 +4422,14 @@ def push(ui, repo, dest=None, **opts):
         c = repo['']
         subs = c.substate # only repos that are committed
         for s in sorted(subs):
-            if not c.sub(s).push(opts):
+            if c.sub(s).push(opts) == 0:
                 return False
     finally:
         del repo._subtoppath
     result = repo.push(other, opts.get('force'), revs=revs,
                        newbranch=opts.get('new_branch'))
 
-    result = (result == 0)
+    result = not result
 
     if opts.get('bookmark'):
         rb = other.listkeys('bookmarks')
@@ -4443,6 +4451,7 @@ def push(ui, repo, dest=None, **opts):
                 ui.warn(_('updating bookmark %s failed!\n') % b)
                 if not result:
                     result = 2
+            result = 0
 
     return result
 

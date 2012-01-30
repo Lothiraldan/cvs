@@ -826,9 +826,13 @@ class queue(object):
         return patches
 
     def finish(self, repo, revs):
+        # Manually trigger phase computation to ensure phasedefaults is
+        # executed before we remove the patches.
+        repo._phaserev
         patches = self._revpatches(repo, sorted(revs))
         qfinished = self._cleanup(patches, len(patches))
-        if qfinished:
+        if qfinished and repo.ui.configbool('mq', 'secret', False):
+            # only use this logic when the secret option is added
             oldqbase = repo[qfinished[0]]
             if oldqbase.p1().phase() < phases.secret:
                 phases.advanceboundary(repo, phases.draft, qfinished)
@@ -1511,6 +1515,8 @@ class queue(object):
 
                 user = ph.user or changes[1]
 
+                oldphase = repo[top].phase()
+
                 # assumes strip can roll itself back if interrupted
                 repo.dirstate.setparents(*cparents)
                 self.applied.pop()
@@ -1523,8 +1529,15 @@ class queue(object):
 
             try:
                 # might be nice to attempt to roll back strip after this
-                n = secretcommit(repo, message, user, ph.date, match=match,
-                                 force=True)
+                backup = repo.ui.backupconfig('phases', 'new-commit')
+                try:
+                    # Ensure we create a new changeset in the same phase than
+                    # the old one.
+                    repo.ui.setconfig('phases', 'new-commit', oldphase)
+                    n = repo.commit(message, user, ph.date, match=match,
+                                    force=True)
+                finally:
+                    repo.ui.restoreconfig(backup)
                 # only write patch after a successful commit
                 patchf.close()
                 self.applied.append(statusentry(n, patchfn))
@@ -1823,6 +1836,9 @@ class queue(object):
 
                 self.added.append(patchname)
                 patchname = None
+            if rev and repo.ui.configbool('mq', 'secret', False):
+                # if we added anything with --rev, we must move the secret root
+                phases.retractboundary(repo, phases.secret, [n])
             self.parseseries()
             self.applieddirty = True
             self.seriesdirty = True
@@ -1997,16 +2013,21 @@ def qimport(ui, repo, *filename, **opts):
 
     Returns 0 if import succeeded.
     """
-    q = repo.mq
+    lock = repo.lock() # cause this may move phase
     try:
-        q.qimport(repo, filename, patchname=opts.get('name'),
-              existing=opts.get('existing'), force=opts.get('force'),
-              rev=opts.get('rev'), git=opts.get('git'))
-    finally:
-        q.savedirty()
+        q = repo.mq
+        try:
+            q.qimport(repo, filename, patchname=opts.get('name'),
+                  existing=opts.get('existing'), force=opts.get('force'),
+                  rev=opts.get('rev'), git=opts.get('git'))
+        finally:
+            q.savedirty()
 
-    if opts.get('push') and not opts.get('rev'):
-        return q.push(repo, None)
+
+        if opts.get('push') and not opts.get('rev'):
+            return q.push(repo, None)
+    finally:
+        lock.release()
     return 0
 
 def qinit(ui, repo, create):
@@ -3142,8 +3163,12 @@ def qqueue(ui, repo, name=None, **opts):
 def mqphasedefaults(repo, roots):
     """callback used to set mq changeset as secret when no phase data exists"""
     if repo.mq.applied:
+        if repo.ui.configbool('mq', 'secret', False):
+            mqphase = phases.secret
+        else:
+            mqphase = phases.draft
         qbase = repo[repo.mq.applied[0].node]
-        roots[phases.secret].add(qbase.node())
+        roots[mqphase].add(qbase.node())
     return roots
 
 def reposetup(ui, repo):
