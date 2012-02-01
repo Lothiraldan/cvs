@@ -745,8 +745,11 @@ class queue(object):
                 repo.dirstate.setparents(p1, merge)
 
             match = scmutil.matchfiles(repo, files or [])
+            oldtip = repo['tip']
             n = secretcommit(repo, message, ph.user, ph.date, match=match,
                              force=True)
+            if repo['tip'] == oldtip:
+                raise util.Abort(_("qpush exactly duplicates child changeset"))
             if n is None:
                 raise util.Abort(_("repository commit failed"))
 
@@ -1310,6 +1313,10 @@ class queue(object):
             if heads != [self.applied[-1].node]:
                 raise util.Abort(_("popping would remove a revision not "
                                    "managed by this patch queue"))
+            if not repo[self.applied[-1].node].mutable():
+                raise util.Abort(
+                    _("popping would remove an immutable revision"),
+                    hint=_('see "hg help phases" for details'))
 
             # we know there are no local changes, so we can make a simplified
             # form of hg.update.
@@ -1371,6 +1378,9 @@ class queue(object):
             (top, patchfn) = (self.applied[-1].node, self.applied[-1].name)
             if repo.changelog.heads(top) != [top]:
                 raise util.Abort(_("cannot refresh a revision with children"))
+            if not repo[top].mutable():
+                raise util.Abort(_("cannot refresh immutable revision"),
+                                 hint=_('see "hg help phases" for details'))
 
             inclsubs = self.checksubstate(repo)
 
