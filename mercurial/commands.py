@@ -3849,9 +3849,11 @@ def log(ui, repo, *pats, **opts):
     limit = cmdutil.loglimit(opts)
     count = 0
 
-    endrev = None
-    if opts.get('copies') and opts.get('rev'):
-        endrev = max(scmutil.revrange(repo, opts.get('rev'))) + 1
+    getrenamed, endrev = None, None
+    if opts.get('copies'):
+        if opts.get('rev'):
+            endrev = max(scmutil.revrange(repo, opts.get('rev'))) + 1
+        getrenamed = templatekw.getrenamedfn(repo, endrev=endrev)
 
     df = False
     if opts["date"]:
@@ -3895,9 +3897,8 @@ def log(ui, repo, *pats, **opts):
                 return
 
         copies = None
-        if opts.get('copies') and rev:
+        if getrenamed is not None and rev:
             copies = []
-            getrenamed = templatekw.getrenamedfn(repo, endrev=endrev)
             for fn in ctx.files():
                 rename = getrenamed(fn, rev)
                 if rename:
@@ -5700,7 +5701,7 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
 
     # with no argument, we also move the current bookmark, if any
     movemarkfrom = None
-    if node is None or node == '':
+    if rev is None or node == '':
         movemarkfrom = repo['.'].node()
 
     # if we defined a bookmark, we have to remember the original bookmark name
@@ -5731,6 +5732,8 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
             ui.status(_("updating bookmark %s\n") % repo._bookmarkcurrent)
     elif brev in repo._bookmarks:
         bookmarks.setcurrent(repo, brev)
+    elif brev:
+        bookmarks.unsetcurrent(repo)
 
     return ret
 
