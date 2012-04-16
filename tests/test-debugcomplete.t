@@ -87,6 +87,7 @@ Show debug commands if there are no other candidates
   debuginstall
   debugknown
   debugpushkey
+  debugpvec
   debugrebuildstate
   debugrename
   debugrevlog
@@ -236,6 +237,7 @@ Show all commands + options
   debuginstall: 
   debugknown: 
   debugpushkey: 
+  debugpvec: 
   debugrebuildstate: rev
   debugrename: rev
   debugrevlog: changelog, manifest, dump
@@ -245,7 +247,7 @@ Show all commands + options
   debugsub: rev
   debugwalk: include, exclude
   debugwireargs: three, four, five, ssh, remotecmd, insecure
-  graft: continue, edit, currentdate, currentuser, date, user, tool
+  graft: continue, edit, currentdate, currentuser, date, user, tool, dry-run
   grep: print0, all, text, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
   heads: rev, topo, active, closed, style, template
   help: extension, command
