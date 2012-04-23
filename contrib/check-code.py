@@ -55,7 +55,7 @@ testpats = [
     (r'head -c', "don't use 'head -c', use 'dd'"),
     (r'sha1sum', "don't use sha1sum, use $TESTDIR/md5sum.py"),
     (r'ls.*-\w*R', "don't use 'ls -R', use 'find'"),
-    (r'printf.*\\\d{1,3}', "don't use 'printf \NNN', use Python"),
+    (r'printf.*\\([1-9]|0\d)', "don't use 'printf \NNN', use Python"),
     (r'printf.*\\x', "don't use printf \\x, use Python"),
     (r'\$\(.*\)', "don't use $(expr), use `expr`"),
     (r'rm -rf \*', "don't use naked rm -rf, target a directory"),
@@ -65,7 +65,7 @@ testpats = [
     (r'\$PWD', "don't use $PWD, use `pwd`"),
     (r'[^\n]\Z', "no trailing newline"),
     (r'export.*=', "don't export and assign at once"),
-    (r'^([^"\'\n]|("[^"\n]*")|(\'[^\'\n]*\'))*\\^', "^ must be quoted"),
+    (r'^([^"\'\n]|("[^"\n]*")|(\'[^\'\n]*\'))*\^', "^ must be quoted"),
     (r'^source\b', "don't use 'source', use '.'"),
     (r'touch -d', "don't use 'touch -d', use 'touch -t' instead"),
     (r'ls +[^|\n-]+ +-', "options to 'ls' must come before filenames"),
@@ -73,6 +73,7 @@ testpats = [
     (r'^stop\(\)', "don't use 'stop' as a shell function name"),
     (r'(\[|\btest\b).*-e ', "don't use 'test -e', use 'test -f'"),
     (r'^alias\b.*=', "don't use alias, use a function"),
+    (r'if\s*!', "don't use '!' to negate exit status"),
   ],
   # warnings
   []
@@ -94,6 +95,7 @@ utestpats = [
     (uprefix + r'.*\|\| echo.*(fail|error)',
      "explicit exit code checks unnecessary"),
     (uprefix + r'set -e', "don't use set -e"),
+    (uprefix + r'\s', "don't indent commands, use > for continued lines"),
     (uprefixc + r'( *)\t', "don't use tabs to indent"),
     (uprefixc + r'.*do\s*true;\s*done',
      "don't use true as loop body, use sleep 0"),
