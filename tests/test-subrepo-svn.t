@@ -120,6 +120,15 @@ change file in svn and hg, commit
    source   file://*/svn-repo/src (glob)
    revision 2
 
+missing svn file, commit should fail
+
+  $ rm s/alpha
+  $ hg commit --subrepos -m 'abort on missing file'
+  committing subrepository s
+  abort: cannot commit missing svn entries
+  [255]
+  $ svn revert s/alpha > /dev/null
+
 add an unrelated revision in svn and update the subrepo to without
 bringing any changes.
 
@@ -272,13 +281,13 @@ Check hg update --clean
   Checked out revision 3.
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd t/s
-  $ svn status
+  $ svn status | sort
+  
   ? *    a (glob)
-  X *    externals (glob)
   ? *    f1 (glob)
   ? *    f2 (glob)
-  
   Performing status on external item at 'externals'* (glob)
+  X *    externals (glob)
 
 Sticky subrepositories, no changes
   $ cd $TESTTMP/sub/t
@@ -548,3 +557,10 @@ Test archive
   archiving (s): 2/2 files (100.00%)
   archiving (recreated): 0/1 files (0.00%)
   archiving (recreated): 1/1 files (100.00%)
+
+Test forgetting files, not implemented in svn subrepo, used to
+traceback
+
+  $ hg forget 'notafile*'
+  notafile*: No such file or directory
+  [1]
