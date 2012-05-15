@@ -827,7 +827,7 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False,
         if mark in marks and not force:
             raise util.Abort(_("bookmark '%s' already exists "
                                "(use -f to force)") % mark)
-        if ((mark in repo.branchtags() or mark == repo.dirstate.branch())
+        if ((mark in repo.branchmap() or mark == repo.dirstate.branch())
             and not force):
             raise util.Abort(
                 _("a bookmark cannot have the name of an existing branch"))
@@ -903,7 +903,7 @@ def branch(ui, repo, label=None, **opts):
             repo.dirstate.setbranch(label)
             ui.status(_('reset working directory to branch %s\n') % label)
         elif label:
-            if not opts.get('force') and label in repo.branchtags():
+            if not opts.get('force') and label in repo.branchmap():
                 if label not in [p.branch() for p in repo.parents()]:
                     raise util.Abort(_('a branch of the same name already'
                                        ' exists'),
@@ -936,22 +936,29 @@ def branches(ui, repo, active=False, closed=False):
     """
 
     hexfunc = ui.debugflag and hex or short
-    activebranches = [repo[n].branch() for n in repo.heads()]
-    def testactive(tag, node):
-        realhead = tag in activebranches
-        open = node in repo.branchheads(tag, closed=False)
-        return realhead and open
-    branches = sorted([(testactive(tag, node), repo.changelog.rev(node), tag)
-                          for tag, node in repo.branchtags().items()],
-                      reverse=True)
 
-    for isactive, node, tag in branches:
+    activebranches = set([repo[n].branch() for n in repo.heads()])
+    branches = []
+    for tag, heads in repo.branchmap().iteritems():
+        for h in reversed(heads):
+            ctx = repo[h]
+            isopen = not ctx.closesbranch()
+            if isopen:
+                tip = ctx
+                break
+        else:
+            tip = repo[heads[-1]]
+        isactive = tag in activebranches and isopen
+        branches.append((tip, isactive, isopen))
+    branches.sort(key=lambda i: (i[1], i[0].rev(), i[0].branch(), i[2]),
+                  reverse=True)
+
+    for ctx, isactive, isopen in branches:
         if (not active) or isactive:
-            hn = repo.lookup(node)
             if isactive:
                 label = 'branches.active'
                 notice = ''
-            elif hn not in repo.branchheads(tag, closed=False):
+            elif not isopen:
                 if not closed:
                     continue
                 label = 'branches.closed'
@@ -959,11 +966,12 @@ def branches(ui, repo, active=False, closed=False):
             else:
                 label = 'branches.inactive'
                 notice = _(' (inactive)')
-            if tag == repo.dirstate.branch():
+            if ctx.branch() == repo.dirstate.branch():
                 label = 'branches.current'
-            rev = str(node).rjust(31 - encoding.colwidth(tag))
-            rev = ui.label('%s:%s' % (rev, hexfunc(hn)), 'log.changeset')
-            tag = ui.label(tag, label)
+            rev = str(ctx.rev()).rjust(31 - encoding.colwidth(ctx.branch()))
+            rev = ui.label('%s:%s' % (rev, hexfunc(ctx.node())),
+                           'log.changeset')
+            tag = ui.label(ctx.branch(), label)
             if ui.quiet:
                 ui.write("%s\n" % tag)
             else:
@@ -1349,7 +1357,7 @@ def commit(ui, repo, *pats, **opts):
 
     if not opts.get('close_branch'):
         for r in parents:
-            if r.extra().get('close') and r.branch() == branch:
+            if r.closesbranch() and r.branch() == branch:
                 ui.status(_('reopening closed branch head %d\n') % r)
 
     if ui.debugflag:
@@ -4443,25 +4451,23 @@ def phase(ui, repo, *revs, **opts):
                 phases.retractboundary(repo, targetphase, nodes)
         finally:
             lock.release()
-        if olddata is not None:
-            changes = 0
-            newdata = repo._phasecache.getphaserevs(repo)
-            changes = sum(o != newdata[i] for i, o in enumerate(olddata))
-            rejected = [n for n in nodes
-                        if newdata[repo[n].rev()] < targetphase]
-            if rejected:
-                ui.warn(_('cannot move %i changesets to a more permissive '
-                          'phase, use --force\n') % len(rejected))
-                ret = 1
-            if changes:
-                msg = _('phase changed for %i changesets\n') % changes
-                if ret:
-                    ui.status(msg)
-                else:
-                    ui.note(msg)
+        newdata = repo._phasecache.getphaserevs(repo)
+        changes = sum(o != newdata[i] for i, o in enumerate(olddata))
+        rejected = [n for n in nodes
+                    if newdata[repo[n].rev()] < targetphase]
+        if rejected:
+            ui.warn(_('cannot move %i changesets to a more permissive '
+                      'phase, use --force\n') % len(rejected))
+            ret = 1
+        if changes:
+            msg = _('phase changed for %i changesets\n') % changes
+            if ret:
+                ui.status(msg)
             else:
-                ui.warn(_('no phases changed\n'))
-                ret = 1
+                ui.note(msg)
+        else:
+            ui.warn(_('no phases changed\n'))
+            ret = 1
     return ret
 
 def postincoming(ui, repo, modheads, optupdate, checkout):
@@ -5416,7 +5422,7 @@ def summary(ui, repo, **opts):
         t += _(' (merge)')
     elif branch != parents[0].branch():
         t += _(' (new branch)')
-    elif (parents[0].extra().get('close') and
+    elif (parents[0].closesbranch() and
           pnode in repo.branchheads(branch, closed=True)):
         t += _(' (head closed)')
     elif not (st[0] or st[1] or st[2] or st[3] or st[4] or st[9]):

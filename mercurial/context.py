@@ -78,10 +78,12 @@ class changectx(object):
             self._node = repo._tagscache.tags[changeid]
             self._rev = repo.changelog.rev(self._node)
             return
-        if changeid in repo.branchtags():
-            self._node = repo.branchtags()[changeid]
+        try:
+            self._node = repo.branchtip(changeid)
             self._rev = repo.changelog.rev(self._node)
             return
+        except error.RepoLookupError:
+            pass
 
         self._node = repo.changelog._partialmatch(changeid)
         if self._node is not None:
@@ -184,6 +186,8 @@ class changectx(object):
         return self._changeset[4]
     def branch(self):
         return encoding.tolocal(self._changeset[5].get("branch"))
+    def closesbranch(self):
+        return 'close' in self._changeset[5]
     def extra(self):
         return self._changeset[5]
     def tags(self):
@@ -893,6 +897,8 @@ class workingctx(changectx):
         return self._clean
     def branch(self):
         return encoding.tolocal(self._extra['branch'])
+    def closesbranch(self):
+        return 'close' in self._extra
     def extra(self):
         return self._extra
 

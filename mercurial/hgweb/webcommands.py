@@ -441,7 +441,7 @@ def branches(web, req, tmpl):
     tips = (web.repo[n] for t, n in web.repo.branchtags().iteritems())
     heads = web.repo.heads()
     parity = paritygen(web.stripecount)
-    sortkey = lambda ctx: ('close' not in ctx.extra(), ctx.rev())
+    sortkey = lambda ctx: (not ctx.closesbranch(), ctx.rev())
 
     def entries(limit, **map):
         count = 0
@@ -558,6 +558,7 @@ def filediff(web, req, tmpl):
     if fctx is not None:
         n = fctx.node()
         path = fctx.path()
+        ctx = fctx.changectx()
     else:
         n = ctx.node()
         # path already defined in except clause
@@ -567,7 +568,7 @@ def filediff(web, req, tmpl):
     if 'style' in req.form:
         style = req.form['style'][0]
 
-    diffs = webutil.diffs(web.repo, tmpl, fctx or ctx, [path], parity, style)
+    diffs = webutil.diffs(web.repo, tmpl, ctx, [path], parity, style)
     rename = fctx and webutil.renamelink(fctx) or []
     ctx = fctx and fctx or ctx
     return tmpl("filediff",
@@ -794,7 +795,11 @@ def graph(web, req, tmpl):
         desc = cgi.escape(templatefilters.nonempty(desc))
         user = cgi.escape(templatefilters.person(ctx.user()))
         branch = ctx.branch()
-        branch = branch, web.repo.branchtags().get(branch) == ctx.node()
+        try:
+            branchnode = web.repo.branchtip(branch)
+        except error.RepoLookupError:
+            branchnode = None
+        branch = branch, branchnode == ctx.node()
         data.append((node, vtx, edges, desc, user, age, branch, ctx.tags(),
                      ctx.bookmarks()))
 
