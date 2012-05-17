@@ -196,6 +196,8 @@ def addremove(ui, repo, *pats, **opts):
     be identical) as its parameter. Detecting renamed files this way
     can be expensive. After using this option, :hg:`status -C` can be
     used to check which files were identified as moved or renamed.
+    If this option is not specified, only renames of identical files
+    are detected.
 
     Returns 0 if all files are successfully added.
     """
@@ -1009,7 +1011,8 @@ def bundle(ui, repo, fname, dest=None, **opts):
         heads = revs and map(repo.lookup, revs) or revs
         outgoing = discovery.findcommonoutgoing(repo, other,
                                                 onlyheads=heads,
-                                                force=opts.get('force'))
+                                                force=opts.get('force'),
+                                                portable=True)
         cg = repo.getlocalbundle('bundle', outgoing)
     if not cg:
         scmutil.nochangesfound(ui, outgoing and outgoing.excluded)

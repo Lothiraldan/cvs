@@ -740,7 +740,11 @@ def node_(repo, subset, x):
     if len(n) == 40:
         rn = repo[n].rev()
     else:
-        rn = repo.changelog.rev(repo.changelog._partialmatch(n))
+        rn = None
+        pm = repo.changelog._partialmatch(n)
+        if pm is not None:
+            rn = repo.changelog.rev(pm)
+
     return [r for r in subset if r == rn]
 
 def outgoing(repo, subset, x):
@@ -926,7 +930,7 @@ def matching(repo, subset, x):
 
     Special fields are ``summary`` and ``metadata``:
     ``summary`` matches the first line of the description.
-    ``metatadata`` is equivalent to matching ``description user date``
+    ``metadata`` is equivalent to matching ``description user date``
     (i.e. it matches the main metadata fields).
 
     ``metadata`` is the default field which is used when no fields are
@@ -996,7 +1000,7 @@ def matching(repo, subset, x):
     # is only one field to match)
     getinfo = lambda r: [f(r) for f in getfieldfuncs]
 
-    matches = []
+    matches = set()
     for rev in revs:
         target = getinfo(rev)
         for r in subset:
@@ -1006,10 +1010,8 @@ def matching(repo, subset, x):
                     match = False
                     break
             if match:
-                matches.append(r)
-    if len(revs) > 1:
-        matches = sorted(set(matches))
-    return matches
+                matches.add(r)
+    return [r for r in subset if r in matches]
 
 def reverse(repo, subset, x):
     """``reverse(set)``
