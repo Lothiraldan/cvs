@@ -246,6 +246,7 @@ typedef struct {
 	Py_ssize_t raw_length; /* original number of elements */
 	Py_ssize_t length;     /* current number of elements */
 	PyObject *added;       /* populated on demand */
+	PyObject *headrevs;    /* cache, invalidated on changes */
 	nodetree *nt;          /* base-16 trie */
 	int ntlength;          /* # nodes in use */
 	int ntcapacity;        /* # nodes allocated */
@@ -463,6 +464,7 @@ static PyObject *index_insert(indexObject *self, PyObject *args)
 	if (self->nt)
 		nt_insert(self, node, (int)offset);
 
+	Py_CLEAR(self->headrevs);
 	Py_RETURN_NONE;
 }
 
@@ -484,6 +486,7 @@ static void _index_clearcaches(indexObject *self)
 		free(self->nt);
 		self->nt = NULL;
 	}
+	Py_CLEAR(self->headrevs);
 }
 
 static PyObject *index_clearcaches(indexObject *self)
@@ -531,6 +534,107 @@ static PyObject *index_stats(indexObject *self)
 
 bail:
 	Py_XDECREF(obj);
+	return NULL;
+}
+
+/*
+ * When we cache a list, we want to be sure the caller can't mutate
+ * the cached copy.
+ */
+static PyObject *list_copy(PyObject *list)
+{
+	Py_ssize_t len = PyList_GET_SIZE(list);
+	PyObject *newlist = PyList_New(len);
+	Py_ssize_t i;
+
+	if (newlist == NULL)
+		return NULL;
+
+	for (i = 0; i < len; i++) {
+		PyObject *obj = PyList_GET_ITEM(list, i);
+		Py_INCREF(obj);
+		PyList_SET_ITEM(newlist, i, obj);
+	}
+
+	return newlist;
+}
+
+static PyObject *index_headrevs(indexObject *self)
+{
+	Py_ssize_t i, len, addlen;
+	char *nothead = NULL;
+	PyObject *heads;
+
+	if (self->headrevs)
+		return list_copy(self->headrevs);
+
+	len = index_length(self) - 1;
+	heads = PyList_New(0);
+	if (heads == NULL)
+		goto bail;
+	if (len == 0) {
+		PyObject *nullid = PyInt_FromLong(-1);
+		if (nullid == NULL || PyList_Append(heads, nullid) == -1) {
+			Py_XDECREF(nullid);
+			goto bail;
+		}
+		goto done;
+	}
+
+	nothead = calloc(len, 1);
+	if (nothead == NULL)
+		goto bail;
+
+	for (i = 0; i < self->raw_length; i++) {
+		const char *data = index_deref(self, i);
+		int parent_1 = getbe32(data + 24);
+		int parent_2 = getbe32(data + 28);
+		if (parent_1 >= 0)
+			nothead[parent_1] = 1;
+		if (parent_2 >= 0)
+			nothead[parent_2] = 1;
+	}
+
+	addlen = self->added ? PyList_GET_SIZE(self->added) : 0;
+
+	for (i = 0; i < addlen; i++) {
+		PyObject *rev = PyList_GET_ITEM(self->added, i);
+		PyObject *p1 = PyTuple_GET_ITEM(rev, 5);
+		PyObject *p2 = PyTuple_GET_ITEM(rev, 6);
+		long parent_1, parent_2;
+
+		if (!PyInt_Check(p1) || !PyInt_Check(p2)) {
+			PyErr_SetString(PyExc_TypeError,
+					"revlog parents are invalid");
+			goto bail;
+		}
+		parent_1 = PyInt_AS_LONG(p1);
+		parent_2 = PyInt_AS_LONG(p2);
+		if (parent_1 >= 0)
+			nothead[parent_1] = 1;
+		if (parent_2 >= 0)
+			nothead[parent_2] = 1;
+	}
+
+	for (i = 0; i < len; i++) {
+		PyObject *head;
+
+		if (nothead[i])
+			continue;
+		head = PyInt_FromLong(i);
+		if (head == NULL || PyList_Append(heads, head) == -1) {
+			Py_XDECREF(head);
+			goto bail;
+		}
+	}
+
+done:
+	self->headrevs = heads;
+	free(nothead);
+	return list_copy(self->headrevs);
+bail:
+	Py_XDECREF(heads);
+	free(nothead);
 	return NULL;
 }
 
@@ -930,6 +1034,7 @@ static int index_slice_del(indexObject *self, PyObject *item)
 {
 	Py_ssize_t start, stop, step, slicelength;
 	Py_ssize_t length = index_length(self);
+	int ret = 0;
 
 	if (PySlice_GetIndicesEx((PySliceObject*)item, length,
 				 &start, &stop, &step, &slicelength) < 0)
@@ -975,7 +1080,9 @@ static int index_slice_del(indexObject *self, PyObject *item)
 				self->ntrev = (int)start;
 		}
 		self->length = start + 1;
-		return 0;
+		if (start < self->raw_length)
+			self->raw_length = start;
+		goto done;
 	}
 
 	if (self->nt) {
@@ -983,10 +1090,12 @@ static int index_slice_del(indexObject *self, PyObject *item)
 		if (self->ntrev > start)
 			self->ntrev = (int)start;
 	}
-	return self->added
-		? PyList_SetSlice(self->added, start - self->length + 1,
-				  PyList_GET_SIZE(self->added), NULL)
-		: 0;
+	if (self->added)
+		ret = PyList_SetSlice(self->added, start - self->length + 1,
+				      PyList_GET_SIZE(self->added), NULL);
+done:
+	Py_CLEAR(self->headrevs);
+	return ret;
 }
 
 /*
@@ -1076,6 +1185,7 @@ static int index_init(indexObject *self, PyObject *args)
 	self->cache = NULL;
 
 	self->added = NULL;
+	self->headrevs = NULL;
 	self->offsets = NULL;
 	self->nt = NULL;
 	self->ntlength = self->ntcapacity = 0;
@@ -1140,6 +1250,8 @@ static PyMethodDef index_methods[] = {
 	 "clear the index caches"},
 	{"get", (PyCFunction)index_m_get, METH_VARARGS,
 	 "get an index entry"},
+	{"headrevs", (PyCFunction)index_headrevs, METH_NOARGS,
+	 "get head revisions"},
 	{"insert", (PyCFunction)index_insert, METH_VARARGS,
 	 "insert an index entry"},
 	{"partialmatch", (PyCFunction)index_partialmatch, METH_VARARGS,
