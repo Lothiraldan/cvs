@@ -2695,7 +2695,7 @@ def graft(ui, repo, *revs, **opts):
                     stats = mergemod.update(repo, ctx.node(), True, True, False,
                                             ctx.p1().node())
                 finally:
-                    ui.setconfig('ui', 'forcemerge', '')
+                    repo.ui.setconfig('ui', 'forcemerge', '')
                 # drop the second merge parent
                 repo.setparents(current.node(), nullid)
                 repo.dirstate.write()
@@ -2950,7 +2950,7 @@ def grep(ui, repo, pattern, *pats, **opts):
     ('a', 'active', False, _('show active branchheads only (DEPRECATED)')),
     ('c', 'closed', False, _('show normal and closed branch heads')),
     ] + templateopts,
-    _('[-ac] [-r STARTREV] [REV]...'))
+    _('[-ct] [-r STARTREV] [REV]...'))
 def heads(ui, repo, *branchrevs, **opts):
     """show current repository heads or show branch heads
 
@@ -5607,10 +5607,10 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     current named branch and move the current bookmark (see :hg:`help
     bookmarks`).
 
-    If the changeset is not a descendant of the working directory's
-    parent, the update is aborted. With the -c/--check option, the
-    working directory is checked for uncommitted changes; if none are
-    found, the working directory is updated to the specified
+    If the changeset is not a descendant or ancestor of the working
+    directory's parent, the update is aborted. With the -c/--check
+    option, the working directory is checked for uncommitted changes; if
+    none are found, the working directory is updated to the specified
     changeset.
 
     Update sets the working directory's parent revison to the specified
