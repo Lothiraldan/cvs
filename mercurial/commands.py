@@ -2744,7 +2744,7 @@ def graft(ui, repo, *revs, **opts):
                     stats = mergemod.update(repo, ctx.node(), True, True, False,
                                             ctx.p1().node())
                 finally:
-                    ui.setconfig('ui', 'forcemerge', '')
+                    repo.ui.setconfig('ui', 'forcemerge', '')
                 # drop the second merge parent
                 repo.setparents(current.node(), nullid)
                 repo.dirstate.write()
@@ -3004,7 +3004,7 @@ def grep(ui, repo, pattern, *pats, **opts):
     ('a', 'active', False, _('show active branchheads only (DEPRECATED)')),
     ('c', 'closed', False, _('show normal and closed branch heads')),
     ] + templateopts,
-    _('[-ac] [-r STARTREV] [REV]...'))
+    _('[-ct] [-r STARTREV] [REV]...'))
 def heads(ui, repo, *branchrevs, **opts):
     """show current repository heads or show branch heads
 
@@ -3097,16 +3097,18 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
             # except block, nor can be used inside a lambda. python issue4617
             prefix = inst.args[0]
             select = lambda c: c.lstrip('^').startswith(prefix)
-            helplist(select)
-            return
+            rst = helplist(select)
+            return rst
+
+        rst = []
 
         # check if it's an invalid alias and display its error if it is
         if getattr(entry[0], 'badalias', False):
             if not unknowncmd:
+                ui.pushbuffer()
                 entry[0](ui)
-            return
-
-        rst = []
+                rst.append(ui.popbuffer())
+            return rst
 
         # synopsis
         if len(entry) > 2:
@@ -3165,10 +3167,7 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
             elif not ui.quiet:
                 rst.append(_('\nuse "hg -v help %s" to show more info\n')
                            % name)
-
-        keep = ui.verbose and ['verbose'] or []
-        formatted, pruned = minirst.format(''.join(rst), textwidth, keep=keep)
-        ui.write(formatted)
+        return rst
 
 
     def helplist(select=None):
@@ -3201,34 +3200,34 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
             h[f] = doc.splitlines()[0].rstrip()
             cmds[f] = c.lstrip("^")
 
+        rst = []
         if not h:
-            ui.status(_('no commands defined\n'))
-            return
+            if not ui.quiet:
+                rst.append(_('no commands defined\n'))
+            return rst
 
-        ui.status(header)
+        if not ui.quiet:
+            rst.append(header)
         fns = sorted(h)
-        m = max(map(len, fns))
         for f in fns:
             if ui.verbose:
                 commands = cmds[f].replace("|",", ")
-                ui.write(" %s:\n      %s\n"%(commands, h[f]))
+                rst.append(" :%s: %s\n" % (commands, h[f]))
             else:
-                ui.write('%s\n' % (util.wrap(h[f], textwidth,
-                                             initindent=' %-*s    ' % (m, f),
-                                             hangindent=' ' * (m + 4))))
+                rst.append(' :%s: %s\n' % (f, h[f]))
 
         if not name:
-            text = help.listexts(_('enabled extensions:'), extensions.enabled())
-            if text:
-                ui.write("\n%s" % minirst.format(text, textwidth))
+            exts = help.listexts(_('enabled extensions:'), extensions.enabled())
+            if exts:
+                rst.append('\n')
+                rst.extend(exts)
 
-            ui.write(_("\nadditional help topics:\n\n"))
+            rst.append(_("\nadditional help topics:\n\n"))
             topics = []
             for names, header, doc in help.helptable:
                 topics.append((sorted(names, key=len, reverse=True)[0], header))
-            topics_len = max([len(s[0]) for s in topics])
             for t, desc in topics:
-                ui.write(" %-*s   %s\n" % (topics_len, t, desc))
+                rst.append(" :%s: %s\n" % (t, desc))
 
         optlist = []
         if not ui.quiet:
@@ -3249,17 +3248,12 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
                             'global options') % (name and " " + name or "")
                 optlist.append((msg, ()))
 
-        if not optlist:
-            return
-
-        rst = ''
-        for title, options in optlist:
-            rst += '\n%s\n' % title
-            if options:
-                rst += "\n"
-                rst += help.optrst(options, ui.verbose)
-                rst += '\n'
-        ui.write('\n' + minirst.format(rst, textwidth))
+        if optlist:
+            for title, options in optlist:
+                rst.append('\n%s\n' % title)
+                if options:
+                    rst.append('\n%s\n' % help.optrst(options, ui.verbose))
+        return rst
 
     def helptopic(name):
         for names, header, doc in help.helptable:
@@ -3281,7 +3275,7 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
                        'the %s command\n') % (name, name))
         except error.UnknownCommand:
             pass
-        ui.write(minirst.format(''.join(rst), textwidth))
+        return rst
 
     def helpext(name):
         try:
@@ -3297,10 +3291,10 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
             head, tail = doc, ""
         else:
             head, tail = doc.split('\n', 1)
-        ui.write(_('%s extension - %s\n\n') % (name.split('.')[-1], head))
+        rst = [_('%s extension - %s\n\n') % (name.split('.')[-1], head)]
         if tail:
-            ui.write(minirst.format(tail, textwidth))
-            ui.status('\n')
+            rst.extend(tail.splitlines(True))
+            rst.append('\n')
 
         if mod:
             try:
@@ -3308,23 +3302,26 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
             except AttributeError:
                 ct = {}
             modcmds = set([c.split('|', 1)[0] for c in ct])
-            helplist(modcmds.__contains__)
+            rst.extend(helplist(modcmds.__contains__))
         else:
-            ui.write(_('use "hg help extensions" for information on enabling '
+            rst.append(_('use "hg help extensions" for information on enabling '
                        'extensions\n'))
+        return rst
 
     def helpextcmd(name):
         cmd, ext, mod = extensions.disabledcmd(ui, name,
                                                ui.configbool('ui', 'strict'))
         doc = gettext(mod.__doc__).splitlines()[0]
 
-        msg = help.listexts(_("'%s' is provided by the following "
+        rst = help.listexts(_("'%s' is provided by the following "
                               "extension:") % cmd, {ext: doc}, indent=4)
-        ui.write(minirst.format(msg, textwidth))
-        ui.write('\n')
-        ui.write(_('use "hg help extensions" for information on enabling '
+        rst.append('\n')
+        rst.append(_('use "hg help extensions" for information on enabling '
                    'extensions\n'))
+        return rst
 
+
+    rst = []
     kw = opts.get('keyword')
     if kw:
         matches = help.topicmatch(kw)
@@ -3333,12 +3330,10 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
                          ('extensions', _('Extensions')),
                          ('extensioncommands', _('Extension Commands'))):
             if matches[t]:
-                ui.write('%s:\n\n' % title)
-                rst = ''.join(minirst.maketable(matches[t], 1))
-                ui.write(minirst.format(rst))
-        return
-
-    if name and name != 'shortlist':
+                rst.append('%s:\n\n' % title)
+                rst.extend(minirst.maketable(matches[t], 1))
+                rst.append('\n')
+    elif name and name != 'shortlist':
         i = None
         if unknowncmd:
             queries = (helpextcmd,)
@@ -3350,7 +3345,7 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
             queries = (helptopic, helpcmd, helpext, helpextcmd)
         for f in queries:
             try:
-                f(name)
+                rst = f(name)
                 i = None
                 break
             except error.UnknownCommand, inst:
@@ -3359,9 +3354,13 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
             raise i
     else:
         # program name
-        ui.status(_("Mercurial Distributed SCM\n"))
-        ui.status('\n')
-        helplist()
+        if not ui.quiet:
+            rst = [_("Mercurial Distributed SCM\n"), '\n']
+        rst.extend(helplist())
+
+    keep = ui.verbose and ['verbose'] or []
+    formatted, pruned = minirst.format(''.join(rst), textwidth, keep=keep)
+    ui.write(formatted)
 
 
 @command('identify|id',
@@ -5398,12 +5397,12 @@ def summary(ui, repo, **opts):
     cl = repo.changelog
     for a in [cl.rev(n) for n in bheads]:
         new[a] = 1
-    for a in cl.ancestors(*[cl.rev(n) for n in bheads]):
+    for a in cl.ancestors([cl.rev(n) for n in bheads]):
         new[a] = 1
     for a in [p.rev() for p in parents]:
         if a >= 0:
             new[a] = 0
-    for a in cl.ancestors(*[p.rev() for p in parents]):
+    for a in cl.ancestors([p.rev() for p in parents]):
         new[a] = 0
     new = sum(new)
 
@@ -5658,10 +5657,10 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     current named branch and move the current bookmark (see :hg:`help
     bookmarks`).
 
-    If the changeset is not a descendant of the working directory's
-    parent, the update is aborted. With the -c/--check option, the
-    working directory is checked for uncommitted changes; if none are
-    found, the working directory is updated to the specified
+    If the changeset is not a descendant or ancestor of the working
+    directory's parent, the update is aborted. With the -c/--check
+    option, the working directory is checked for uncommitted changes; if
+    none are found, the working directory is updated to the specified
     changeset.
 
     Update sets the working directory's parent revison to the specified

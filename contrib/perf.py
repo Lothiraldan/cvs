@@ -74,7 +74,7 @@ def perftags(ui, repo):
 def perfancestors(ui, repo):
     heads = repo.changelog.headrevs()
     def d():
-        for a in repo.changelog.ancestors(*heads):
+        for a in repo.changelog.ancestors(heads):
             pass
     timer(d)
 
@@ -139,6 +139,10 @@ def perfparents(ui, repo):
 
 def perflookup(ui, repo, rev):
     timer(lambda: len(repo.lookup(rev)))
+
+def perfrevrange(ui, repo, *specs):
+    revrange = scmutil.revrange
+    timer(lambda: len(revrange(repo, specs)))
 
 def perfnodelookup(ui, repo, rev):
     import mercurial.revlog
@@ -223,6 +227,7 @@ cmdtable = {
     'perffncacheload': (perffncacheload, []),
     'perffncachewrite': (perffncachewrite, []),
     'perflookup': (perflookup, []),
+    'perfrevrange': (perfrevrange, []),
     'perfnodelookup': (perfnodelookup, []),
     'perfparents': (perfparents, []),
     'perfstartup': (perfstartup, []),

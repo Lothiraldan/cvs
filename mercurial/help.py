@@ -12,19 +12,18 @@ import encoding, util, minirst
 
 def listexts(header, exts, indent=1):
     '''return a text listing of the given extensions'''
-    if not exts:
-        return ''
-    maxlength = max(len(e) for e in exts)
-    result = '\n%s\n\n' % header
-    for name, desc in sorted(exts.iteritems()):
-        result += '%s%-*s %s\n' % (' ' * indent, maxlength + 2,
-                                   ':%s:' % name, desc)
-    return result
+    rst = []
+    if exts:
+        rst.append('\n%s\n\n' % header)
+        for name, desc in sorted(exts.iteritems()):
+            rst.append('%s:%s: %s\n' % (' ' * indent, name, desc))
+    return rst
 
 def extshelp():
-    doc = loaddoc('extensions')()
-    doc += listexts(_('enabled extensions:'), extensions.enabled())
-    doc += listexts(_('disabled extensions:'), extensions.disabled())
+    rst = loaddoc('extensions')().splitlines(True)
+    rst.extend(listexts(_('enabled extensions:'), extensions.enabled()))
+    rst.extend(listexts(_('disabled extensions:'), extensions.disabled()))
+    doc = ''.join(rst)
     return doc
 
 def optrst(options, verbose):
@@ -70,7 +69,7 @@ def topicmatch(kw):
     """
     kw = encoding.lower(kw)
     def lowercontains(container):
-        return kw in encoding.lower(_(container))
+        return kw in encoding.lower(container)  # translated in helptable
     results = {'topics': [],
                'commands': [],
                'extensions': [],
@@ -89,9 +88,10 @@ def topicmatch(kw):
             summary = entry[2]
         else:
             summary = ''
-        docs = getattr(entry[0], '__doc__', None) or ''
+        # translate docs *before* searching there
+        docs = _(getattr(entry[0], '__doc__', None)) or ''
         if kw in cmd or lowercontains(summary) or lowercontains(docs):
-            doclines = _(docs).splitlines()
+            doclines = docs.splitlines()
             if doclines:
                 summary = doclines[0]
             cmdname = cmd.split('|')[0].lstrip('^')
@@ -102,12 +102,16 @@ def topicmatch(kw):
         # extensions.load ignores the UI argument
         mod = extensions.load(None, name, '')
         if lowercontains(name) or lowercontains(docs):
-            results['extensions'].append((name, _(docs).splitlines()[0]))
+            # extension docs are already translated
+            results['extensions'].append((name, docs.splitlines()[0]))
         for cmd, entry in getattr(mod, 'cmdtable', {}).iteritems():
             if kw in cmd or (len(entry) > 2 and lowercontains(entry[2])):
                 cmdname = cmd.split('|')[0].lstrip('^')
-                results['extensioncommands'].append(
-                    (cmdname, _(getattr(cmd, '__doc__', ''))))
+                if mod.__doc__:
+                    cmddoc = gettext(mod.__doc__).splitlines()[0]
+                else:
+                    cmddoc = _('(no help text available)')
+                results['extensioncommands'].append((cmdname, cmddoc))
     return results
 
 def loaddoc(topic):
