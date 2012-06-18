@@ -222,7 +222,6 @@ subdir log
 
 Issue1049: Hg permits partial commit of merge without warning
 
-  $ cd ..
   $ hg init issue1049
   $ cd issue1049
   $ echo a > a
@@ -304,3 +303,5 @@ commit copy
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       6      0       0 26d3ca0dfd18 000000000000 000000000000
        1         6       7      1       1 d267bddd54f7 26d3ca0dfd18 000000000000
+
+  $ cd ..

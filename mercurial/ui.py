@@ -64,7 +64,7 @@ class ui(object):
             return True
 
         if self._reportuntrusted:
-            self.warn(_('Not trusting file %s from untrusted '
+            self.warn(_('not trusting file %s from untrusted '
                         'user %s, group %s\n') % (f, user, group))
         return False
 
@@ -86,7 +86,7 @@ class ui(object):
         except error.ConfigError, inst:
             if trusted:
                 raise
-            self.warn(_("Ignored: %s\n") % str(inst))
+            self.warn(_("ignored: %s\n") % str(inst))
 
         if self.plain():
             for k in ('debug', 'fallbackencoding', 'quiet', 'slash',
@@ -409,7 +409,7 @@ class ui(object):
         if user is None and not self.interactive():
             try:
                 user = '%s@%s' % (util.getuser(), socket.getfqdn())
-                self.warn(_("No username found, using '%s' instead\n") % user)
+                self.warn(_("no username found, using '%s' instead\n") % user)
             except KeyError:
                 pass
         if not user:

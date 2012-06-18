@@ -46,6 +46,9 @@ The corresponding values can be either:
 - a comma-separated list containing users and groups, or
 - an asterisk, to match anyone;
 
+You can add the "!" prefix to a user or group name to invert the sense
+of the match.
+
 Path-based Access Control
 .........................
 
@@ -146,6 +149,46 @@ Example Configuration
 
   .hgtags = release_engineer
 
+Examples using the "!" prefix
+.............................
+
+Suppose there's a branch that only a given user (or group) should be able to
+push to, and you don't want to restrict access to any other branch that may
+be created.
+
+The "!" prefix allows you to prevent anyone except a given user or group to
+push changesets in a given branch or path.
+
+In the examples below, we will:
+1) Deny access to branch "ring" to anyone but user "gollum"
+2) Deny access to branch "lake" to anyone but members of the group "hobbit"
+3) Deny access to a file to anyone but user "gollum"
+
+::
+
+  [acl.allow.branches]
+  # Empty
+
+  [acl.deny.branches]
+
+  # 1) only 'gollum' can commit to branch 'ring';
+  # 'gollum' and anyone else can still commit to any other branch.
+  ring = !gollum
+
+  # 2) only members of the group 'hobbit' can commit to branch 'lake';
+  # 'hobbit' members and anyone else can still commit to any other branch.
+  lake = !@hobbit
+
+  # You can also deny access based on file paths:
+
+  [acl.allow]
+  # Empty
+
+  [acl.deny]
+  # 3) only 'gollum' can change the file below;
+  # 'gollum' and anyone else can still change any other file.
+  /misty/mountains/cave/ring = !gollum
+
 '''
 
 from mercurial.i18n import _
@@ -174,7 +217,21 @@ def _usermatch(ui, user, usersorgroups):
         return True
 
     for ug in usersorgroups.replace(',', ' ').split():
-        if user == ug or ug.startswith('@') and user in _getusers(ui, ug[1:]):
+
+        if ug.startswith('!'):
+            # Test for excluded user or group. Format:
+            # if ug is a user  name: !username
+            # if ug is a group name: !@groupname
+            ug = ug[1:]
+            if not ug.startswith('@') and user != ug \
+                or ug.startswith('@') and user not in _getusers(ui, ug[1:]):
+                return True
+
+        # Test for user or group. Format:
+        # if ug is a user  name: username
+        # if ug is a group name: @groupname
+        elif user == ug \
+             or ug.startswith('@') and user in _getusers(ui, ug[1:]):
             return True
 
     return False

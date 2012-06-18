@@ -599,8 +599,9 @@ def tsttest(test, wd, options, replacements):
 
     def hghave(reqs):
         # TODO: do something smarter when all other uses of hghave is gone
+        tdir = TESTDIR.replace('\\', '/')
         proc = Popen4('%s -c "%s/hghave %s"' %
-                      (options.shell, TESTDIR, ' '.join(reqs)), TESTDIR, 0)
+                      (options.shell, tdir, ' '.join(reqs)), wd, 0)
         proc.communicate()
         ret = proc.wait()
         if wifexited(ret):
@@ -658,6 +659,9 @@ def tsttest(test, wd, options, replacements):
             prepos = pos
             pos = n
             addsalt(n, False)
+            cmd = l[4:].split()
+            if len(cmd) == 2 and cmd[0] == 'cd':
+                l = '  $ cd %s || exit 1\n' % cmd[1]
             script.append(l[4:])
         elif l.startswith('  > '): # continuations
             after.setdefault(prepos, []).append(l)
@@ -909,7 +913,7 @@ def runone(options, test):
 
     # Make a tmp subdirectory to work in
     testtmp = os.environ["TESTTMP"] = os.environ["HOME"] = \
-        os.path.join(HGTMP, os.path.basename(test)).replace('\\', '/')
+        os.path.join(HGTMP, os.path.basename(test))
 
     replacements = [
         (r':%s\b' % options.port, ':$HGPORT'),
@@ -1229,7 +1233,7 @@ def main():
             del os.environ[k]
 
     global TESTDIR, HGTMP, INST, BINDIR, PYTHONDIR, COVERAGE_FILE
-    TESTDIR = os.environ["TESTDIR"] = os.getcwd().replace('\\', '/')
+    TESTDIR = os.environ["TESTDIR"] = os.getcwd()
     if options.tmpdir:
         options.keep_tmpdir = True
         tmpdir = options.tmpdir
@@ -1246,7 +1250,12 @@ def main():
             #shutil.rmtree(tmpdir)
         os.makedirs(tmpdir)
     else:
-        tmpdir = tempfile.mkdtemp('', 'hgtests.')
+        d = None
+        if os.name == 'nt':
+            # without this, we get the default temp dir location, but
+            # in all lowercase, which causes troubles with paths (issue3490)
+            d = os.getenv('TMP')
+        tmpdir = tempfile.mkdtemp('', 'hgtests.', d)
     HGTMP = os.environ['HGTMP'] = os.path.realpath(tmpdir)
     DAEMON_PIDS = None
     HGRCPATH = None

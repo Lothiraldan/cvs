@@ -684,7 +684,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
                 ctx = scmutil.revsingle(repo, rev, node)
                 rev = None # clear for future iterations
                 state[transition].append(ctx.node())
-                ui.status(_('Changeset %d:%s: %s\n') % (ctx, ctx, transition))
+                ui.status(_('changeset %d:%s: %s\n') % (ctx, ctx, transition))
                 check_state(state, interactive=False)
                 # bisect
                 nodes, changesets, good = hbisect.bisect(repo.changelog, state)
@@ -1973,7 +1973,7 @@ def debuginstall(ui):
     problems = 0
 
     # encoding
-    ui.status(_("Checking encoding (%s)...\n") % encoding.encoding)
+    ui.status(_("checking encoding (%s)...\n") % encoding.encoding)
     try:
         encoding.fromlocal("test")
     except util.Abort, inst:
@@ -1982,7 +1982,7 @@ def debuginstall(ui):
         problems += 1
 
     # compiled modules
-    ui.status(_("Checking installed modules (%s)...\n")
+    ui.status(_("checking installed modules (%s)...\n")
               % os.path.dirname(__file__))
     try:
         import bdiff, mpatch, base85, osutil
@@ -1996,7 +1996,7 @@ def debuginstall(ui):
     # templates
     import templater
     p = templater.templatepath()
-    ui.status(_("Checking templates (%s)...\n") % ' '.join(p))
+    ui.status(_("checking templates (%s)...\n") % ' '.join(p))
     try:
         templater.templater(templater.templatepath("map-cmdline.default"))
     except Exception, inst:
@@ -2005,7 +2005,7 @@ def debuginstall(ui):
         problems += 1
 
     # editor
-    ui.status(_("Checking commit editor...\n"))
+    ui.status(_("checking commit editor...\n"))
     editor = ui.geteditor()
     cmdpath = util.findexe(editor) or util.findexe(editor.split()[0])
     if not cmdpath:
@@ -2020,7 +2020,7 @@ def debuginstall(ui):
             problems += 1
 
     # check username
-    ui.status(_("Checking username...\n"))
+    ui.status(_("checking username...\n"))
     try:
         ui.username()
     except util.Abort, e:
@@ -2029,7 +2029,7 @@ def debuginstall(ui):
         problems += 1
 
     if not problems:
-        ui.status(_("No problems detected\n"))
+        ui.status(_("no problems detected\n"))
     else:
         ui.write(_("%s problems detected,"
                    " please check your install!\n") % problems)
@@ -2371,11 +2371,14 @@ def debugwalk(ui, repo, *pats, **opts):
     items = list(repo.walk(m))
     if not items:
         return
+    f = lambda fn: fn
+    if ui.configbool('ui', 'slash') and os.sep != '/':
+        f = lambda fn: util.normpath(fn)
     fmt = 'f  %%-%ds  %%-%ds  %%s' % (
         max([len(abs) for abs in items]),
         max([len(m.rel(abs)) for abs in items]))
     for abs in items:
-        line = fmt % (abs, m.rel(abs), m.exact(abs) and 'exact' or '')
+        line = fmt % (abs, f(m.rel(abs)), m.exact(abs) and 'exact' or '')
         ui.write("%s\n" % line.rstrip())
 
 @command('debugwireargs',
@@ -3331,7 +3334,7 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
                          ('extensioncommands', _('Extension Commands'))):
             if matches[t]:
                 rst.append('%s:\n\n' % title)
-                rst.extend(minirst.maketable(matches[t], 1))
+                rst.extend(minirst.maketable(sorted(matches[t]), 1))
                 rst.append('\n')
     elif name and name != 'shortlist':
         i = None
@@ -5035,7 +5038,7 @@ def serve(ui, repo, **opts):
 
     def checkrepo():
         if repo is None:
-            raise error.RepoError(_("There is no Mercurial repository here"
+            raise error.RepoError(_("there is no Mercurial repository here"
                               " (.hg not found)"))
 
     if opts["stdio"]:
@@ -5066,7 +5069,7 @@ def serve(ui, repo, **opts):
     o = opts.get('web_conf') or opts.get('webdir_conf')
     if not o:
         if not repo:
-            raise error.RepoError(_("There is no Mercurial repository"
+            raise error.RepoError(_("there is no Mercurial repository"
                                     " here (.hg not found)"))
         o = repo.root
 

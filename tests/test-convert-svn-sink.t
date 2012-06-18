@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" svn13 no-outer-repo symlink execbit || exit 80
+  $ "$TESTDIR/hghave" svn13 no-outer-repo || exit 80
 
   $ fixpath()
   > {
@@ -31,18 +31,16 @@ Add
   $ echo a > a/a
   $ mkdir -p a/d1/d2
   $ echo b > a/d1/d2/b
-  $ ln -s a/missing a/link
   $ hg --cwd a ci -d '0 0' -A -m 'add a file'
   adding a
   adding d1/d2/b
-  adding link
 
 Modify
 
   $ "$TESTDIR/svn-safe-append.py" a a/a
   $ hg --cwd a ci -d '1 0' -m 'modify a file'
   $ hg --cwd a tip -q
-  1:8231f652da37
+  1:e0e2b8a9156b
 
   $ hg convert -d svn a
   assuming destination a-hg
@@ -57,7 +55,6 @@ Modify
    2 1 test d1
    2 1 test d1/d2
    2 1 test d1/d2/b
-   2 1 test link
    2 2 test .
    2 2 test a
   revision: 2
@@ -71,27 +68,22 @@ Modify
    A /d1
    A /d1/d2
    A /d1/d2/b
-   A /link
   $ ls a a-hg-wc
   a:
   a
   d1
-  link
   
   a-hg-wc:
   a
   d1
-  link
   $ cmp a/a a-hg-wc/a
 
 Rename
 
   $ hg --cwd a mv a b
-  $ hg --cwd a mv link newlink
-
   $ hg --cwd a ci -d '2 0' -m 'rename a file'
   $ hg --cwd a tip -q
-  2:a67e26ccec09
+  2:eb5169441d43
 
   $ hg convert -d svn a
   assuming destination a-hg
@@ -106,24 +98,19 @@ Rename
    3 1 test d1/d2/b
    3 3 test .
    3 3 test b
-   3 3 test newlink
   revision: 3
   author: test
   msg: rename a file
    D /a
    A /b (from /a@2)
-   D /link
-   A /newlink (from /link@2)
   $ ls a a-hg-wc
   a:
   b
   d1
-  newlink
   
   a-hg-wc:
   b
   d1
-  newlink
 
 Copy
 
@@ -131,7 +118,7 @@ Copy
 
   $ hg --cwd a ci -d '3 0' -m 'copy a file'
   $ hg --cwd a tip -q
-  3:0cf087b9ab02
+  3:60effef6ab48
 
   $ hg convert -d svn a
   assuming destination a-hg
@@ -145,7 +132,6 @@ Copy
    4 1 test d1/d2
    4 1 test d1/d2/b
    4 3 test b
-   4 3 test newlink
    4 4 test .
    4 4 test c
   revision: 4
@@ -157,13 +143,11 @@ Copy
   b
   c
   d1
-  newlink
   
   a-hg-wc:
   b
   c
   d1
-  newlink
 
   $ hg --cwd a rm b
 
@@ -171,7 +155,7 @@ Remove
 
   $ hg --cwd a ci -d '4 0' -m 'remove a file'
   $ hg --cwd a tip -q
-  4:07b2e34a5b17
+  4:87bbe3013fb6
 
   $ hg convert -d svn a
   assuming destination a-hg
@@ -184,7 +168,6 @@ Remove
    5 1 test d1
    5 1 test d1/d2
    5 1 test d1/d2/b
-   5 3 test newlink
    5 4 test c
    5 5 test .
   revision: 5
@@ -195,19 +178,26 @@ Remove
   a:
   c
   d1
-  newlink
   
   a-hg-wc:
   c
   d1
-  newlink
 
-Exectutable
+Executable
 
+#if execbit
   $ chmod +x a/c
+#else
+  $ echo fake >> a/c
+#endif
   $ hg --cwd a ci -d '5 0' -m 'make a file executable'
+#if execbit
   $ hg --cwd a tip -q
-  5:31093672760b
+  5:ff42e473c340
+#else
+  $ hg --cwd a tip -q
+  5:817a700c8cf1
+#endif
 
   $ hg convert -d svn a
   assuming destination a-hg
@@ -220,23 +210,62 @@ Exectutable
    6 1 test d1
    6 1 test d1/d2
    6 1 test d1/d2/b
-   6 3 test newlink
    6 6 test .
    6 6 test c
   revision: 6
   author: test
   msg: make a file executable
    M /c
+#if execbit
   $ test -x a-hg-wc/c
+#endif
+
+#if symlink
+
+Symlinks
+
+  $ ln -s a/missing a/link
+  $ hg --cwd a commit -Am 'add symlink'
+  adding link
+  $ hg --cwd a mv link newlink
+  $ hg --cwd a commit -m 'move symlink'
+  $ hg convert -d svn a
+  assuming destination a-hg
+  initializing svn working copy 'a-hg-wc'
+  scanning source...
+  sorting...
+  converting...
+  1 add symlink
+  0 move symlink
+  $ svnupanddisplay a-hg-wc 1
+   8 1 test d1
+   8 1 test d1/d2
+   8 1 test d1/d2/b
+   8 6 test c
+   8 8 test .
+   8 8 test newlink
+  revision: 8
+  author: test
+  msg: move symlink
+   D /link
+   A /newlink (from /link@7)
+
+#endif
+
+  $ rm -rf a a-hg a-hg-wc
+
 
 Executable in new directory
 
-  $ rm -rf a a-hg a-hg-wc
   $ hg init a
 
   $ mkdir a/d1
   $ echo a > a/d1/a
+#if execbit
   $ chmod +x a/d1/a
+#else
+  $ echo fake >> a/d1/a
+#endif
   $ hg --cwd a ci -d '0 0' -A -m 'add executable file in new directory'
   adding d1/a
 
@@ -257,7 +286,9 @@ Executable in new directory
   msg: add executable file in new directory
    A /d1
    A /d1/a
+#if execbit
   $ test -x a-hg-wc/d1/a
+#endif
 
 Copy to new directory
 

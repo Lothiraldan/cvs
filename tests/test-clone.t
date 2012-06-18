@@ -48,8 +48,13 @@ Invalid dest '' must abort:
 
 No update, with debug option:
 
+#if hardlink
   $ hg --debug clone -U . ../c
   linked 8 files
+#else
+  $ hg --debug clone -U . ../c
+  copied 8 files
+#endif
   $ cd ../c
   $ cat a 2>/dev/null || echo "a not present"
   a not present
@@ -503,16 +508,17 @@ Inaccessible destination
 #endif
 
 
+#if fifo
+
 Source of wrong type
 
-  $ if "$TESTDIR/hghave" -q fifo; then
-  >     mkfifo a
-  >     hg clone a b
-  >     rm a
-  > else
-  >     echo "abort: repository a not found!"
-  > fi
+  $ mkfifo a
+  $ hg clone a b
   abort: repository a not found!
+  [255]
+  $ rm a
+
+#endif
 
 Default destination, same directory
 

@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" symlink unix-permissions serve || exit 80
+  $ "$TESTDIR/hghave" unix-permissions serve || exit 80
   $ USERCACHE=`pwd`/cache; export USERCACHE
   $ mkdir -p ${USERCACHE}
   $ cat >> $HGRCPATH <<EOF
@@ -514,7 +514,7 @@ revisions (this was a very bad bug that took a lot of work to fix).
   Invoking status precommit hook
   M sub/normal4
   M sub2/large6
-  saved backup bundle to $TESTTMP/d/.hg/strip-backup/f574fb32bb45-backup.hg
+  saved backup bundle to $TESTTMP/d/.hg/strip-backup/f574fb32bb45-backup.hg (glob)
   nothing to rebase
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
@@ -552,7 +552,7 @@ revisions (this was a very bad bug that took a lot of work to fix).
   Invoking status precommit hook
   M sub/normal4
   M sub2/large6
-  saved backup bundle to $TESTTMP/e/.hg/strip-backup/f574fb32bb45-backup.hg
+  saved backup bundle to $TESTTMP/e/.hg/strip-backup/f574fb32bb45-backup.hg (glob)
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
   8:a381d2c8c80e  modify normal file and largefile in repo b
@@ -1051,6 +1051,8 @@ We have to simulate that here by setting $HOME and removing write permissions
   $ chmod -R u+w alice/pubrepo
   $ HOME="$ORIGHOME"
 
+#if symlink
+
 Symlink to a large largefile should behave the same as a symlink to a normal file
   $ hg init largesymlink
   $ cd largesymlink
@@ -1075,6 +1077,8 @@ Symlink to a large largefile should behave the same as a symlink to a normal fil
   $ test -f largelink
   $ test -L largelink
   $ cd ..
+
+#endif
 
 test for pattern matching on 'hg status':
 to boost performance, largefiles checks whether specified patterns are

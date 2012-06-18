@@ -598,6 +598,15 @@ Test command with no help text
   
   use "hg -v help nohelp" to show more info
 
+  $ hg help -k nohelp
+  Commands:
+  
+   nohelp hg nohelp
+  
+  Extension Commands:
+  
+   nohelp (no help text available)
+
 Test that default list of commands omits extension commands
 
   $ hg help
@@ -766,3 +775,30 @@ Test help hooks
   $ hg help revsets | grep helphook
       helphook1
       helphook2
+
+Test keyword search help
+
+  $ hg help -k clone
+  Topics:
+  
+   config     Configuration Files
+   extensions Using Additional Features
+   glossary   Glossary
+   phases     Working with Phases
+   subrepo    Subrepositories
+   urls       URL Paths
+  
+  Commands:
+  
+   clone  make a copy of an existing repository
+   paths  show aliases for remote repositories
+   update update working directory (or switch revisions)
+  
+  Extensions:
+  
+   relink recreates hardlinks between repository clones
+  
+  Extension Commands:
+  
+   qclone clone main and patch repository at same time
+
