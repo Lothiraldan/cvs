@@ -1885,6 +1885,8 @@ class queue(object):
                                    'files'))
             rev = scmutil.revrange(repo, rev)
             rev.sort(reverse=True)
+        elif not files:
+            raise util.Abort(_('no files or revisions specified'))
         if (len(files) > 1 or len(rev) > 1) and patchname:
             raise util.Abort(_('option "-n" not valid when importing multiple '
                                'patches'))
@@ -2096,7 +2098,7 @@ def unapplied(ui, repo, patch=None, **opts):
            _('place existing revisions under mq control'), _('REV')),
           ('g', 'git', None, _('use git extended diff format')),
           ('P', 'push', None, _('qpush after importing'))],
-         _('hg qimport [-e] [-n NAME] [-f] [-g] [-P] [-r REV]... FILE...'))
+         _('hg qimport [-e] [-n NAME] [-f] [-g] [-P] [-r REV]... [FILE]...'))
 def qimport(ui, repo, *filename, **opts):
     """import a patch or existing changeset
 
@@ -2899,7 +2901,7 @@ def save(ui, repo, **opts):
           ('k', 'keep', None, _("do not modify working copy during strip")),
           ('B', 'bookmark', '', _("remove revs only reachable from given"
                                   " bookmark"))],
-          _('hg strip [-k] [-f] [-n] [-B bookmark] REV...'))
+          _('hg strip [-k] [-f] [-n] [-B bookmark] [-r] REV...'))
 def strip(ui, repo, *revs, **opts):
     """strip changesets and all their descendants from the repository
 
