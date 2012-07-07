@@ -4,12 +4,11 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
-
 from node import bin, hex, nullid, nullrev, short
 from i18n import _
-import repo, changegroup, subrepo, discovery, pushkey
+import repo, changegroup, subrepo, discovery, pushkey, obsolete
 import changelog, dirstate, filelog, manifest, context, bookmarks, phases
-import lock, transaction, store, encoding
+import lock, transaction, store, encoding, base85
 import scmutil, util, extensions, hook, error, revset
 import match as matchmod
 import merge as mergemod
@@ -191,6 +190,14 @@ class localrepository(repo.repository):
     @storecache('phaseroots')
     def _phasecache(self):
         return phases.phasecache(self, self._phasedefaults)
+
+    @storecache('obsstore')
+    def obsstore(self):
+        store = obsolete.obsstore()
+        data = self.sopener.tryread('obsstore')
+        if data:
+            store.loadmarkers(data)
+        return store
 
     @storecache('00changelog.i')
     def changelog(self):
@@ -983,6 +990,16 @@ class localrepository(repo.repository):
             self.store.write()
             if '_phasecache' in vars(self):
                 self._phasecache.write()
+            if 'obsstore' in vars(self) and self.obsstore._new:
+                # XXX: transaction logic should be used here. But for
+                # now rewriting the whole file is good enough.
+                f = self.sopener('obsstore', 'wb', atomictemp=True)
+                try:
+                    self.obsstore.flushmarkers(f)
+                    f.close()
+                except: # re-raises
+                    f.discard()
+                    raise
             for k, ce in self._filecache.items():
                 if k == 'dirstate':
                     continue
@@ -1656,6 +1673,11 @@ class localrepository(repo.repository):
                 # Remote is old or publishing all common changesets
                 # should be seen as public
                 phases.advanceboundary(self, phases.public, subset)
+
+            remoteobs = remote.listkeys('obsolete')
+            if 'dump' in remoteobs:
+                data = base85.b85decode(remoteobs['dump'])
+                self.obsstore.mergemarkers(data)
         finally:
             lock.release()
 
@@ -1796,6 +1818,12 @@ class localrepository(repo.repository):
                         if not r:
                             self.ui.warn(_('updating %s to public failed!\n')
                                             % newremotehead)
+                if 'obsolete' in self.listkeys('namespaces') and self.obsstore:
+                    data = self.obsstore._writemarkers()
+                    r = remote.pushkey('obsolete', 'dump', '',
+                                       base85.b85encode(data))
+                    if not r:
+                        self.ui.warn(_('failed to push obsolete markers!\n'))
             finally:
                 if lock is not None:
                     lock.release()
