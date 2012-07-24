@@ -370,6 +370,146 @@ accident.
   removing normal3
   adding normaladdremove
 
+Test addremove with -R
+
+  $ hg up -C
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  getting changed largefiles
+  1 largefiles updated, 0 removed
+  $ rm normal3
+  $ rm sub/large4
+  $ echo "testing addremove with patterns" > testaddremove.dat
+  $ echo "normaladdremove" > normaladdremove
+  $ cd ..
+  $ hg -R a addremove
+  removing sub/large4
+  adding a/testaddremove.dat as a largefile (glob)
+  removing normal3
+  adding normaladdremove
+  $ cd a
+
+Test 3364
+  $ hg clone . ../addrm
+  updating to branch default
+  5 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  getting changed largefiles
+  3 largefiles updated, 0 removed
+  $ cd ../addrm
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > post-commit.stat=sh -c "echo \"Invoking status postcommit hook\"; hg status -A"
+  > EOF
+  $ touch foo
+  $ hg add --large foo
+  $ hg ci -m "add foo"
+  Invoking status precommit hook
+  A foo
+  Invoking status postcommit hook
+  C foo
+  C normal3
+  C sub/large4
+  C sub/normal4
+  C sub2/large6
+  C sub2/large7
+  $ rm foo
+  $ hg st
+  ! foo
+hmm.. no precommit invoked, but there is a postcommit??
+  $ hg ci -m "will not checkin"
+  nothing changed
+  Invoking status postcommit hook
+  ! foo
+  C normal3
+  C sub/large4
+  C sub/normal4
+  C sub2/large6
+  C sub2/large7
+  [1]
+  $ hg addremove
+  removing foo
+  $ hg st
+  R foo
+  $ hg ci -m "used to say nothing changed"
+  Invoking status precommit hook
+  R foo
+  Invoking status postcommit hook
+  C normal3
+  C sub/large4
+  C sub/normal4
+  C sub2/large6
+  C sub2/large7
+  $ hg st
+
+Test 3507 (both normal files and largefiles were a problem)
+
+  $ touch normal
+  $ touch large
+  $ hg add normal
+  $ hg add --large large
+  $ hg ci -m "added"
+  Invoking status precommit hook
+  A large
+  A normal
+  Invoking status postcommit hook
+  C large
+  C normal
+  C normal3
+  C sub/large4
+  C sub/normal4
+  C sub2/large6
+  C sub2/large7
+  $ hg remove normal
+  $ hg addremove --traceback
+  $ hg ci -m "addremoved normal"
+  Invoking status precommit hook
+  R normal
+  Invoking status postcommit hook
+  C large
+  C normal3
+  C sub/large4
+  C sub/normal4
+  C sub2/large6
+  C sub2/large7
+  $ hg up -C '.^'
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  getting changed largefiles
+  0 largefiles updated, 0 removed
+  $ hg remove large
+  $ hg addremove --traceback
+  $ hg ci -m "removed large"
+  Invoking status precommit hook
+  R large
+  created new head
+  Invoking status postcommit hook
+  C normal
+  C normal3
+  C sub/large4
+  C sub/normal4
+  C sub2/large6
+  C sub2/large7
+
+Test that a standin can't be added as a large file
+
+  $ touch large
+  $ hg add --large large
+  $ hg ci -m "add"
+  Invoking status precommit hook
+  A large
+  Invoking status postcommit hook
+  C large
+  C normal
+  C normal3
+  C sub/large4
+  C sub/normal4
+  C sub2/large6
+  C sub2/large7
+  $ hg remove large
+  $ touch large
+  $ hg addremove --config largefiles.patterns=**large --traceback
+  adding large as a largefile
+
+  $ cd ../a
+
 Clone a largefiles repo.
 
   $ hg clone . ../b
@@ -988,7 +1128,8 @@ largefiles clients refuse to push largefiles repos to vanilla servers
   $ cd ..
 
 putlfile errors are shown (issue3123)
-Corrupt the cached largefile in r7
+Corrupt the cached largefile in r7 and in the usercache (required for testing on vfat)
+  $ echo corruption > "$TESTTMP/r7/.hg/largefiles/4cdac4d8b084d0b599525cf732437fb337d422a8"
   $ echo corruption > "$USERCACHE/4cdac4d8b084d0b599525cf732437fb337d422a8"
   $ hg init empty
   $ hg serve -R empty -d -p $HGPORT1 --pid-file hg.pid \

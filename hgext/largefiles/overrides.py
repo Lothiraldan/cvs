@@ -81,9 +81,16 @@ def addlargefiles(ui, repo, *pats, **opts):
                 ui.warn(_('%s already a largefile\n') % f)
             continue
 
-        if exact or not exists:
+        if (exact or not exists) and not lfutil.isstandin(f):
+            wfile = repo.wjoin(f)
+
+            # In case the file was removed previously, but not committed
+            # (issue3507)
+            if not os.path.exists(wfile):
+                continue
+
             abovemin = (lfsize and
-                        os.lstat(repo.wjoin(f)).st_size >= lfsize * 1024 * 1024)
+                        os.lstat(wfile).st_size >= lfsize * 1024 * 1024)
             if large or abovemin or (lfmatcher and lfmatcher(f)):
                 lfnames.append(f)
                 if ui.verbose or not exact:
@@ -1001,8 +1008,9 @@ def overrideaddremove(orig, ui, repo, *pats, **opts):
     # we don't remove the standin in the largefiles code, preventing a very
     # confused state later.
     if missing:
+        m = [repo.wjoin(f) for f in missing]
         repo._isaddremove = True
-        removelargefiles(ui, repo, *missing, **opts)
+        removelargefiles(ui, repo, *m, **opts)
         repo._isaddremove = False
     # Call into the normal add code, and any files that *should* be added as
     # largefiles will be
