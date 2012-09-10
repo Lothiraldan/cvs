@@ -13,7 +13,7 @@
   > patterns=glob:**.dat
   > usercache=${USERCACHE}
   > [hooks]
-  > precommit=sh -c "echo \"Invoking status precommit hook\"; hg status"
+  > precommit=sh -c "echo \\"Invoking status precommit hook\\"; hg status"
   > EOF
 
 Create the repo with a couple of revisions of both large and normal
@@ -200,7 +200,7 @@ Test display of largefiles in hgweb
   -rw-r--r-- 9 normal4
   
   
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 #endif
 
 Test archiving the various revisions.  These hit corner cases known with
@@ -434,7 +434,7 @@ Test 3364
   $ cd ../addrm
   $ cat >> .hg/hgrc <<EOF
   > [hooks]
-  > post-commit.stat=sh -c "echo \"Invoking status postcommit hook\"; hg status -A"
+  > post-commit.stat=sh -c "echo \\"Invoking status postcommit hook\\"; hg status -A"
   > EOF
   $ touch foo
   $ hg add --large foo
@@ -1166,7 +1166,7 @@ largefiles can be pushed locally (issue3583)
   [255]
 
 used all HGPORTs, kill all daemons
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 #endif
 
 vanilla clients locked out from largefiles ssh repos
@@ -1252,7 +1252,7 @@ Push a largefiles repository to a served empty repository
   $ rm -rf empty
 
 used all HGPORTs, kill all daemons
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 
 #endif
 
