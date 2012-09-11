@@ -136,7 +136,7 @@ pypats = [
     (r'\w[+/*\-<>]\w', "missing whitespace in expression"),
     (r'^\s+\w+=\w+[^,)\n]$', "missing whitespace in assignment"),
     (r'(\s+)try:\n((?:\n|\1\s.*\n)+?)\1except.*?:\n'
-     r'((?:\n|\1\s.*\n)+?)\1finally:', 'no try/except/finally in Py2.4'),
+     r'((?:\n|\1\s.*\n)+?)\1finally:', 'no try/except/finally in Python 2.4'),
     (r'.{81}', "line too long"),
     (r' x+[xo][\'"]\n\s+[\'"]x', 'string join across lines with no space'),
     (r'[^\n]\Z', "no trailing newline"),
@@ -190,8 +190,8 @@ pypats = [
      'hasattr(foo, bar) is broken, use util.safehasattr(foo, bar) instead'),
     (r'opener\([^)]*\).read\(',
      "use opener.read() instead"),
-    (r'BaseException', 'not in Py2.4, use Exception'),
-    (r'os\.path\.relpath', 'os.path.relpath is not in Py2.5'),
+    (r'BaseException', 'not in Python 2.4, use Exception'),
+    (r'os\.path\.relpath', 'os.path.relpath is not in Python 2.5'),
     (r'opener\([^)]*\).write\(',
      "use opener.write() instead"),
     (r'[\s\(](open|file)\([^)]*\)\.read\(',
@@ -321,7 +321,7 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
     :f: filepath
     :logfunc: function used to report error
               logfunc(filename, linenumber, linecontent, errormessage)
-    :maxerr: number of error to display before arborting.
+    :maxerr: number of error to display before aborting.
              Set to false (default) to report all errors
 
     return True if no error is found, False otherwise.
@@ -365,7 +365,7 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
                 p, msg = pat
                 ignore = None
 
-            # fix-up regexes for multiline searches
+            # fix-up regexes for multi-line searches
             po = p
             # \s doesn't match \n
             p = re.sub(r'(?<!\\)\\s', r'[ \\t]', p)

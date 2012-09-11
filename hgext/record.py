@@ -33,7 +33,7 @@ def scanpatch(fp):
     - ('file',    [header_lines + fromfile + tofile])
     - ('context', [context_lines])
     - ('hunk',    [hunk_lines])
-    - ('range',   (-start,len, +start,len, diffp))
+    - ('range',   (-start,len, +start,len, proc))
     """
     lr = patch.linereader(fp)
 
@@ -495,6 +495,9 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
     if not ui.interactive():
         raise util.Abort(_('running non-interactively, use %s instead') %
                          cmdsuggest)
+
+    # make sure username is set before going interactive
+    ui.username()
 
     def recordfunc(ui, repo, message, match, opts):
         """This is generic record driver.

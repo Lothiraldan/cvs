@@ -45,7 +45,6 @@ makedir = platform.makedir
 nlinks = platform.nlinks
 normpath = platform.normpath
 normcase = platform.normcase
-nulldev = platform.nulldev
 openhardlinks = platform.openhardlinks
 oslink = platform.oslink
 parsepatchoutput = platform.parsepatchoutput
@@ -800,7 +799,7 @@ def mktempcopy(name, emptyok=False, createmode=None):
     return temp
 
 class atomictempfile(object):
-    '''writeable file object that atomically updates a file
+    '''writable file object that atomically updates a file
 
     All writes will go to a temporary copy of the original file. Call
     close() when you are done writing, and atomictempfile will rename
@@ -1240,7 +1239,7 @@ def MBTextWrapper(**kwargs):
         so overriding is needed to use width information of each characters.
 
         In addition, characters classified into 'ambiguous' width are
-        treated as wide in east asian area, but as narrow in other.
+        treated as wide in East Asian area, but as narrow in other.
 
         This requires use decision to determine width of such characters.
         """
@@ -1301,7 +1300,7 @@ def MBTextWrapper(**kwargs):
                 width = self.width - len(indent)
 
                 # First chunk on line is whitespace -- drop it, unless this
-                # is the very beginning of the text (ie. no lines started yet).
+                # is the very beginning of the text (i.e. no lines started yet).
                 if self.drop_whitespace and chunks[-1].strip() == '' and lines:
                     del chunks[-1]
 
@@ -1478,7 +1477,11 @@ _hextochr = dict((a + b, chr(int(a + b, 16)))
                  for a in _hexdig for b in _hexdig)
 
 def _urlunquote(s):
-    """unquote('abc%20def') -> 'abc def'."""
+    """Decode HTTP/HTML % encoding.
+
+    >>> _urlunquote('abc%20def')
+    'abc def'
+    """
     res = s.split('%')
     # fastpath
     if len(res) == 1:

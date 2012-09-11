@@ -300,12 +300,14 @@ class localrepository(object):
         """hiddenrevs: revs that should be hidden by command and tools
 
         This set is carried on the repo to ease initialization and lazy
-        loading it'll probably move back to changelog for efficiently and
-        consistency reason
+        loading; it'll probably move back to changelog for efficiency and
+        consistency reasons.
 
         Note that the hiddenrevs will needs invalidations when
         - a new changesets is added (possible unstable above extinct)
         - a new obsolete marker is added (possible new extinct changeset)
+
+        hidden changesets cannot have non-hidden descendants
         """
         hidden = set()
         if self.obsstore:
@@ -712,7 +714,7 @@ class localrepository(object):
             # Remove candidate heads that no longer are in the repo (e.g., as
             # the result of a strip that just happened).  Avoid using 'node in
             # self' here because that dives down into branchcache code somewhat
-            # recrusively.
+            # recursively.
             bheadrevs = [self.changelog.rev(node) for node in bheads
                          if self.changelog.hasnode(node)]
             newheadrevs = [self.changelog.rev(node) for node in newnodes
@@ -1040,6 +1042,7 @@ class localrepository(object):
 
         self._branchcache = None # in UTF-8
         self._branchcachetip = None
+        obsolete.clearobscaches(self)
 
     def invalidatedirstate(self):
         '''Invalidates the dirstate, causing the next call to dirstate
@@ -1312,6 +1315,7 @@ class localrepository(object):
                 matched = set(changes[0] + changes[1] + changes[2])
 
                 for f in match.files():
+                    f = self.dirstate.normalize(f)
                     if f == '.' or f in matched or f in wctx.substate:
                         continue
                     if f in changes[3]: # missing
@@ -1478,7 +1482,7 @@ class localrepository(object):
         and you also know the set of candidate new heads that may have resulted
         from the destruction, you can set newheadnodes.  This will enable the
         code to update the branchheads cache, rather than having future code
-        decide it's invalid and regenrating it from scratch.
+        decide it's invalid and regenerating it from scratch.
         '''
         # If we have info, newheadnodes, on how to update the branch cache, do
         # it, Otherwise, since nodes were destroyed, the cache is stale and this
@@ -1924,7 +1928,7 @@ class localrepository(object):
                     #     missing = ((commonheads::missingheads) - commonheads)
                     #
                     # We can pick:
-                    # * missingheads part of comon (::commonheads)
+                    # * missingheads part of common (::commonheads)
                     common = set(outgoing.common)
                     cheads = [node for node in revs if node in common]
                     # and
@@ -2401,6 +2405,7 @@ class localrepository(object):
             self.ui.status(_("added %d changesets"
                              " with %d changes to %d files%s\n")
                              % (changesets, revisions, files, htext))
+            obsolete.clearobscaches(self)
 
             if changesets > 0:
                 p = lambda: cl.writepending() and self.root or ""
@@ -2538,7 +2543,7 @@ class localrepository(object):
         # uncompressed only if compatible.
 
         if not stream:
-            # if the server explicitly prefer to stream (for fast LANs)
+            # if the server explicitly prefers to stream (for fast LANs)
             stream = remote.capable('stream-preferred')
 
         if stream and not heads:

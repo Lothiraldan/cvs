@@ -25,7 +25,7 @@ Nothing to amend:
 
   $ cat >> $HGRCPATH <<EOF
   > [hooks]
-  > pretxncommit.foo = sh -c "echo \"pretxncommit \$HG_NODE\"; hg id -r \$HG_NODE"
+  > pretxncommit.foo = sh -c "echo \\"pretxncommit \$HG_NODE\\"; hg id -r \$HG_NODE"
   > EOF
 
 Amending changeset with changes in working dir:
@@ -167,6 +167,8 @@ Same, but with changes in working dir (different code path):
   $ echo a >> a
   $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg commit --amend -v
   amending changeset ffb49186f961
+  a
+  copying changeset a4f8a65b7c6a to ad120869acf0
   another precious commit message
   
   
@@ -177,9 +179,7 @@ Same, but with changes in working dir (different code path):
   HG: branch 'default'
   HG: changed a
   a
-  copying changeset 27f3aacd3011 to ad120869acf0
-  a
-  stripping intermediate changeset 27f3aacd3011
+  stripping intermediate changeset a4f8a65b7c6a
   stripping amended changeset ffb49186f961
   2 changesets found
   saved backup bundle to $TESTTMP/.hg/strip-backup/ffb49186f961-amend-backup.hg (glob)
@@ -355,3 +355,90 @@ first graft something so there's an additional entry:
   $ hg log -r . --debug | grep extra
   extra:       branch=a
   extra:       source=2647734878ef0236dda712fae9c1651cf694ea8a
+
+Preserve phase
+
+  $ hg phase '.^::.'
+  11: draft
+  13: draft
+  $ hg phase --secret --force .
+  $ hg phase '.^::.'
+  11: draft
+  13: secret
+  $ hg commit --amend -m 'amend for phase' -q
+  $ hg phase '.^::.'
+  11: draft
+  13: secret
+
+Test amend with obsolete
+---------------------------
+
+Enable obsolete
+
+  $ cat > ${TESTTMP}/obs.py << EOF
+  > import mercurial.obsolete
+  > mercurial.obsolete._enabled = True
+  > EOF
+  $ echo '[extensions]' >> $HGRCPATH
+  $ echo "obs=${TESTTMP}/obs.py" >> $HGRCPATH
+
+
+Amend with no files changes
+
+  $ hg id -n
+  13
+  $ hg ci --amend -m 'babar'
+  $ hg id -n
+  14
+  $ hg log -Gl 3 --style=compact
+  @  14[tip]:11   43df5a5434ad   1970-01-01 00:00 +0000   test
+  |    babar
+  |
+  | o  12:0   2647734878ef   1970-01-01 00:00 +0000   test
+  | |    fork
+  | |
+  o |  11   7e09f708a0e9   1970-01-01 00:00 +0000   test
+  | |    a''
+  | |
+  $ hg log -Gl 4 --hidden --style=compact
+  @  14[tip]:11   43df5a5434ad   1970-01-01 00:00 +0000   test
+  |    babar
+  |
+  | x  13:11   175fafee6f44   1970-01-01 00:00 +0000   test
+  |/     amend for phase
+  |
+  | o  12:0   2647734878ef   1970-01-01 00:00 +0000   test
+  | |    fork
+  | |
+  o |  11   7e09f708a0e9   1970-01-01 00:00 +0000   test
+  | |    a''
+  | |
+
+Amend with files changes
+
+(note: the extra commit over 15 is a temporary junk I would be happy to get
+ride of)
+
+  $ echo 'babar' >> a
+  $ hg commit --amend
+  $ hg log -Gl 6 --hidden --style=compact
+  @  16[tip]:11   31e0a4a1b04a   1970-01-01 00:00 +0000   test
+  |    babar
+  |
+  | x  15   053c696ada75   1970-01-01 00:00 +0000   test
+  | |    temporary amend commit for 43df5a5434ad
+  | |
+  | x  14:11   43df5a5434ad   1970-01-01 00:00 +0000   test
+  |/     babar
+  |
+  | x  13:11   175fafee6f44   1970-01-01 00:00 +0000   test
+  |/     amend for phase
+  |
+  | o  12:0   2647734878ef   1970-01-01 00:00 +0000   test
+  | |    fork
+  | |
+  o |  11   7e09f708a0e9   1970-01-01 00:00 +0000   test
+  | |    a''
+  | |
+
+

@@ -53,7 +53,7 @@ works on all supported Bugzilla versions.
 Configuration items common to all access modes:
 
 bugzilla.version
-  This access type to use. Values recognized are:
+  The access type to use. Values recognized are:
 
   :``xmlrpc``:       Bugzilla XMLRPC interface.
   :``xmlrpc+email``: Bugzilla XMLRPC and email interfaces.
@@ -516,7 +516,7 @@ class bzmysql_3_0(bzmysql_2_18):
             raise util.Abort(_('unknown database schema'))
         return ids[0][0]
 
-# Buzgilla via XMLRPC interface.
+# Bugzilla via XMLRPC interface.
 
 class cookietransportrequest(object):
     """A Transport request method that retains cookies over its lifetime.

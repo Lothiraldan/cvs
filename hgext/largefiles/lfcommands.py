@@ -65,7 +65,7 @@ def lfconvert(ui, src, dest, *pats, **opts):
         dstlock = rdst.lock()
 
         # Get a list of all changesets in the source.  The easy way to do this
-        # is to simply walk the changelog, using changelog.nodesbewteen().
+        # is to simply walk the changelog, using changelog.nodesbetween().
         # Take a look at mercurial/revlog.py:639 for more details.
         # Use a generator instead of a list to decrease memory usage
         ctxs = (rsrc[ctx] for ctx in rsrc.changelog.nodesbetween(None,
@@ -177,7 +177,7 @@ def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
         if f not in lfiles and f not in normalfiles:
             islfile = _islfile(f, ctx, matcher, size)
             # If this file was renamed or copied then copy
-            # the lfileness of its predecessor
+            # the largefile-ness of its predecessor
             if f in ctx.manifest():
                 fctx = ctx.filectx(f)
                 renamed = fctx.renamed()
@@ -444,11 +444,13 @@ def updatelfiles(ui, repo, filelist=None, printmessage=True):
             cachelfiles(ui, repo, '.', lfiles)
 
         updated, removed = 0, 0
-        for i in map(lambda f: _updatelfile(repo, lfdirstate, f), lfiles):
-            # increment the appropriate counter according to _updatelfile's
-            # return value
-            updated += i > 0 and i or 0
-            removed -= i < 0 and i or 0
+        for f in lfiles:
+            i = _updatelfile(repo, lfdirstate, f)
+            if i:
+                if i > 0:
+                    updated += i
+                else:
+                    removed -= i
             if printmessage and (removed or updated) and not printed:
                 ui.status(_('getting changed largefiles\n'))
                 printed = True

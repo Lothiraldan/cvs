@@ -1522,7 +1522,7 @@ class queue(object):
             #
             # this should really read:
             #   mm, dd, aa = repo.status(top, patchparent)[:3]
-            # but we do it backwards to take advantage of manifest/chlog
+            # but we do it backwards to take advantage of manifest/changelog
             # caching against the next repo.status call
             mm, aa, dd = repo.status(patchparent, top)[:3]
             changes = repo.changelog.read(top)
@@ -1535,7 +1535,7 @@ class queue(object):
                 # if amending a patch, we start with existing
                 # files plus specified files - unfiltered
                 match = scmutil.matchfiles(repo, mm + aa + dd + matchfn.files())
-                # filter with inc/exl options
+                # filter with include/exclude options
                 matchfn = scmutil.match(repo[None], opts=opts)
             else:
                 match = scmutil.matchall(repo)
@@ -3187,7 +3187,7 @@ def finish(ui, repo, *revrange, **opts):
         ui.warn(_('warning: uncommitted changes in the working directory\n'))
     # queue.finish may changes phases but leave the responsibility to lock the
     # repo to the caller to avoid deadlock with wlock. This command code is
-    # responsability for this locking.
+    # responsibility for this locking.
     lock = repo.lock()
     try:
         q.finish(repo, revs)

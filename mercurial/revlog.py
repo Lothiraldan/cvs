@@ -1015,7 +1015,7 @@ class revlog(object):
         see addrevision for argument descriptions.
         invariants:
         - text is optional (can be None); if not set, cachedelta must be set.
-          if both are set, they must correspond to eachother.
+          if both are set, they must correspond to each other.
         """
         btext = [text]
         def buildtext():

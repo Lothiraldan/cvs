@@ -159,7 +159,7 @@ def get(repo, status):
     Return a list of revision(s) that match the given status:
 
     - ``good``, ``bad``, ``skip``: csets explicitly marked as good/bad/skip
-    - ``goods``, ``bads``      : csets topologicaly good/bad
+    - ``goods``, ``bads``      : csets topologically good/bad
     - ``range``              : csets taking part in the bisection
     - ``pruned``             : csets that are goods, bads or skipped
     - ``untested``           : csets whose fate is yet unknown
@@ -200,7 +200,7 @@ def get(repo, status):
 
         # 'ignored' is all csets that were not used during the bisection
         # due to DAG topology, but may however have had an impact.
-        # Eg., a branch merged between bads and goods, but whose branch-
+        # E.g., a branch merged between bads and goods, but whose branch-
         # point is out-side of the range.
         iba = '::bisect(bad) - ::bisect(good)'  # Ignored bads' ancestors
         iga = '::bisect(good) - ::bisect(bad)'  # Ignored goods' ancestors

@@ -543,7 +543,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
           hg bisect --good
           hg bisect --bad
 
-      - mark the current revision, or a known revision, to be skipped (eg. if
+      - mark the current revision, or a known revision, to be skipped (e.g. if
         that revision is not usable because of another issue)::
 
           hg bisect --skip
@@ -1352,20 +1352,20 @@ def commit(ui, repo, *pats, **opts):
         # printed anyway.
         #
         # Par Msg Comment
-        # NN   y  additional topo root
+        # N N  y  additional topo root
         #
-        # BN   y  additional branch root
-        # CN   y  additional topo head
-        # HN   n  usual case
+        # B N  y  additional branch root
+        # C N  y  additional topo head
+        # H N  n  usual case
         #
-        # BB   y  weird additional branch root
-        # CB   y  branch merge
-        # HB   n  merge with named branch
+        # B B  y  weird additional branch root
+        # C B  y  branch merge
+        # H B  n  merge with named branch
         #
-        # CC   y  additional head from merge
-        # CH   n  merge with a head
+        # C C  y  additional head from merge
+        # C H  n  merge with a head
         #
-        # HH   n  head merge: head count decreases
+        # H H  n  head merge: head count decreases
 
     if not opts.get('close_branch'):
         for r in parents:
@@ -1997,6 +1997,10 @@ def debuginstall(ui):
         ui.write(" %s\n" % inst)
         ui.write(_(" (check that your locale is properly set)\n"))
         problems += 1
+
+    # Python lib
+    ui.status(_("checking Python lib (%s)...\n")
+              % os.path.dirname(os.__file__))
 
     # compiled modules
     ui.status(_("checking installed modules (%s)...\n")
@@ -4269,7 +4273,7 @@ def merge(ui, repo, node=None, **opts):
                              hint=_("run 'hg heads .' to see heads"))
 
         parent = repo.dirstate.p1()
-        if len(nbhs) == 1:
+        if len(nbhs) <= 1:
             if len(bheads) > 1:
                 raise util.Abort(_("heads are bookmarked - "
                                    "please merge with an explicit rev"),
