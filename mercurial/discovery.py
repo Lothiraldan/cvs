@@ -7,7 +7,7 @@
 
 from node import nullid, short
 from i18n import _
-import util, setdiscovery, treediscovery, phases, obsolete
+import util, setdiscovery, treediscovery, phases, obsolete, bookmarks
 
 def findcommonincoming(repo, remote, heads=None, force=False):
     """Return a tuple (common, anyincoming, heads) used to identify the common
@@ -255,7 +255,7 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
         rnode = remotebookmarks.get(bm)
         if rnode and rnode in repo:
             lctx, rctx = repo[bm], repo[rnode]
-            if rctx == lctx.ancestor(rctx):
+            if bookmarks.validdest(repo, rctx, lctx):
                 bookmarkedheads.add(lctx.node())
 
     # 3. Check for new heads.
@@ -264,24 +264,26 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
     error = None
     unsynced = False
     allmissing = set(outgoing.missing)
+    allfuturecommon = set(c.node() for c in repo.set('%ld', outgoing.common))
+    allfuturecommon.update(allmissing)
     for branch, heads in headssum.iteritems():
         if heads[0] is None:
             # Maybe we should abort if we push more that one head
             # for new branches ?
             continue
-        if heads[2]:
-            unsynced = True
-        oldhs = set(heads[0])
         candidate_newhs = set(heads[1])
         # add unsynced data
+        oldhs = set(heads[0])
         oldhs.update(heads[2])
         candidate_newhs.update(heads[2])
         dhs = None
+        discardedheads = set()
         if repo.obsstore:
             # remove future heads which are actually obsolete by another
             # pushed element:
             #
-            # XXX There is several case this case does not handle properly
+            # XXX as above, There are several cases this case does not handle
+            # XXX properly
             #
             # (1) if <nh> is public, it won't be affected by obsolete marker
             #     and a new is created
@@ -293,13 +295,19 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
             # more tricky for unsynced changes.
             newhs = set()
             for nh in candidate_newhs:
-                for suc in obsolete.anysuccessors(repo.obsstore, nh):
-                    if suc != nh and suc in allmissing:
-                        break
-                else:
+                if nh in repo and repo[nh].phase() <= phases.public:
                     newhs.add(nh)
+                else:
+                    for suc in obsolete.anysuccessors(repo.obsstore, nh):
+                        if suc != nh and suc in allfuturecommon:
+                            discardedheads.add(nh)
+                            break
+                    else:
+                        newhs.add(nh)
         else:
             newhs = candidate_newhs
+        if [h for h in heads[2] if h not in discardedheads]:
+            unsynced = True
         if len(newhs) > len(oldhs):
             # strip updates to existing remote heads from the new heads list
             dhs = list(newhs - bookmarkedheads - oldhs)

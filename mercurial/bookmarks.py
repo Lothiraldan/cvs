@@ -7,7 +7,7 @@
 
 from mercurial.i18n import _
 from mercurial.node import hex
-from mercurial import encoding, error, util
+from mercurial import encoding, error, util, obsolete, phases
 import errno, os
 
 def valid(mark):
@@ -209,7 +209,7 @@ def updatefromremote(ui, repo, remote, path):
                 cl = repo[nl]
                 if cl.rev() >= cr.rev():
                     continue
-                if cr in cl.descendants():
+                if validdest(repo, cl, cr):
                     repo._bookmarks[k] = cr.node()
                     changed = True
                     ui.status(_("updating bookmark %s\n") % k)
@@ -252,3 +252,33 @@ def diff(ui, repo, remote):
         ui.status(_("no changed bookmarks found\n"))
         return 1
     return 0
+
+def validdest(repo, old, new):
+    """Is the new bookmark destination a valid update from the old one"""
+    if old == new:
+        # Old == new -> nothing to update.
+        validdests = ()
+    elif not old:
+        # old is nullrev, anything is valid.
+        # (new != nullrev has been excluded by the previous check)
+        validdests = (new,)
+    elif repo.obsstore:
+        # We only need this complicated logic if there is obsolescence
+        # XXX will probably deserve an optimised rset.
+
+        validdests = set([old])
+        plen = -1
+        # compute the whole set of successors or descendants
+        while len(validdests) != plen:
+            plen = len(validdests)
+            succs = set(c.node() for c in validdests)
+            for c in validdests:
+                if c.phase() > phases.public:
+                    # obsolescence marker does not apply to public changeset
+                    succs.update(obsolete.anysuccessors(repo.obsstore,
+                                                        c.node()))
+            validdests = set(repo.set('%ln::', succs))
+        validdests.remove(old)
+    else:
+        validdests = old.descendants()
+    return new in validdests
