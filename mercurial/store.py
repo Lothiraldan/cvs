@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import osutil, scmutil, util, parsers
+import scmutil, util, parsers
 import os, stat, errno
 
 _sha = util.sha1
@@ -227,7 +227,7 @@ def _hybridencode(path, dotencode):
     characters are encoded as '~xx', where xx is the two digit hex code
     of the character (see encodefilename).
     Relevant path components consisting of Windows reserved filenames are
-    masked by encoding the third character ('aux' -> 'au~78', see auxencode).
+    masked by encoding the third character ('aux' -> 'au~78', see _auxencode).
 
     Hashed encoding (not reversible):
 
@@ -311,9 +311,10 @@ class basicstore(object):
         l = []
         if self.rawvfs.isdir(path):
             visit = [path]
+            readdir = self.rawvfs.readdir
             while visit:
                 p = visit.pop()
-                for f, kind, st in osutil.listdir(p, stat=True):
+                for f, kind, st in readdir(p, stat=True):
                     fp = p + '/' + f
                     if kind == stat.S_IFREG and f[-2:] in ('.d', '.i'):
                         n = util.pconvert(fp[striplen:])
@@ -340,6 +341,17 @@ class basicstore(object):
 
     def write(self):
         pass
+
+    def __contains__(self, path):
+        '''Checks if the store contains path'''
+        path = "/".join(("data", path))
+        # file?
+        if os.path.exists(self.join(path + ".i")):
+            return True
+        # dir?
+        if not path.endswith("/"):
+            path = path + "/"
+        return os.path.exists(self.join(path))
 
 class encodedstore(basicstore):
     def __init__(self, path, vfstype):
@@ -414,10 +426,19 @@ class fncache(object):
             self._dirty = True
             self.entries.add(fn)
 
-    def __contains__(self, fn):
+    def __contains__(self, path):
         if self.entries is None:
             self._load()
-        return fn in self.entries
+        # Check for files (exact match)
+        if path + ".i" in self.entries:
+            return True
+        # Now check for directories (prefix match)
+        if not path.endswith('/'):
+            path += '/'
+        for e in self.entries:
+            if e.startswith(path):
+                return True
+        return False
 
     def __iter__(self):
         if self.entries is None:
@@ -499,6 +520,11 @@ class fncachestore(basicstore):
 
     def write(self):
         self.fncache.write()
+
+    def __contains__(self, path):
+        '''Checks if the store contains path'''
+        path = "/".join(("data", path))
+        return path in self.fncache
 
 def store(requirements, path, vfstype):
     if 'store' in requirements:

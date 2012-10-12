@@ -283,21 +283,6 @@ def rename(src, dst):
     shutil.copy(src, dst)
     os.remove(src)
 
-def splitnewlines(text):
-    '''like str.splitlines, but only split on newlines.
-    keep line endings.'''
-    i = 0
-    lines = []
-    while True:
-        n = text.find('\n', i)
-        if n == -1:
-            last = text[i:]
-            if last:
-                lines.append(last)
-            return lines
-        lines.append(text[i:n + 1])
-        i = n + 1
-
 def parsehghaveoutput(lines):
     '''Parse hghave log lines.
     Return tuple of lists (missing, failed):
@@ -684,14 +669,13 @@ def tsttest(test, wd, options, replacements):
     pos = -1
     postout = []
     ret = 0
-    for n, l in enumerate(output):
+    for l in output:
         lout, lcmd = l, None
         if salt in l:
             lout, lcmd = l.split(salt, 1)
 
         if lout:
-            if lcmd:
-                # output block had no trailing newline, clean up
+            if not lout.endswith('\n'):
                 lout += ' (no-eol)\n'
 
             # find the expected output at the current position
@@ -762,7 +746,7 @@ def run(cmd, wd, options, replacements):
 
     for s, r in replacements:
         output = re.sub(s, r, output)
-    return ret, splitnewlines(output)
+    return ret, output.splitlines(True)
 
 def runone(options, test):
     '''tristate output:
@@ -925,7 +909,7 @@ def runone(options, test):
         refout = None                   # to match "out is None"
     elif os.path.exists(ref):
         f = open(ref, "r")
-        refout = list(splitnewlines(f.read()))
+        refout = f.read().splitlines(True)
         f.close()
     else:
         refout = []
@@ -936,6 +920,11 @@ def runone(options, test):
         for line in out:
             f.write(line)
         f.close()
+
+    def describe(ret):
+        if ret < 0:
+            return 'killed by signal %d' % -ret
+        return 'returned error code %d' % ret
 
     if skipped:
         mark = 's'
@@ -964,13 +953,13 @@ def runone(options, test):
                 showdiff(refout, out, ref, err)
             iolock.release()
         if ret:
-            fail("output changed and returned error code %d" % ret, ret)
+            fail("output changed and " + describe(ret), ret)
         else:
             fail("output changed", ret)
         ret = 1
     elif ret:
         mark = '!'
-        fail("returned error code %d" % ret, ret)
+        fail(describe(ret), ret)
     else:
         success()
 
