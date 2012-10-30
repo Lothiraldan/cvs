@@ -348,12 +348,13 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
 
             # we need to re-init the repo after manually copying the data
             # into it
-            destpeer = peer(ui, peeropts, dest)
+            destpeer = peer(srcrepo, peeropts, dest)
             srcrepo.hook('outgoing', source='clone',
                           node=node.hex(node.nullid))
         else:
             try:
-                destpeer = peer(ui, peeropts, dest, create=True)
+                destpeer = peer(srcrepo or ui, peeropts, dest, create=True)
+                                # only pass ui when no srcrepo
             except OSError, inst:
                 if inst.errno == errno.EEXIST:
                     dircleanup.close()
@@ -409,16 +410,32 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             if update:
                 if update is not True:
                     checkout = srcpeer.lookup(update)
-                for test in (checkout, '@', 'default', 'tip'):
-                    if test is None:
-                        continue
+                uprev = None
+                status = None
+                if checkout is not None:
                     try:
-                        uprev = destrepo.lookup(test)
-                        break
+                        uprev = destrepo.lookup(checkout)
                     except error.RepoLookupError:
-                        continue
-                bn = destrepo[uprev].branch()
-                destrepo.ui.status(_("updating to branch %s\n") % bn)
+                        pass
+                if uprev is None:
+                    try:
+                        uprev = destrepo._bookmarks['@']
+                        update = '@'
+                        bn = destrepo[uprev].branch()
+                        if bn == 'default':
+                            status = _("updating to bookmark @\n")
+                        else:
+                            status = _("updating to bookmark @ on branch %s\n"
+                                       % bn)
+                    except KeyError:
+                        try:
+                            uprev = destrepo.branchtip('default')
+                        except error.RepoLookupError:
+                            uprev = destrepo.lookup('tip')
+                if not status:
+                    bn = destrepo[uprev].branch()
+                    status = _("updating to branch %s\n") % bn
+                destrepo.ui.status(status)
                 _update(destrepo, uprev)
                 if update in destrepo._bookmarks:
                     bookmarks.setcurrent(destrepo, update)
