@@ -10,7 +10,7 @@ from i18n import _
 from lock import release
 from node import hex, nullid
 import localrepo, bundlerepo, httppeer, sshpeer, statichttprepo, bookmarks
-import lock, util, extensions, error, node, scmutil, phases
+import lock, util, extensions, error, node, scmutil, phases, url
 import cmdutil, discovery
 import merge as mergemod
 import verify as verifymod
@@ -88,6 +88,13 @@ def islocal(repo):
         except AttributeError:
             return False
     return repo.local()
+
+def openpath(ui, path):
+    '''open path with open if local, url.open if remote'''
+    if islocal(path):
+        return open(util.urllocalpath(path))
+    else:
+        return url.open(ui, path)
 
 def _peerorrepo(ui, path, create=False):
     """return a repository object for the specified path"""
@@ -452,9 +459,17 @@ def _showstats(repo, stats):
     repo.ui.status(_("%d files updated, %d files merged, "
                      "%d files removed, %d files unresolved\n") % stats)
 
+def updaterepo(repo, node, overwrite):
+    """Update the working directory to node.
+
+    When overwrite is set, changes are clobbered, merged else
+
+    returns stats (see pydoc mercurial.merge.applyupdates)"""
+    return mergemod.update(repo, node, False, overwrite, None)
+
 def update(repo, node):
     """update the working directory to node, merging linear changes"""
-    stats = mergemod.update(repo, node, False, False, None)
+    stats = updaterepo(repo, node, False)
     _showstats(repo, stats)
     if stats[3]:
         repo.ui.status(_("use 'hg resolve' to retry unresolved file merges\n"))
@@ -465,7 +480,7 @@ _update = update
 
 def clean(repo, node, show_stats=True):
     """forcibly switch the working directory to node, clobbering changes"""
-    stats = mergemod.update(repo, node, False, True, None)
+    stats = updaterepo(repo, node, True)
     if show_stats:
         _showstats(repo, stats)
     return stats[3] > 0
