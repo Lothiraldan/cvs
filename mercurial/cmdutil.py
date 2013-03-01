@@ -1210,6 +1210,13 @@ def walkchangerevs(repo, match, opts, prepare):
             if ff.match(x):
                 wanted.discard(x)
 
+    # Choose a small initial window if we will probably only visit a
+    # few commits.
+    limit = loglimit(opts)
+    windowsize = 8
+    if limit:
+        windowsize = min(limit, windowsize)
+
     # Now that wanted is correctly initialized, we can iterate over the
     # revision range, yielding only revisions in wanted.
     def iterate():
@@ -1221,7 +1228,7 @@ def walkchangerevs(repo, match, opts, prepare):
             def want(rev):
                 return rev in wanted
 
-        for i, window in increasingwindows(0, len(revs)):
+        for i, window in increasingwindows(0, len(revs), windowsize):
             nrevs = [rev for rev in revs[i:i + window] if want(rev)]
             for rev in sorted(nrevs):
                 fns = fncache.get(rev)
@@ -1820,6 +1827,52 @@ def commitforceeditor(repo, ctx, subs):
         raise util.Abort(_("empty commit message"))
 
     return text
+
+def commitstatus(repo, node, branch, bheads=None, opts={}):
+    ctx = repo[node]
+    parents = ctx.parents()
+
+    if (not opts.get('amend') and bheads and node not in bheads and not
+        [x for x in parents if x.node() in bheads and x.branch() == branch]):
+        repo.ui.status(_('created new head\n'))
+        # The message is not printed for initial roots. For the other
+        # changesets, it is printed in the following situations:
+        #
+        # Par column: for the 2 parents with ...
+        #   N: null or no parent
+        #   B: parent is on another named branch
+        #   C: parent is a regular non head changeset
+        #   H: parent was a branch head of the current branch
+        # Msg column: whether we print "created new head" message
+        # In the following, it is assumed that there already exists some
+        # initial branch heads of the current branch, otherwise nothing is
+        # printed anyway.
+        #
+        # Par Msg Comment
+        # N N  y  additional topo root
+        #
+        # B N  y  additional branch root
+        # C N  y  additional topo head
+        # H N  n  usual case
+        #
+        # B B  y  weird additional branch root
+        # C B  y  branch merge
+        # H B  n  merge with named branch
+        #
+        # C C  y  additional head from merge
+        # C H  n  merge with a head
+        #
+        # H H  n  head merge: head count decreases
+
+    if not opts.get('close_branch'):
+        for r in parents:
+            if r.closesbranch() and r.branch() == branch:
+                repo.ui.status(_('reopening closed branch head %d\n') % r)
+
+    if repo.ui.debugflag:
+        repo.ui.write(_('committed changeset %d:%s\n') % (int(ctx), ctx.hex()))
+    elif repo.ui.verbose:
+        repo.ui.write(_('committed changeset %d:%s\n') % (int(ctx), ctx))
 
 def revert(ui, repo, ctx, parents, *pats, **opts):
     parent, p2 = parents

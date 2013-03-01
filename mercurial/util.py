@@ -880,6 +880,23 @@ def makedirs(name, mode=None):
     if mode is not None:
         os.chmod(name, mode)
 
+def ensuredirs(name, mode=None):
+    """race-safe recursive directory creation"""
+    if os.path.isdir(name):
+        return
+    parent = os.path.dirname(os.path.abspath(name))
+    if parent != name:
+        ensuredirs(parent, mode)
+    try:
+        os.mkdir(name)
+    except OSError, err:
+        if err.errno == errno.EEXIST and os.path.isdir(name):
+            # someone else seems to have won a directory creation race
+            return
+        raise
+    if mode is not None:
+        os.chmod(name, mode)
+
 def readfile(path):
     fp = open(path, 'rb')
     try:
@@ -1251,7 +1268,18 @@ def ellipsis(text, maxlength=400):
     except (UnicodeDecodeError, UnicodeEncodeError):
         return _ellipsis(text, maxlength)[0]
 
-_byteunits = (
+def unitcountfn(*unittable):
+    '''return a function that renders a readable count of some quantity'''
+
+    def go(count):
+        for multiplier, divisor, format in unittable:
+            if count >= divisor * multiplier:
+                return format % (count / float(divisor))
+        return unittable[-1][2] % count
+
+    return go
+
+bytecount = unitcountfn(
     (100, 1 << 30, _('%.0f GB')),
     (10, 1 << 30, _('%.1f GB')),
     (1, 1 << 30, _('%.2f GB')),
@@ -1263,14 +1291,6 @@ _byteunits = (
     (1, 1 << 10, _('%.2f KB')),
     (1, 1, _('%.0f bytes')),
     )
-
-def bytecount(nbytes):
-    '''return byte count formatted as readable string, with units'''
-
-    for multiplier, divisor, format in _byteunits:
-        if nbytes >= divisor * multiplier:
-            return format % (nbytes / float(divisor))
-    return _byteunits[-1][2] % nbytes
 
 def uirepr(s):
     # Avoid double backslash in Windows path repr()
@@ -1852,3 +1872,46 @@ def isatty(fd):
         return fd.isatty()
     except AttributeError:
         return False
+
+timecount = unitcountfn(
+    (1, 1e3, _('%.0f s')),
+    (100, 1, _('%.1f s')),
+    (10, 1, _('%.2f s')),
+    (1, 1, _('%.3f s')),
+    (100, 0.001, _('%.1f ms')),
+    (10, 0.001, _('%.2f ms')),
+    (1, 0.001, _('%.3f ms')),
+    (100, 0.000001, _('%.1f us')),
+    (10, 0.000001, _('%.2f us')),
+    (1, 0.000001, _('%.3f us')),
+    (100, 0.000000001, _('%.1f ns')),
+    (10, 0.000000001, _('%.2f ns')),
+    (1, 0.000000001, _('%.3f ns')),
+    )
+
+_timenesting = [0]
+
+def timed(func):
+    '''Report the execution time of a function call to stderr.
+
+    During development, use as a decorator when you need to measure
+    the cost of a function, e.g. as follows:
+
+    @util.timed
+    def foo(a, b, c):
+        pass
+    '''
+
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        indent = 2
+        _timenesting[0] += indent
+        try:
+            return func(*args, **kwargs)
+        finally:
+            elapsed = time.time() - start
+            _timenesting[0] -= indent
+            sys.stderr.write('%s%s: %s\n' %
+                             (' ' * _timenesting[0], func.__name__,
+                              timecount(elapsed)))
+    return wrapper

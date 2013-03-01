@@ -686,15 +686,8 @@ def hgupdaterepo(orig, repo, node, overwrite):
     return result
 
 def hgmerge(orig, repo, node, force=None, remind=True):
-    # Mark the repo as being in the middle of a merge, so that
-    # updatelfiles() will know that it needs to trust the standins in
-    # the working copy, not in the standins in the current node
-    repo._ismerging = True
-    try:
-        result = orig(repo, node, force, remind)
-        lfcommands.updatelfiles(repo.ui, repo)
-    finally:
-        repo._ismerging = False
+    result = orig(repo, node, force, remind)
+    lfcommands.updatelfiles(repo.ui, repo)
     return result
 
 # When we rebase a repository with remotely changed largefiles, we need to
@@ -733,23 +726,25 @@ def overridepull(orig, ui, repo, source=None, **opts):
         repo.lfpullsource = source
         oldheads = lfutil.getcurrentheads(repo)
         result = orig(ui, repo, source, **opts)
-        # If we do not have the new largefiles for any new heads we pulled, we
-        # will run into a problem later if we try to merge or rebase with one of
-        # these heads, so cache the largefiles now directly into the system
-        # cache.
-        numcached = 0
-        heads = lfutil.getcurrentheads(repo)
-        newheads = set(heads).difference(set(oldheads))
-        if len(newheads) > 0:
-            ui.status(_("caching largefiles for %s heads\n") % len(newheads))
-        for head in newheads:
-            (cached, missing) = lfcommands.cachelfiles(ui, repo, head)
-            numcached += len(cached)
-        ui.status(_("%d largefiles cached\n") % numcached)
+        if opts.get('cache_largefiles'):
+            # If you are pulling from a remote location that is not your
+            # default location, you may want to cache largefiles for new heads
+            # that have been pulled, so you can easily merge or rebase with
+            # them later
+            numcached = 0
+            heads = lfutil.getcurrentheads(repo)
+            newheads = set(heads).difference(set(oldheads))
+            if len(newheads) > 0:
+                ui.status(_("caching largefiles for %s heads\n") %
+                          len(newheads))
+            for head in newheads:
+                (cached, missing) = lfcommands.cachelfiles(ui, repo, head)
+                numcached += len(cached)
+            ui.status(_("%d largefiles cached\n") % numcached)
     if opts.get('all_largefiles'):
         revspostpull = len(repo)
         revs = []
-        for rev in xrange(revsprepull + 1, revspostpull):
+        for rev in xrange(revsprepull, revspostpull):
             revs.append(repo[rev].rev())
         lfcommands.downloadlfiles(ui, repo, revs)
     return result
@@ -771,17 +766,6 @@ def hgclone(orig, ui, opts, *args, **kwargs):
     if result is not None:
         sourcerepo, destrepo = result
         repo = destrepo.local()
-
-        # The .hglf directory must exist for the standin matcher to match
-        # anything (which listlfiles uses for each rev), and .hg/largefiles is
-        # assumed to exist by the code that caches the downloaded file.  These
-        # directories exist if clone updated to any rev.  (If the repo does not
-        # have largefiles, download never gets to the point of needing
-        # .hg/largefiles, and the standin matcher won't match anything anyway.)
-        if 'largefiles' in repo.requirements:
-            if opts.get('noupdate'):
-                util.makedirs(repo.wjoin(lfutil.shortname))
-                util.makedirs(repo.join(lfutil.longname))
 
         # Caching is implicitly limited to 'rev' option, since the dest repo was
         # truncated at that point.  The user may expect a download count with

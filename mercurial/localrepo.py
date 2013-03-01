@@ -1532,12 +1532,12 @@ class localrepository(object):
 
             modified, added, clean = [], [], []
             withflags = mf1.withflags() | mf2.withflags()
-            for fn in mf2:
+            for fn, mf2node in mf2.iteritems():
                 if fn in mf1:
                     if (fn not in deleted and
                         ((fn in withflags and mf1.flags(fn) != mf2.flags(fn)) or
-                         (mf1[fn] != mf2[fn] and
-                          (mf2[fn] or ctx1[fn].cmp(ctx2[fn]))))):
+                         (mf1[fn] != mf2node and
+                          (mf2node or ctx1[fn].cmp(ctx2[fn]))))):
                         modified.append(fn)
                     elif listclean:
                         clean.append(fn)
@@ -2399,6 +2399,12 @@ class localrepository(object):
                     for n in added:
                         self.hook("incoming", node=hex(n), source=srctype,
                                   url=url)
+
+                    newheads = [h for h in self.heads() if h not in oldheads]
+                    self.ui.log("incoming",
+                                "%s incoming changes - new heads: %s\n",
+                                len(added),
+                                ', '.join([hex(c[:6]) for c in newheads]))
                 self._afterlock(runhooks)
 
         finally:

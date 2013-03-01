@@ -456,14 +456,11 @@ def backout(ui, repo, node=None, rev=None, **opts):
     wlock = repo.wlock()
     try:
         branch = repo.dirstate.branch()
+        bheads = repo.branchheads(branch)
         hg.clean(repo, node, show_stats=False)
         repo.dirstate.setbranch(branch)
-        revert_opts = opts.copy()
-        revert_opts['date'] = None
-        revert_opts['all'] = True
-        revert_opts['rev'] = hex(parent)
-        revert_opts['no_backup'] = None
-        revert(ui, repo, **revert_opts)
+        rctx = scmutil.revsingle(repo, hex(parent))
+        cmdutil.revert(ui, repo, rctx, repo.dirstate.parents())
         if not opts.get('merge') and op1 != node:
             try:
                 ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
@@ -471,13 +468,18 @@ def backout(ui, repo, node=None, rev=None, **opts):
             finally:
                 ui.setconfig('ui', 'forcemerge', '')
 
-        commit_opts = opts.copy()
-        commit_opts['addremove'] = False
-        if not commit_opts['message'] and not commit_opts['logfile']:
+        e = cmdutil.commiteditor
+        if not opts['message'] and not opts['logfile']:
             # we don't translate commit messages
-            commit_opts['message'] = "Backed out changeset %s" % short(node)
-            commit_opts['force_editor'] = True
-        commit(ui, repo, **commit_opts)
+            opts['message'] = "Backed out changeset %s" % short(node)
+            e = cmdutil.commitforceeditor
+
+        def commitfunc(ui, repo, message, match, opts):
+            return repo.commit(message, opts.get('user'), opts.get('date'),
+                               match, editor=e)
+        newnode = cmdutil.commit(ui, repo, commitfunc, [], opts)
+        cmdutil.commitstatus(repo, newnode, branch, bheads)
+
         def nice(node):
             return '%d:%s' % (repo.changelog.rev(node), short(node))
         ui.status(_('changeset %s backs out changeset %s\n') %
@@ -1066,7 +1068,7 @@ def bundle(ui, repo, fname, dest=None, **opts):
         dest = ui.expandpath(dest or 'default-push', dest or 'default')
         dest, branches = hg.parseurl(dest, opts.get('branch'))
         other = hg.peer(repo, opts, dest)
-        revs, checkout = hg.addbranchrevs(repo, other, branches, revs)
+        revs, checkout = hg.addbranchrevs(repo, repo, branches, revs)
         heads = revs and map(repo.lookup, revs) or revs
         outgoing = discovery.findcommonoutgoing(repo, other,
                                                 onlyheads=heads,
@@ -1361,50 +1363,7 @@ def commit(ui, repo, *pats, **opts):
                 ui.status(_("nothing changed\n"))
             return 1
 
-    ctx = repo[node]
-    parents = ctx.parents()
-
-    if (not opts.get('amend') and bheads and node not in bheads and not
-        [x for x in parents if x.node() in bheads and x.branch() == branch]):
-        ui.status(_('created new head\n'))
-        # The message is not printed for initial roots. For the other
-        # changesets, it is printed in the following situations:
-        #
-        # Par column: for the 2 parents with ...
-        #   N: null or no parent
-        #   B: parent is on another named branch
-        #   C: parent is a regular non head changeset
-        #   H: parent was a branch head of the current branch
-        # Msg column: whether we print "created new head" message
-        # In the following, it is assumed that there already exists some
-        # initial branch heads of the current branch, otherwise nothing is
-        # printed anyway.
-        #
-        # Par Msg Comment
-        # N N  y  additional topo root
-        #
-        # B N  y  additional branch root
-        # C N  y  additional topo head
-        # H N  n  usual case
-        #
-        # B B  y  weird additional branch root
-        # C B  y  branch merge
-        # H B  n  merge with named branch
-        #
-        # C C  y  additional head from merge
-        # C H  n  merge with a head
-        #
-        # H H  n  head merge: head count decreases
-
-    if not opts.get('close_branch'):
-        for r in parents:
-            if r.closesbranch() and r.branch() == branch:
-                ui.status(_('reopening closed branch head %d\n') % r)
-
-    if ui.debugflag:
-        ui.write(_('committed changeset %d:%s\n') % (int(ctx), ctx.hex()))
-    elif ui.verbose:
-        ui.write(_('committed changeset %d:%s\n') % (int(ctx), ctx))
+    cmdutil.commitstatus(repo, node, branch, bheads, opts)
 
 @command('copy|cp',
     [('A', 'after', None, _('record a copy that has already occurred')),
@@ -4256,10 +4215,10 @@ def log(ui, repo, *pats, **opts):
         displayer.show(ctx, copies=copies, matchfn=revmatchfn)
 
     for ctx in cmdutil.walkchangerevs(repo, matchfn, opts, prep):
-        if count == limit:
-            break
         if displayer.flush(ctx.rev()):
             count += 1
+        if count == limit:
+            break
     displayer.close()
 
 @command('manifest',
