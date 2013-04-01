@@ -40,8 +40,6 @@ repo as "default" path in .hg/hgrc.
   adding file changes
   added 2 changesets with 1 changes to 1 files
   (run 'hg update' to get a working copy)
-  caching new largefiles
-  0 largefiles cached
 
 Update working directory to "tip", which requires largefile("large"),
 but there is no cache file for it.  So, hg must treat it as
@@ -83,8 +81,6 @@ Verify that largefiles from pulled branchheads are fetched, also to an empty rep
   adding file changes
   added 1 changesets with 1 changes to 1 files
   (run 'hg update' to get a working copy)
-  caching new largefiles
-  1 largefiles cached
 
 #if unix-permissions
 

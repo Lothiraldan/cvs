@@ -2,7 +2,7 @@
 '''helper extension to measure performance'''
 
 from mercurial import cmdutil, scmutil, util, match, commands, obsolete
-from mercurial import repoview, branchmap
+from mercurial import repoview, branchmap, merge
 import time, os, sys
 
 cmdtable = {}
@@ -122,6 +122,22 @@ def perfdirstatewrite(ui, repo):
     def d():
         ds._dirty = True
         ds.write()
+    timer(d)
+
+@command('perfmergecalculate',
+         [('r', 'rev', '.', 'rev to merge against')])
+def perfmergecalculate(ui, repo, rev):
+    wctx = repo[None]
+    rctx = scmutil.revsingle(repo, rev, rev)
+    ancestor = wctx.ancestor(rctx)
+    # we don't want working dir files to be stat'd in the benchmark, so prime
+    # that cache
+    wctx.dirty()
+    def d():
+        # acceptremote is True because we don't want prompts in the middle of
+        # our benchmark
+        merge.calculateupdates(repo, wctx, rctx, ancestor, False, False, False,
+                               acceptremote=True)
     timer(d)
 
 @command('perfmanifest')
@@ -268,7 +284,7 @@ def perfrevlog(ui, repo, file_, **opts):
 def perfrevset(ui, repo, expr, clear=False):
     """benchmark the execution time of a revset
 
-    Use the --clean option if need to evaluate the impact of build volative
+    Use the --clean option if need to evaluate the impact of build volatile
     revisions set cache on the revset execution. Volatile cache hold filtered
     and obsolete related cache."""
     def d():
@@ -361,6 +377,3 @@ def perfbranchmap(ui, repo, full=False):
     finally:
         branchmap.read = oldread
         branchmap.branchcache.write = oldwrite
-
-
-

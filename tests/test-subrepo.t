@@ -203,20 +203,19 @@ merge tests
   $ hg merge 6 --debug # test change
     searching for copies back to rev 2
   resolving manifests
-   overwrite: False, partial: False
+   branchmerge: True, force: False, partial: False
    ancestor: 1f14a2e2d3ec, local: f0d2028bf86d+, remote: 1831e14459c4
    .hgsubstate: versions differ -> m
   updating: .hgsubstate 1/1 files (100.00%)
   subrepo merge f0d2028bf86d+ 1831e14459c4 1f14a2e2d3ec
     subrepo t: other changed, get t:6747d179aa9a688023c4b0cad32e4c92bb7f34ad:hg
   getting subrepo t
-    searching for copies back to rev 1
   resolving manifests
-   overwrite: False, partial: False
+   branchmerge: False, force: False, partial: False
    ancestor: 60ca1237c194, local: 60ca1237c194+, remote: 6747d179aa9a
    t: remote is newer -> g
-  updating: t 1/1 files (100.00%)
   getting t
+  updating: t 1/1 files (100.00%)
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
   $ hg debugsub
@@ -232,7 +231,7 @@ merge tests
   $ HGMERGE=internal:merge hg merge --debug 7 # test conflict
     searching for copies back to rev 2
   resolving manifests
-   overwrite: False, partial: False
+   branchmerge: True, force: False, partial: False
    ancestor: 1831e14459c4, local: e45c8b14af55+, remote: f94576341bcf
    .hgsubstate: versions differ -> m
   updating: .hgsubstate 1/1 files (100.00%)
@@ -241,10 +240,10 @@ merge tests
   merging subrepo t
     searching for copies back to rev 2
   resolving manifests
-   overwrite: False, partial: False
+   branchmerge: True, force: False, partial: False
    ancestor: 6747d179aa9a, local: 20a0db6fbf6c+, remote: 7af322bc1198
    t: versions differ -> m
-  preserving t for resolve of t
+    preserving t for resolve of t
   updating: t 1/1 files (100.00%)
   picked tool 'internal:merge' for t (binary False symlink False)
   merging t
@@ -270,9 +269,9 @@ clone
   $ cd ..
   $ hg clone t tc
   updating to branch default
-  cloning subrepo s from $TESTTMP/t/s (glob)
+  cloning subrepo s from $TESTTMP/t/s
   cloning subrepo s/ss from $TESTTMP/t/s/ss (glob)
-  cloning subrepo t from $TESTTMP/t/t (glob)
+  cloning subrepo t from $TESTTMP/t/t
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd tc
   $ hg debugsub
@@ -293,10 +292,10 @@ push
   pushing subrepo s/ss to $TESTTMP/t/s/ss (glob)
   searching for changes
   no changes found
-  pushing subrepo s to $TESTTMP/t/s (glob)
+  pushing subrepo s to $TESTTMP/t/s
   searching for changes
   no changes found
-  pushing subrepo t to $TESTTMP/t/t (glob)
+  pushing subrepo t to $TESTTMP/t/t
   searching for changes
   adding changesets
   adding manifests
@@ -318,7 +317,7 @@ push -f
   pushing subrepo s/ss to $TESTTMP/t/s/ss (glob)
   searching for changes
   no changes found
-  pushing subrepo s to $TESTTMP/t/s (glob)
+  pushing subrepo s to $TESTTMP/t/s
   searching for changes
   abort: push creates new remote head 12a213df6fa9! (in subrepo s)
   (did you forget to merge? use push -f to force)
@@ -328,13 +327,13 @@ push -f
   pushing subrepo s/ss to $TESTTMP/t/s/ss (glob)
   searching for changes
   no changes found
-  pushing subrepo s to $TESTTMP/t/s (glob)
+  pushing subrepo s to $TESTTMP/t/s
   searching for changes
   adding changesets
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files (+1 heads)
-  pushing subrepo t to $TESTTMP/t/t (glob)
+  pushing subrepo t to $TESTTMP/t/t
   searching for changes
   no changes found
   searching for changes
@@ -367,7 +366,7 @@ pull
 should pull t
 
   $ hg up
-  pulling subrepo t from $TESTTMP/t/t (glob)
+  pulling subrepo t from $TESTTMP/t/t
   searching for changes
   adding changesets
   adding manifests
@@ -573,7 +572,7 @@ Issue1977: multirepo push should fail if subrepo push fails
   adding .hgsub
   $ hg clone repo repo2
   updating to branch default
-  cloning subrepo s from $TESTTMP/repo/s (glob)
+  cloning subrepo s from $TESTTMP/repo/s
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -q -R repo2 pull -u
   $ echo 1 > repo2/s/a

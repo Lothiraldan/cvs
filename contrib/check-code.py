@@ -80,6 +80,7 @@ testpats = [
     (r'^diff.*-\w*N', "don't use 'diff -N'"),
     (r'\$PWD|\${PWD}', "don't use $PWD, use `pwd`"),
     (r'^([^"\'\n]|("[^"\n]*")|(\'[^\'\n]*\'))*\^', "^ must be quoted"),
+    (r'kill (`|\$\()', "don't use kill, use killdaemons.py")
   ]
 ]
 
@@ -88,6 +89,7 @@ testfilters = [
     (r"<<(\S+)((.|\n)*?\n\1)", rephere),
 ]
 
+winglobmsg = "use (glob) to match Windows paths too"
 uprefix = r"^  \$ "
 utestpats = [
   [
@@ -100,11 +102,16 @@ utestpats = [
      "explicit exit code checks unnecessary"),
     (uprefix + r'set -e', "don't use set -e"),
     (uprefix + r'\s', "don't indent commands, use > for continued lines"),
-    (r'^  saved backup bundle to \$TESTTMP.*\.hg$',
-     "use (glob) to match Windows paths too"),
+    (r'^  saved backup bundle to \$TESTTMP.*\.hg$', winglobmsg),
+    (r'^  changeset .* references (corrupted|missing) \$TESTTMP/.*[^)]$',
+     winglobmsg),
+    (r'^  pulling from \$TESTTMP/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
   ],
   # warnings
-  []
+  [
+    (r'^  [^*?/\n]* \(glob\)$',
+     "warning: glob match with no glob character (?*/)"),
+  ]
 ]
 
 for i in [0, 1]:
@@ -212,7 +219,7 @@ pypats = [
     (r'(?i)descendent', "the proper spelling is descendAnt"),
     (r'\.debug\(\_', "don't mark debug messages for translation"),
     (r'\.strip\(\)\.split\(\)', "no need to strip before splitting"),
-    (r'^\s*except\s*:', "warning: naked except clause", r'#.*re-raises'),
+    (r'^\s*except\s*:', "naked except clause", r'#.*re-raises'),
     (r':\n(    )*( ){1,3}[^ ]', "must indent 4 spaces"),
     (r'ui\.(status|progress|write|note|warn)\([\'\"]x',
      "missing _() in ui message (use () to hide false-positives)"),

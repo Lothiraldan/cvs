@@ -179,7 +179,7 @@ editcomment = _("""# Edit history between %s and %s
 def commitfuncfor(repo, src):
     """Build a commit function for the replacement of <src>
 
-    This function ensure we apply the same treatement to all changesets.
+    This function ensure we apply the same treatment to all changesets.
 
     - Add a 'histedit_source' entry in extra.
 
@@ -498,8 +498,8 @@ def histedit(ui, repo, *parent, **opts):
         keep = opts.get('keep', False)
         revs = between(repo, parent, topmost, keep)
         if not revs:
-            ui.warn(_('nothing to edit\n'))
-            return 1
+            raise util.Abort(_('%s is not an ancestor of working directory') %
+                             node.short(parent))
 
         ctxs = [repo[r] for r in revs]
         rules = opts.get('commands', '')
@@ -583,7 +583,7 @@ def bootstrapcontinue(ui, repo, parentctx, rules, opts):
     if not newchildren:
         # `parentctxnode` should match but no result. This means that
         # currentnode is not a descendant from parentctxnode.
-        msg = _('working directory parent is not a descendant of %s')
+        msg = _('%s is not an ancestor of working directory')
         hint = _('update to %s or descendant and run "hg histedit '
                  '--continue" again') % parentctx
         raise util.Abort(msg % parentctx, hint=hint)
@@ -626,7 +626,7 @@ def bootstrapcontinue(ui, repo, parentctx, rules, opts):
                                      newchildren)
         replacements.extend(repl)
     elif newchildren:
-        # otherwize update "parentctx" before proceding to further operation
+        # otherwise update "parentctx" before proceeding to further operation
         parentctx = repo[newchildren[-1]]
     return parentctx, replacements
 
