@@ -282,7 +282,7 @@ def newcommit(repo, phase, *args, **kwargs):
     if phase is not None:
         backup = repo.ui.backupconfig('phases', 'new-commit')
     # Marking the repository as committing an mq patch can be used
-    # to optimize operations like _branchtags().
+    # to optimize operations like branchtags().
     repo._committingpatch = True
     try:
         if phase is not None:
@@ -1571,7 +1571,7 @@ class queue(object):
             r = list(dd)
             a = list(aa)
 
-            # create 'match' that includes the files to be recommited.
+            # create 'match' that includes the files to be recommitted.
             # apply matchfn via repo.status to ensure correct case handling.
             cm, ca, cr, cd = repo.status(patchparent, match=matchfn)[:4]
             allmatches = set(cm + ca + cr + cd)
@@ -3037,7 +3037,22 @@ def strip(ui, repo, *revs, **opts):
         wlock = repo.wlock()
         try:
             urev = repo.mq.qparents(repo, revs[0])
-            repo.dirstate.rebuild(urev, repo[urev].manifest())
+            uctx = repo[urev]
+
+            # only reset the dirstate for files that would actually change
+            # between the working context and uctx
+            descendantrevs = repo.revs("%s::." % uctx.rev())
+            changedfiles = []
+            for rev in descendantrevs:
+                # blindy reset the files, regardless of what actually changed
+                changedfiles.extend(repo[rev].files())
+
+            # reset files that only changed in the dirstate too
+            dirstate = repo.dirstate
+            dirchanges = [f for f in dirstate if dirstate[f] != 'n']
+            changedfiles.extend(dirchanges)
+
+            repo.dirstate.rebuild(urev, uctx.manifest(), changedfiles)
             repo.dirstate.write()
             update = False
         finally:
@@ -3452,6 +3467,12 @@ def reposetup(ui, repo):
             except error.LookupError:
                 self.ui.warn(_('mq status file refers to unknown node %s\n')
                              % short(mqtags[-1][0]))
+                return result
+
+            # do not add fake tags for filtered revisions
+            included = self.changelog.hasnode
+            mqtags = [mqt for mqt in mqtags if included(mqt[0])]
+            if not mqtags:
                 return result
 
             mqtags.append((mqtags[-1][0], 'qtip'))

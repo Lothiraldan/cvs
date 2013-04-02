@@ -426,12 +426,12 @@ class filectx(object):
             # repository is filtered this may lead to `filectx` trying to build
             # `changectx` for filtered revision. In such case we fallback to
             # creating `changectx` on the unfiltered version of the reposition.
-            # This fallback should not be an issue because`changectx` from
-            # `filectx` are not used in complexe operation that care about
+            # This fallback should not be an issue because `changectx` from
+            # `filectx` are not used in complex operations that care about
             # filtering.
             #
             # This fallback is a cheap and dirty fix that prevent several
-            # crash. It does not ensure the behavior is correct. However the
+            # crashes. It does not ensure the behavior is correct. However the
             # behavior was not correct before filtering either and "incorrect
             # behavior" is seen as better as "crash"
             #
@@ -1137,6 +1137,22 @@ class workingctx(changectx):
                 self._repo.dirstate.copy(source, dest)
             finally:
                 wlock.release()
+
+    def markcommitted(self, node):
+        """Perform post-commit cleanup necessary after commiting this workingctx
+
+        Specifically, this updates backing stores this working context
+        wraps to reflect the fact that the changes reflected by this
+        workingctx have been committed.  For example, it marks
+        modified and added files as normal in the dirstate.
+
+        """
+
+        for f in self.modified() + self.added():
+            self._repo.dirstate.normal(f)
+        for f in self.removed():
+            self._repo.dirstate.drop(f)
+        self._repo.dirstate.setparents(node)
 
     def dirs(self):
         return set(self._repo.dirstate.dirs())

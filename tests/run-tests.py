@@ -52,6 +52,7 @@ import signal
 import sys
 import tempfile
 import time
+import random
 import re
 import threading
 import killdaemons as killmod
@@ -540,6 +541,13 @@ def rematch(el, l):
 def globmatch(el, l):
     # The only supported special characters are * and ? plus / which also
     # matches \ on windows. Escaping of these caracters is supported.
+    if el + '\n' == l:
+        if os.name == 'nt':
+            # matching on "/" is not needed for this line
+            iolock.acquire()
+            print "\nInfo, unnecessary glob: %s (glob)" % el
+            iolock.release()
+        return True
     i, n = 0, len(el)
     res = ''
     while i < n:
@@ -622,6 +630,7 @@ def tsttest(test, wd, options, replacements):
         script.append('set -x\n')
     if os.getenv('MSYSTEM'):
         script.append('alias pwd="pwd -W"\n')
+    n = 0
     for n, l in enumerate(t):
         if not l.endswith('\n'):
             l += '\n'
@@ -1235,8 +1244,7 @@ def main():
         checktools()
 
         if len(args) == 0:
-            args = os.listdir(".")
-        args.sort()
+            args = sorted(os.listdir("."))
 
     tests = args
 
@@ -1252,7 +1260,11 @@ def main():
     os.environ['no_proxy'] = ''
     os.environ['NO_PROXY'] = ''
     os.environ['TERM'] = 'xterm'
-    os.environ['PYTHONHASHSEED'] = os.environ.get('PYTHONHASHSEED', 'random')
+    if 'PYTHONHASHSEED' not in os.environ:
+        # use a random python hash seed all the time
+        # we do the randomness ourself to know what seed is used
+        os.environ['PYTHONHASHSEED'] = str(random.getrandbits(32))
+        print 'python hash seed:', os.environ['PYTHONHASHSEED']
 
     # unset env related to hooks
     for k in os.environ.keys():
@@ -1264,6 +1276,9 @@ def main():
         # can't remove on solaris
         os.environ['HG'] = ''
         del os.environ['HG']
+    if 'HGPROF' in os.environ:
+        os.environ['HGPROF'] = ''
+        del os.environ['HGPROF']
 
     global TESTDIR, HGTMP, INST, BINDIR, PYTHONDIR, COVERAGE_FILE
     TESTDIR = os.environ["TESTDIR"] = os.getcwd()

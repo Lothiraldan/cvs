@@ -883,9 +883,7 @@ downloaded from 'default' instead of 'default-push' when no source is specified
   adding file changes
   added 6 changesets with 16 changes to 8 files
   (run 'hg update' to get a working copy)
-  caching new largefiles
-  3 largefiles cached
-  3 additional largefiles cached
+  6 additional largefiles cached
   $ cd ..
 
 Rebasing between two repositories does not revert largefiles to old
@@ -969,8 +967,6 @@ rebased or not.
   adding file changes
   added 1 changesets with 2 changes to 2 files (+1 heads)
   (run 'hg heads' to see heads, 'hg merge' to merge)
-  caching new largefiles
-  0 largefiles cached
   $ hg rebase
   Invoking status precommit hook
   M sub/normal4
@@ -1205,20 +1201,14 @@ revert some files to an older revision
   checking files
   10 files, 10 changesets, 28 total revisions
   searching 1 changesets for largefiles
-  changeset 9:598410d3eb9a: sub/large4 missing
-    (looked for hash e166e74c7303192238d60af5a9c4ce9bef0b7928)
+  changeset 9:598410d3eb9a: sub/large4 references missing $TESTTMP/d/.hg/largefiles/e166e74c7303192238d60af5a9c4ce9bef0b7928 (glob)
   verified existence of 3 revisions of 3 largefiles
   [1]
 
 - introduce corruption and make sure that it is caught when checking content:
   $ echo '5 cents' > $TESTTMP/d/.hg/largefiles/e166e74c7303192238d60af5a9c4ce9bef0b7928
   $ hg verify -q --large --lfc
-  searching 1 changesets for largefiles
-  changeset 9:598410d3eb9a: sub/large4: contents differ
-    ($TESTTMP/d/.hg/largefiles/e166e74c7303192238d60af5a9c4ce9bef0b7928: (glob)
-    expected hash e166e74c7303192238d60af5a9c4ce9bef0b7928,
-    but got 1f19b76d5b3cad1472c87efb42b582c97e040060)
-  verified contents of 3 revisions of 3 largefiles
+  changeset 9:598410d3eb9a: sub/large4 references corrupted $TESTTMP/d/.hg/largefiles/e166e74c7303192238d60af5a9c4ce9bef0b7928 (glob)
   [1]
 
 - cleanup
@@ -1226,37 +1216,17 @@ revert some files to an older revision
 
 - verifying all revisions will fail because we didn't clone all largefiles to d:
   $ echo 'T-shirt' > $TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4
-  $ hg verify -q --large --lfa --lfc
-  searching 10 changesets for largefiles
-  changeset 0:30d30fe6a5be: large1 missing
-    (looked for hash 4669e532d5b2c093a78eca010077e708a071bb64)
-  changeset 0:30d30fe6a5be: sub/large2 missing
-    (looked for hash 1deebade43c8c498a3c8daddac0244dc55d1331d)
-  changeset 1:ce8896473775: large1 missing
-    (looked for hash 5f78770c0e77ba4287ad6ef3071c9bf9c379742f)
-  changeset 1:ce8896473775: sub/large2: contents differ
-    ($TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4: (glob)
-    expected hash eb7338044dc27f9bc59b8dd5a246b065ead7a9c4,
-    but got cfef678f24d3e339944138ecdd8fd85ca21d820f)
-  changeset 3:9e8fbc4bce62: large1: contents differ
-    ($TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4: (glob)
-    expected hash eb7338044dc27f9bc59b8dd5a246b065ead7a9c4,
-    but got cfef678f24d3e339944138ecdd8fd85ca21d820f)
-  changeset 4:74c02385b94c: large3: contents differ
-    ($TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4: (glob)
-    expected hash eb7338044dc27f9bc59b8dd5a246b065ead7a9c4,
-    but got cfef678f24d3e339944138ecdd8fd85ca21d820f)
-  changeset 4:74c02385b94c: sub/large4: contents differ
-    ($TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4: (glob)
-    expected hash eb7338044dc27f9bc59b8dd5a246b065ead7a9c4,
-    but got cfef678f24d3e339944138ecdd8fd85ca21d820f)
-  changeset 5:9d5af5072dbd: large3 missing
-    (looked for hash baaf12afde9d8d67f25dab6dced0d2bf77dba47c)
-  changeset 5:9d5af5072dbd: sub/large4 missing
-    (looked for hash aeb2210d19f02886dde00dac279729a48471e2f9)
-  changeset 6:4355d653f84f: large3 missing
-    (looked for hash 7838695e10da2bb75ac1156565f40a2595fa2fa0)
-  verified contents of 15 revisions of 6 largefiles
+  $ hg verify -q --lfa --lfc
+  changeset 0:30d30fe6a5be: large1 references missing $TESTTMP/d/.hg/largefiles/4669e532d5b2c093a78eca010077e708a071bb64 (glob)
+  changeset 0:30d30fe6a5be: sub/large2 references missing $TESTTMP/d/.hg/largefiles/1deebade43c8c498a3c8daddac0244dc55d1331d (glob)
+  changeset 1:ce8896473775: large1 references missing $TESTTMP/d/.hg/largefiles/5f78770c0e77ba4287ad6ef3071c9bf9c379742f (glob)
+  changeset 1:ce8896473775: sub/large2 references corrupted $TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4 (glob)
+  changeset 3:9e8fbc4bce62: large1 references corrupted $TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4 (glob)
+  changeset 4:74c02385b94c: large3 references corrupted $TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4 (glob)
+  changeset 4:74c02385b94c: sub/large4 references corrupted $TESTTMP/d/.hg/largefiles/eb7338044dc27f9bc59b8dd5a246b065ead7a9c4 (glob)
+  changeset 5:9d5af5072dbd: large3 references missing $TESTTMP/d/.hg/largefiles/baaf12afde9d8d67f25dab6dced0d2bf77dba47c (glob)
+  changeset 5:9d5af5072dbd: sub/large4 references missing $TESTTMP/d/.hg/largefiles/aeb2210d19f02886dde00dac279729a48471e2f9 (glob)
+  changeset 6:4355d653f84f: large3 references missing $TESTTMP/d/.hg/largefiles/7838695e10da2bb75ac1156565f40a2595fa2fa0 (glob)
   [1]
 
 - cleanup
@@ -1323,8 +1293,6 @@ Pulling 0 revisions with --all-largefiles should not fetch for all revisions
   pulling from $TESTTMP/d (glob)
   searching for changes
   no changes found
-  caching new largefiles
-  0 largefiles cached
   0 additional largefiles cached
 
 Merging does not revert to old versions of largefiles and also check
@@ -1354,7 +1322,8 @@ correctly.
   $ hg commit -m "Modify large4 to test merge"
   Invoking status precommit hook
   M sub/large4
-  $ hg pull ../e
+# Test --cache-largefiles flag
+  $ hg pull --cache-largefiles ../e
   pulling from ../e
   searching for changes
   adding changesets
@@ -1362,7 +1331,7 @@ correctly.
   adding file changes
   added 2 changesets with 4 changes to 4 files (+1 heads)
   (run 'hg heads' to see heads, 'hg merge' to merge)
-  caching new largefiles
+  caching largefiles for 1 heads
   2 largefiles cached
   $ hg merge
   merging sub/large4
@@ -1730,8 +1699,6 @@ test 'verify' with remotestore:
   [1]
   $ mv 02a439e5c31c526465ab1a0ca1f431f76b827b90 empty/.hg/largefiles/
   $ hg -R http-clone -q verify --large --lfa
-  searching 1 changesets for largefiles
-  verified existence of 1 revisions of 1 largefiles
 
 largefiles pulled on update - a largefile missing on the server:
   $ mv empty/.hg/largefiles/02a439e5c31c526465ab1a0ca1f431f76b827b90 .
@@ -1767,11 +1734,11 @@ largefiles pulled on update - no server side problems:
   $ mv 02a439e5c31c526465ab1a0ca1f431f76b827b90 empty/.hg/largefiles/
   $ hg -R http-clone --debug up --config largefiles.usercache=http-clone-usercache
   resolving manifests
-   overwrite: False, partial: False
+   branchmerge: False, force: False, partial: False
    ancestor: 000000000000, local: 000000000000+, remote: cf03e5bb9936
    .hglf/f1: remote created -> g
-  updating: .hglf/f1 1/1 files (100.00%)
   getting .hglf/f1
+  updating: .hglf/f1 1/1 files (100.00%)
   getting changed largefiles
   using http://localhost:$HGPORT2/
   sending capabilities command

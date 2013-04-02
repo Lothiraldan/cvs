@@ -86,7 +86,9 @@ Show debug commands if there are no other candidates
   debugindexdot
   debuginstall
   debugknown
+  debuglabelcomplete
   debugobsolete
+  debugpathcomplete
   debugpushkey
   debugpvec
   debugrebuildstate
@@ -239,7 +241,9 @@ Show all commands + options
   debugindexdot: 
   debuginstall: 
   debugknown: 
+  debuglabelcomplete: 
   debugobsolete: flags, date, user
+  debugpathcomplete: full, normal, added, removed
   debugpushkey: 
   debugpvec: 
   debugrebuildstate: rev
@@ -278,3 +282,55 @@ Show all commands + options
   unbundle: update
   verify: 
   version: 
+
+  $ hg init a
+  $ cd a
+  $ echo fee > fee
+  $ hg ci -q -Amfee
+  $ hg tag fee
+  $ mkdir fie
+  $ echo dead > fie/dead
+  $ echo live > fie/live
+  $ hg bookmark fo
+  $ hg branch -q fie
+  $ hg ci -q -Amfie
+  $ echo fo > fo
+  $ hg branch -qf default
+  $ hg ci -q -Amfo
+  $ echo Fum > Fum
+  $ hg ci -q -AmFum
+  $ hg bookmark Fum
+
+Test debugpathcomplete
+
+  $ hg debugpathcomplete f
+  fee
+  fie/
+  fo
+  $ hg debugpathcomplete -f f
+  fee
+  fie/dead
+  fie/live
+  fo
+
+  $ hg rm Fum
+  $ hg debugpathcomplete -r F
+  Fum
+
+If one directory and no files match, give an ambiguous answer
+
+  $ hg debugpathcomplete fi
+  fie/
+  fie/.
+
+Test debuglabelcomplete
+
+  $ hg debuglabelcomplete
+  Fum
+  default
+  fee
+  fo
+  tip
+  $ hg debuglabelcomplete f
+  fee
+  fo
