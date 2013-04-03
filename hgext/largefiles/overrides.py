@@ -34,6 +34,7 @@ def installnormalfilesmatchfn(manifest):
                 manifest)
         m._files = filter(notlfile, m._files)
         m._fmap = set(m._files)
+        m._always = False
         origmatchfn = m.matchfn
         m.matchfn = lambda f: notlfile(f) and origmatchfn(f) or None
         return m
@@ -251,6 +252,7 @@ def overridelog(orig, ui, repo, *pats, **opts):
         standins = [lfutil.standin(f) for f in m._files]
         m._files.extend(standins)
         m._fmap = set(m._files)
+        m._always = False
         origmatchfn = m.matchfn
         def lfmatchfn(f):
             lf = lfutil.splitstandin(f)
@@ -274,7 +276,7 @@ def overrideverify(orig, ui, repo, *pats, **opts):
     contents = opts.pop('lfc', False)
 
     result = orig(ui, repo, *pats, **opts)
-    if large:
+    if large or all or contents:
         result = result or lfcommands.verifylfiles(ui, repo, all, contents)
     return result
 
@@ -360,29 +362,35 @@ def overridecheckunknownfile(origfn, repo, wctx, mctx, f):
 # Finally, the merge.applyupdates function will then take care of
 # writing the files into the working copy and lfcommands.updatelfiles
 # will update the largefiles.
-def overridemanifestmerge(origfn, repo, p1, p2, pa, overwrite, partial):
-    actions = origfn(repo, p1, p2, pa, overwrite, partial)
+def overridemanifestmerge(origfn, repo, p1, p2, pa, branchmerge, force,
+                          partial, acceptremote=False):
+    overwrite = force and not branchmerge
+    actions = origfn(repo, p1, p2, pa, branchmerge, force, partial,
+                     acceptremote)
     processed = []
 
     for action in actions:
         if overwrite:
             processed.append(action)
             continue
-        f, m = action[:2]
+        f, m, args, msg = action
 
         choices = (_('&Largefile'), _('&Normal file'))
-        if m == "g" and lfutil.splitstandin(f) in p1 and f in p2:
+
+        splitstandin = lfutil.splitstandin(f)
+        if (m == "g" and splitstandin is not None and
+            splitstandin in p1 and f in p2):
             # Case 1: normal file in the working copy, largefile in
             # the second parent
-            lfile = lfutil.splitstandin(f)
+            lfile = splitstandin
             standin = f
             msg = _('%s has been turned into a largefile\n'
                     'use (l)argefile or keep as (n)ormal file?') % lfile
             if repo.ui.promptchoice(msg, choices, 0) == 0:
-                processed.append((lfile, "r"))
-                processed.append((standin, "g", p2.flags(standin)))
+                processed.append((lfile, "r", None, msg))
+                processed.append((standin, "g", (p2.flags(standin),), msg))
             else:
-                processed.append((standin, "r"))
+                processed.append((standin, "r", None, msg))
         elif m == "g" and lfutil.standin(f) in p1 and f in p2:
             # Case 2: largefile in the working copy, normal file in
             # the second parent
@@ -391,10 +399,10 @@ def overridemanifestmerge(origfn, repo, p1, p2, pa, overwrite, partial):
             msg = _('%s has been turned into a normal file\n'
                     'keep as (l)argefile or use (n)ormal file?') % lfile
             if repo.ui.promptchoice(msg, choices, 0) == 0:
-                processed.append((lfile, "r"))
+                processed.append((lfile, "r", None, msg))
             else:
-                processed.append((standin, "r"))
-                processed.append((lfile, "g", p2.flags(lfile)))
+                processed.append((standin, "r", None, msg))
+                processed.append((lfile, "g", (p2.flags(lfile),), msg))
         else:
             processed.append(action)
 
@@ -513,6 +521,7 @@ def overridecopy(orig, ui, repo, pats, opts, rename=False):
                 lfile = lambda f: lfutil.standin(f) in manifest
                 m._files = [lfutil.standin(f) for f in m._files if lfile(f)]
                 m._fmap = set(m._files)
+                m._always = False
                 origmatchfn = m.matchfn
                 m.matchfn = lambda f: (lfutil.isstandin(f) and
                                     (f in manifest) and
@@ -619,6 +628,7 @@ def overriderevert(orig, ui, repo, *pats, **opts):
                 m._files = [tostandin(f) for f in m._files]
                 m._files = [f for f in m._files if f is not None]
                 m._fmap = set(m._files)
+                m._always = False
                 origmatchfn = m.matchfn
                 def matchfn(f):
                     if lfutil.isstandin(f):
@@ -724,18 +734,21 @@ def overridepull(orig, ui, repo, source=None, **opts):
         repo.lfpullsource = source
         oldheads = lfutil.getcurrentheads(repo)
         result = orig(ui, repo, source, **opts)
-        # If we do not have the new largefiles for any new heads we pulled, we
-        # will run into a problem later if we try to merge or rebase with one of
-        # these heads, so cache the largefiles now directly into the system
-        # cache.
-        ui.status(_("caching new largefiles\n"))
-        numcached = 0
-        heads = lfutil.getcurrentheads(repo)
-        newheads = set(heads).difference(set(oldheads))
-        for head in newheads:
-            (cached, missing) = lfcommands.cachelfiles(ui, repo, head)
-            numcached += len(cached)
-        ui.status(_("%d largefiles cached\n") % numcached)
+        if opts.get('cache_largefiles'):
+            # If you are pulling from a remote location that is not your
+            # default location, you may want to cache largefiles for new heads
+            # that have been pulled, so you can easily merge or rebase with
+            # them later
+            numcached = 0
+            heads = lfutil.getcurrentheads(repo)
+            newheads = set(heads).difference(set(oldheads))
+            if len(newheads) > 0:
+                ui.status(_("caching largefiles for %s heads\n") %
+                          len(newheads))
+            for head in newheads:
+                (cached, missing) = lfcommands.cachelfiles(ui, repo, head)
+                numcached += len(cached)
+            ui.status(_("%d largefiles cached\n") % numcached)
     if opts.get('all_largefiles'):
         revspostpull = len(repo)
         revs = []
@@ -761,17 +774,6 @@ def hgclone(orig, ui, opts, *args, **kwargs):
     if result is not None:
         sourcerepo, destrepo = result
         repo = destrepo.local()
-
-        # The .hglf directory must exist for the standin matcher to match
-        # anything (which listlfiles uses for each rev), and .hg/largefiles is
-        # assumed to exist by the code that caches the downloaded file.  These
-        # directories exist if clone updated to any rev.  (If the repo does not
-        # have largefiles, download never gets to the point of needing
-        # .hg/largefiles, and the standin matcher won't match anything anyway.)
-        if 'largefiles' in repo.requirements:
-            if opts.get('noupdate'):
-                util.makedirs(repo.wjoin(lfutil.shortname))
-                util.makedirs(repo.join(lfutil.longname))
 
         # Caching is implicitly limited to 'rev' option, since the dest repo was
         # truncated at that point.  The user may expect a download count with

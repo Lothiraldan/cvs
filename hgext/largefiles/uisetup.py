@@ -52,11 +52,12 @@ def uisetup(ui):
     entry = extensions.wrapcommand(commands.table, 'verify',
                                    overrides.overrideverify)
 
-    verifyopt = [('', 'large', None, _('verify largefiles')),
+    verifyopt = [('', 'large', None,
+                  _('verify that all largefiles in current revision exists')),
                  ('', 'lfa', None,
-                     _('verify all revisions of largefiles not just current')),
+                  _('verify largefiles in all revisions, not just current')),
                  ('', 'lfc', None,
-                     _('verify largefile contents not just existence'))]
+                  _('verify local largefile contents, not just existence'))]
     entry[1].extend(verifyopt)
 
     entry = extensions.wrapcommand(commands.table, 'debugstate',
@@ -78,7 +79,9 @@ def uisetup(ui):
     entry = extensions.wrapcommand(commands.table, 'pull',
                                    overrides.overridepull)
     pullopt = [('', 'all-largefiles', None,
-                 _('download all pulled versions of largefiles'))]
+                 _('download all pulled versions of largefiles')),
+               ('', 'cache-largefiles', None,
+                 _('caches new largefiles in all pulled heads'))]
     entry[1].extend(pullopt)
     entry = extensions.wrapcommand(commands.table, 'clone',
                                    overrides.overrideclone)

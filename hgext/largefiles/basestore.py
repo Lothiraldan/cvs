@@ -43,7 +43,8 @@ class basestore(object):
         raise NotImplementedError('abstract method')
 
     def exists(self, hashes):
-        '''Check to see if the store contains the given hashes.'''
+        '''Check to see if the store contains the given hashes. Given an
+        iterable of hashes it returns a mapping from hash to bool.'''
         raise NotImplementedError('abstract method')
 
     def get(self, files):
@@ -98,10 +99,10 @@ class basestore(object):
         '''Verify the existence (and, optionally, contents) of every big
         file revision referenced by every changeset in revs.
         Return 0 if all is well, non-zero on any errors.'''
-        write = self.ui.write
         failed = False
 
-        write(_('searching %d changesets for largefiles\n') % len(revs))
+        self.ui.status(_('searching %d changesets for largefiles\n') %
+                       len(revs))
         verified = set()                # set of (filename, filenode) tuples
 
         for rev in revs:
@@ -115,12 +116,13 @@ class basestore(object):
         numrevs = len(verified)
         numlfiles = len(set([fname for (fname, fnode) in verified]))
         if contents:
-            write(_('verified contents of %d revisions of %d largefiles\n')
-                  % (numrevs, numlfiles))
+            self.ui.status(
+                _('verified contents of %d revisions of %d largefiles\n')
+                % (numrevs, numlfiles))
         else:
-            write(_('verified existence of %d revisions of %d largefiles\n')
-                  % (numrevs, numlfiles))
-
+            self.ui.status(
+                _('verified existence of %d revisions of %d largefiles\n')
+                % (numrevs, numlfiles))
         return int(failed)
 
     def _getfile(self, tmpfile, filename, hash):
@@ -133,6 +135,11 @@ class basestore(object):
 
     def _verifyfile(self, cctx, cset, contents, standin, verified):
         '''Perform the actual verification of a file in the store.
+        'cset' is only used in warnings.
+        'contents' controls verification of content hash.
+        'standin' is the standin path of the largefile to verify.
+        'verified' is maintained as a set of already verified files.
+        Returns _true_ if it is a standin and any problems are found!
         '''
         raise NotImplementedError('abstract method')
 
