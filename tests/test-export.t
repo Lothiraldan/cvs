@@ -91,13 +91,28 @@
   foo-foo_10.patch
   foo-foo_11.patch
 
+Doing it again clobbers the files rather than appending:
+  $ hg export -v -o "foo-%m.patch" 2:3
+  exporting patches:
+  foo-foo_2.patch
+  foo-foo_3.patch
+  $ grep HG foo-foo_2.patch | wc -l
+  \s*1 (re)
+  $ grep HG foo-foo_3.patch | wc -l
+  \s*1 (re)
+
 Exporting 4 changesets to a file:
 
   $ hg export -o export_internal 1 2 3 4
   $ grep HG export_internal | wc -l
   \s*4 (re)
 
-Exporting 4 changesets to a file:
+Doing it again clobbers the file rather than appending:
+  $ hg export -o export_internal 1 2 3 4
+  $ grep HG export_internal | wc -l
+  \s*4 (re)
+
+Exporting 4 changesets to stdout:
 
   $ hg export 1 2 3 4 | grep HG | wc -l
   \s*4 (re)
@@ -108,6 +123,7 @@ Exporting revision -2 to a file:
   # HG changeset patch
   # User test
   # Date 0 0
+  #      Thu Jan 01 00:00:00 1970 +0000
   # Node ID 5f17a83f5fbd9414006a5e563eab4c8a00729efd
   # Parent  747d3c68f8ec44bb35816bfcd59aeb50b9654c2f
   foo-10
@@ -154,6 +170,7 @@ Check for color output
   # HG changeset patch
   # User test
   # Date 0 0
+  #      Thu Jan 01 00:00:00 1970 +0000
   # Node ID * (glob)
   # Parent * (glob)
    !"#$%&(,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~

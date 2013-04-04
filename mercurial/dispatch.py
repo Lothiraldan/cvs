@@ -247,6 +247,7 @@ def _runcatch(req):
                     (_("** Mercurial Distributed SCM (version %s)\n") % myver) +
                     (_("** Extensions loaded: %s\n") %
                      ", ".join([x[0] for x in extensions.extensions()])))
+        ui.log("commandexception", "%s\n%s\n", warning, traceback.format_exc())
         ui.warn(warning)
         raise
 
@@ -333,7 +334,7 @@ class cmdalias(object):
         self.cmdname = cmd = args.pop(0)
         args = map(util.expandpath, args)
 
-        for invalidarg in ("--cwd", "-R", "--repository", "--repo"):
+        for invalidarg in ("--cwd", "-R", "--repository", "--repo", "--config"):
             if _earlygetopt([invalidarg], args):
                 def fn(ui, *args):
                     ui.warn(_("error in definition for alias '%s': %s may only "
@@ -736,18 +737,25 @@ def _dispatch(req):
         ui.warn(_("warning: --repository ignored\n"))
 
     msg = ' '.join(' ' in a and repr(a) or a for a in fullargs)
-    ui.log("command", msg + "\n")
+    ui.log("command", '%s\n', msg)
     d = lambda: util.checksignature(func)(ui, *args, **cmdoptions)
+    starttime = time.time()
+    ret = None
     try:
-        return runcommand(lui, repo, cmd, fullargs, ui, options, d,
-                          cmdpats, cmdoptions)
+        ret = runcommand(lui, repo, cmd, fullargs, ui, options, d,
+                         cmdpats, cmdoptions)
+        return ret
     finally:
+        duration = time.time() - starttime
+        ui.log("commandfinish", "%s exited %s after %0.2f seconds\n",
+               cmd, ret, duration)
         if repo and repo != req.repo:
             repo.close()
 
 def lsprofile(ui, func, fp):
     format = ui.config('profiling', 'format', default='text')
     field = ui.config('profiling', 'sort', default='inlinetime')
+    limit = ui.configint('profiling', 'limit', default=30)
     climit = ui.configint('profiling', 'nested', default=5)
 
     if format not in ['text', 'kcachegrind']:
@@ -776,7 +784,7 @@ def lsprofile(ui, func, fp):
             # format == 'text'
             stats = lsprof.Stats(p.getstats())
             stats.sort(field)
-            stats.pprint(limit=30, file=fp, climit=climit)
+            stats.pprint(limit=limit, file=fp, climit=climit)
 
 def statprofile(ui, func, fp):
     try:

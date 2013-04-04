@@ -49,7 +49,7 @@ class filteredpropertycache(propertycache):
 
 
 def hasunfilteredcache(repo, name):
-    """check if an repo and a unfilteredproperty cached value for <name>"""
+    """check if a repo has an unfilteredpropertycache value for <name>"""
     return name in vars(repo.unfiltered())
 
 def unfilteredmethod(orig):
@@ -310,13 +310,13 @@ class localrepository(object):
     def unfiltered(self):
         """Return unfiltered version of the repository
 
-        Intended to be ovewritten by filtered repo."""
+        Intended to be overwritten by filtered repo."""
         return self
 
     def filtered(self, name):
         """Return a filtered version of a repository"""
         # build a new class with the mixin and the current class
-        # (possibily subclass of the repo)
+        # (possibly subclass of the repo)
         class proxycls(repoview.repoview, self.unfiltered().__class__):
             pass
         return proxycls(self, name)
@@ -966,7 +966,7 @@ class localrepository(object):
             delattr(self.unfiltered(), 'dirstate')
 
     def invalidate(self):
-        unfiltered = self.unfiltered() # all filecaches are stored on unfiltered
+        unfiltered = self.unfiltered() # all file caches are stored unfiltered
         for k in self._filecache:
             # dirstate is invalidated separately in invalidatedirstate()
             if k == 'dirstate':
@@ -1234,12 +1234,14 @@ class localrepository(object):
                     elif f not in self.dirstate:
                         fail(f, _("file not tracked!"))
 
+            cctx = context.workingctx(self, text, user, date, extra, changes)
+
             if (not force and not extra.get("close") and not merge
-                and not (changes[0] or changes[1] or changes[2])
+                and not cctx.files()
                 and wctx.branch() == wctx.p1().branch()):
                 return None
 
-            if merge and changes[3]:
+            if merge and cctx.deleted():
                 raise util.Abort(_("cannot commit merge with missing files"))
 
             ms = mergemod.mergestate(self)
@@ -1248,7 +1250,6 @@ class localrepository(object):
                     raise util.Abort(_("unresolved merge conflicts "
                                        "(see hg help resolve)"))
 
-            cctx = context.workingctx(self, text, user, date, extra, changes)
             if editor:
                 cctx._text = editor(self, cctx, subs)
             edited = (text != cctx._text)
@@ -1282,11 +1283,7 @@ class localrepository(object):
 
             # update bookmarks, dirstate and mergestate
             bookmarks.update(self, [p1, p2], ret)
-            for f in changes[0] + changes[1]:
-                self.dirstate.normal(f)
-            for f in changes[2]:
-                self.dirstate.drop(f)
-            self.dirstate.setparents(ret)
+            cctx.markcommitted(ret)
             ms.reset()
         finally:
             wlock.release()
@@ -1401,12 +1398,6 @@ class localrepository(object):
         '''Inform the repository that nodes have been destroyed.
         Intended for use by strip and rollback, so there's a common
         place for anything that has to be done after destroying history.
-
-        If you know the branchheadcache was uptodate before nodes were removed
-        and you also know the set of candidate new heads that may have resulted
-        from the destruction, you can set newheadnodes.  This will enable the
-        code to update the branchheads cache, rather than having future code
-        decide it's invalid and regenerating it from scratch.
         '''
         # When one tries to:
         # 1) destroy nodes thus calling this method (e.g. strip)
@@ -1420,7 +1411,7 @@ class localrepository(object):
         self._phasecache.write()
 
         # update the 'served' branch cache to help read only server process
-        # Thanks to branchcach collaboration this is done from the nearest
+        # Thanks to branchcache collaboration this is done from the nearest
         # filtered subset and it is expected to be fast.
         branchmap.updatecache(self.filtered('served'))
 
@@ -1544,12 +1535,12 @@ class localrepository(object):
 
             modified, added, clean = [], [], []
             withflags = mf1.withflags() | mf2.withflags()
-            for fn in mf2:
+            for fn, mf2node in mf2.iteritems():
                 if fn in mf1:
                     if (fn not in deleted and
                         ((fn in withflags and mf1.flags(fn) != mf2.flags(fn)) or
-                         (mf1[fn] != mf2[fn] and
-                          (mf2[fn] or ctx1[fn].cmp(ctx2[fn]))))):
+                         (mf1[fn] != mf2node and
+                          (mf2node or ctx1[fn].cmp(ctx2[fn]))))):
                         modified.append(fn)
                     elif listclean:
                         clean.append(fn)
@@ -2411,6 +2402,12 @@ class localrepository(object):
                     for n in added:
                         self.hook("incoming", node=hex(n), source=srctype,
                                   url=url)
+
+                    newheads = [h for h in self.heads() if h not in oldheads]
+                    self.ui.log("incoming",
+                                "%s incoming changes - new heads: %s\n",
+                                len(added),
+                                ', '.join([hex(c[:6]) for c in newheads]))
                 self._afterlock(runhooks)
 
         finally:
