@@ -398,7 +398,7 @@ class filectx(object):
                 ("bad args: changeid=%r, fileid=%r, changectx=%r"
                  % (changeid, fileid, changectx))
 
-        if filelog:
+        if filelog is not None:
             self._filelog = filelog
 
         if changeid is not None:
@@ -437,7 +437,9 @@ class filectx(object):
 
     @propertycache
     def _changeid(self):
-        if '_changectx' in self.__dict__:
+        if '_changeid' in self.__dict__:
+            return self._changeid
+        elif '_changectx' in self.__dict__:
             return self._changectx.rev()
         else:
             return self._filelog.linkrev(self._filerev)
@@ -501,14 +503,8 @@ class filectx(object):
         return self._changectx.flags(self._path)
     def filelog(self):
         return self._filelog
-
     def rev(self):
-        if '_changectx' in self.__dict__:
-            return self._changectx.rev()
-        if '_changeid' in self.__dict__:
-            return self._changectx.rev()
-        return self._filelog.linkrev(self._filerev)
-
+        return self._changeid
     def linkrev(self):
         return self._filelog.linkrev(self._filerev)
     def node(self):
@@ -653,25 +649,21 @@ class filectx(object):
             return child
 
         getlog = util.lrucachefunc(lambda x: self._repo.file(x))
-        def getctx(path, fileid):
-            log = path == self._path and self._filelog or getlog(path)
-            return filectx(self._repo, path, fileid=fileid, filelog=log)
-        getctx = util.lrucachefunc(getctx)
 
         def parents(f):
-            # we want to reuse filectx objects as much as possible
-            p = f._path
-            if f._filerev is None: # working dir
-                pl = [(n.path(), n.filerev()) for n in f.parents()]
-            else:
-                pl = [(p, n) for n in f._filelog.parentrevs(f._filerev)]
+            pl = f.parents()
 
-            if follow:
-                r = f.renamed()
-                if r:
-                    pl[0] = (r[0], getlog(r[0]).rev(r[1]))
+            # Don't return renamed parents if we aren't following.
+            if not follow:
+                pl = [p for p in pl if p.path() == f.path()]
 
-            return [getctx(p, n) for p, n in pl if n != nullrev]
+            # renamed filectx won't have a filelog yet, so set it
+            # from the cache to save time
+            for p in pl:
+                if not '_filelog' in p.__dict__:
+                    p._filelog = getlog(p.path())
+
+            return pl
 
         # use linkrev to find the first changeset where self appeared
         if self.rev() != self.linkrev():
@@ -1167,7 +1159,7 @@ class workingfilectx(filectx):
         self._changeid = None
         self._filerev = self._filenode = None
 
-        if filelog:
+        if filelog is not None:
             self._filelog = filelog
         if workingctx:
             self._changectx = workingctx
