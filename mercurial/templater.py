@@ -199,9 +199,6 @@ def buildfunc(exp, context):
     if n in funcs:
         f = funcs[n]
         return (f, args)
-    if n in templatefilters.funcs:
-        f = templatefilters.funcs[n]
-        return (f, args)
     if n in context._filters:
         if len(args) != 1:
             raise error.ParseError(_("filter %s expects one argument") % n)
@@ -301,6 +298,41 @@ def rstdoc(context, mapping, args):
 
     return minirst.format(text, style=style, keep=['verbose'])
 
+def fill(context, mapping, args):
+    if not (1 <= len(args) <= 4):
+        raise error.ParseError(_("fill expects one to four arguments"))
+
+    text = stringify(args[0][0](context, mapping, args[0][1]))
+    width = 76
+    initindent = ''
+    hangindent = ''
+    if 2 <= len(args) <= 4:
+        try:
+            width = int(stringify(args[1][0](context, mapping, args[1][1])))
+        except ValueError:
+            raise error.ParseError(_("fill expects an integer width"))
+        try:
+            initindent = stringify(args[2][0](context, mapping, args[2][1]))
+            initindent = stringify(runtemplate(context, mapping,
+                                     compiletemplate(initindent, context)))
+            hangindent = stringify(args[3][0](context, mapping, args[3][1]))
+            hangindent = stringify(runtemplate(context, mapping,
+                                     compiletemplate(hangindent, context)))
+        except IndexError:
+            pass
+
+    return templatefilters.fill(text, width, initindent, hangindent)
+
+def date(context, mapping, args):
+    if not (1 <= len(args) <= 2):
+        raise error.ParseError(_("date expects one or two arguments"))
+
+    date = args[0][0](context, mapping, args[0][1])
+    if len(args) == 2:
+        fmt = stringify(args[1][0](context, mapping, args[1][1]))
+        return util.datestr(date, fmt)
+    return util.datestr(date)
+
 methods = {
     "string": lambda e, c: (runstring, e[1]),
     "symbol": lambda e, c: (runsymbol, e[1]),
@@ -319,6 +351,8 @@ funcs = {
     "label": label,
     "rstdoc": rstdoc,
     "sub": sub,
+    "fill": fill,
+    "date": date,
 }
 
 # template engine
@@ -394,6 +428,16 @@ class engine(object):
 
 engines = {'default': engine}
 
+def stylelist():
+    path = templatepath()[0]
+    dirlist =  os.listdir(path)
+    stylelist = []
+    for file in dirlist:
+        split = file.split(".")
+        if split[0] == "map-cmdline":
+            stylelist.append(split[1])
+    return ", ".join(sorted(stylelist))
+
 class templater(object):
 
     def __init__(self, mapfile, filters={}, defaults={}, cache={},
@@ -415,7 +459,8 @@ class templater(object):
         if not mapfile:
             return
         if not os.path.exists(mapfile):
-            raise util.Abort(_('style not found: %s') % mapfile)
+            raise util.Abort(_("style '%s' not found") % mapfile,
+                             hint=_("available styles: %s") % stylelist())
 
         conf = config.config()
         conf.read(mapfile)
