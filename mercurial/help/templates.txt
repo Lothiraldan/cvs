@@ -6,8 +6,8 @@ template-style (--style).
 You can customize output for any "log-like" command: log,
 outgoing, incoming, tip, parents, heads and glog.
 
-Four styles are packaged with Mercurial: default (the style used
-when no explicit preference is passed), compact, changelog,
+Five styles are packaged with Mercurial: default (the style used
+when no explicit preference is passed), compact, changelog, phases
 and xml.
 Usage::
 
@@ -61,6 +61,8 @@ In addition to filters, there are some basic built-in functions:
 - sub(pat, repl, expr)
 
 - rstdoc(text, style)
+
+- strip(text, chars)
 
 Also, for any expression that returns a list, there is a list operator:
 

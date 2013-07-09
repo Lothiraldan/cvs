@@ -1,7 +1,7 @@
 # perf.py - performance test routines
 '''helper extension to measure performance'''
 
-from mercurial import cmdutil, scmutil, util, match, commands, obsolete
+from mercurial import cmdutil, scmutil, util, commands, obsolete
 from mercurial import repoview, branchmap, merge, copies
 import time, os, sys
 
@@ -44,6 +44,11 @@ def perfwalk(ui, repo, *pats):
             timer(lambda: len([b for a, b, c in repo.dirstate.statwalk([], m)]))
         except Exception:
             timer(lambda: len(list(cmdutil.walk(repo, pats, {}))))
+
+@command('perfannotate')
+def perfannotate(ui, repo, f):
+    fc = repo['.'][f]
+    timer(lambda: len(fc.annotate(True)))
 
 @command('perfstatus',
          [('u', 'unknown', False,
