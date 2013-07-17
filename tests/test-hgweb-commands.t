@@ -289,7 +289,7 @@ Logs and changes
   
   <form class="search" action="/log">
   
-  <p><input name="rev" id="search1" type="text" size="30" /></p>
+  <p><input name="rev" id="search1" type="text" size="30" value="" /></p>
   <div id="hint">find changesets by author, revision,
   files, or words in the commit message</div>
   </form>
@@ -525,7 +525,7 @@ Logs and changes
   
   <form class="search" action="/log">
   
-  <p><input name="rev" id="search1" type="text" size="30"></p>
+  <p><input name="rev" id="search1" type="text" size="30" value="base"></p>
   <div id="hint">find changesets by author, revision,
   files, or words in the commit message</div>
   </form>
@@ -668,9 +668,8 @@ File-related
   
   <div class="overflow">
   <div class="sourcefirst"> line source</div>
-  
-  <div class="parity0 source"><a href="#l1" id="l1">     1</a> foo
-  </div>
+  <pre class="sourcelines">
+  <span id="l1">foo</span><a href="#l1"></a></pre>
   <div class="sourcelast"></div>
   </div>
   </div>
