@@ -66,16 +66,7 @@ class shelvedfile(object):
         except IOError, err:
             if err.errno != errno.ENOENT:
                 raise
-            if mode[0] in 'wa':
-                try:
-                    self.vfs.mkdir()
-                    return self.vfs(self.fname, mode)
-                except IOError, err:
-                    if err.errno != errno.EEXIST:
-                        raise
-            elif mode[0] == 'r':
-                raise util.Abort(_("shelved change '%s' not found") %
-                                 self.name)
+            raise util.Abort(_("shelved change '%s' not found") % self.name)
 
 class shelvedstate(object):
     """Handle persistence during unshelving operations.
@@ -358,11 +349,6 @@ def listcmd(ui, repo, pats, opts):
         finally:
             fp.close()
 
-def readshelvedfiles(repo, basename):
-    """return the list of files touched in a shelve"""
-    fp = shelvedfile(repo, basename, 'files').opener()
-    return fp.read().split('\0')
-
 def checkparents(repo, state):
     """check parent while resuming an unshelve"""
     if state.parents != repo.dirstate.parents():
@@ -532,7 +518,8 @@ def unshelve(ui, repo, *shelved, **opts):
     else:
         basename = shelved[0]
 
-    shelvedfiles = readshelvedfiles(repo, basename)
+    if not shelvedfile(repo, basename, 'files').exists():
+        raise util.Abort(_("shelved change '%s' not found") % basename)
 
     wlock = lock = tr = None
     try:
@@ -704,5 +691,6 @@ def shelvecmd(ui, repo, *pats, **opts):
 
 def extsetup(ui):
     cmdutil.unfinishedstates.append(
-        [shelvedstate._filename, False, True, _('unshelve already in progress'),
+        [shelvedstate._filename, False, False,
+         _('unshelve already in progress'),
          _("use 'hg unshelve --continue' or 'hg unshelve --abort'")])

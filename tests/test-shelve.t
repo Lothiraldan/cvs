@@ -228,6 +228,7 @@ ensure that we have a merge with unresolved conflicts
   +a
   +>>>>>>> other
   diff --git a/b.rename/b b/b.rename/b
+  new file mode 100644
   --- /dev/null
   +++ b/b.rename/b
   @@ -0,0 +1,1 @@
@@ -239,6 +240,7 @@ ensure that we have a merge with unresolved conflicts
   @@ -1,1 +0,0 @@
   -b
   diff --git a/c.copy b/c.copy
+  new file mode 100644
   --- /dev/null
   +++ b/c.copy
   @@ -0,0 +1,1 @@
@@ -302,6 +304,11 @@ attempt to continue
 
   $ hg revert -r . a/a
   $ hg resolve -m a/a
+
+  $ hg commit -m 'commit while unshelve in progress'
+  abort: unshelve already in progress
+  (use 'hg unshelve --continue' or 'hg unshelve --abort')
+  [255]
 
   $ hg unshelve -c
   unshelve of 'default' complete
