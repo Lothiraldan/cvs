@@ -1586,3 +1586,23 @@ Test the strip function with chars specified:
   h1c
   b
   a
+
+Test string escaping:
+
+  $ hg log -R latesttag -r 0 --template '>\n<>\\n<{if(rev, "[>\n<>\\n<]")}>\n<>\\n<\n'
+  >
+  <>\n<[>
+  <>\n<]>
+  <>\n<
+
+Test recursive evaluation:
+
+  $ hg init r
+  $ cd r
+  $ echo a > a
+  $ hg ci -Am '{rev}'
+  adding a
+  $ hg log -r 0 --template '{if(rev, desc)}\n'
+  {rev}
+  $ hg log -r 0 --template '{if(rev, "{author} {rev}")}\n'
+  test 0
