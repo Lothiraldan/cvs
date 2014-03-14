@@ -940,7 +940,7 @@ def head(repo, subset, x):
     hs = set()
     for b, ls in repo.branchmap().iteritems():
         hs.update(repo[h].rev() for h in ls)
-    return subset.filter(lambda r: r in hs)
+    return baseset(hs).filter(subset.__contains__)
 
 def heads(repo, subset, x):
     """``heads(set)``
@@ -1492,7 +1492,14 @@ def sort(repo, subset, x):
     l = []
     def invert(s):
         return "".join(chr(255 - ord(c)) for c in s)
-    for r in getset(repo, subset, s):
+    revs = getset(repo, subset, s)
+    if keys == ["rev"]:
+        revs.sort()
+        return revs
+    elif keys == ["-rev"]:
+        revs.sort(reverse=True)
+        return revs
+    for r in revs:
         c = repo[r]
         e = []
         for k in keys:
@@ -2164,41 +2171,82 @@ def funcsused(tree):
 class baseset(list):
     """Basic data structure that represents a revset and contains the basic
     operation that it should be able to perform.
+
+    Every method in this class should be implemented by any smartset class.
     """
     def __init__(self, data):
         super(baseset, self).__init__(data)
         self._set = None
 
     def ascending(self):
+        """Sorts the set in ascending order (in place).
+
+        This is part of the mandatory API for smartset."""
         self.sort()
 
     def descending(self):
+        """Sorts the set in descending order (in place).
+
+        This is part of the mandatory API for smartset."""
         self.sort(reverse=True)
 
     def set(self):
+        """Returns a set or a smartset containing all the elements.
+
+        The returned structure should be the fastest option for membership
+        testing.
+
+        This is part of the mandatory API for smartset."""
         if not self._set:
             self._set = set(self)
         return self._set
 
-    def __sub__(self, x):
-        if isinstance(x, baseset):
-            s = x.set()
+    def __sub__(self, other):
+        """Returns a new object with the substraction of the two collections.
+
+        This is part of the mandatory API for smartset."""
+        if isinstance(other, baseset):
+            s = other.set()
         else:
-            s = set(x)
+            s = set(other)
         return baseset(self.set() - s)
 
-    def __and__(self, x):
-        if isinstance(x, baseset):
-            x = x.set()
-        return baseset([y for y in self if y in x])
+    def __and__(self, other):
+        """Returns a new object with the intersection of the two collections.
 
-    def __add__(self, x):
+        This is part of the mandatory API for smartset."""
+        if isinstance(other, baseset):
+            other = other.set()
+        return baseset([y for y in self if y in other])
+
+    def __add__(self, other):
+        """Returns a new object with the union of the two collections.
+
+        This is part of the mandatory API for smartset."""
         s = self.set()
-        l = [r for r in x if r not in s]
+        l = [r for r in other if r not in s]
         return baseset(list(self) + l)
 
-    def filter(self, l):
-        return lazyset(self, l)
+    def isascending(self):
+        """Returns True if the collection is ascending order, False if not.
+
+        This is part of the mandatory API for smartset."""
+        return False
+
+    def isdescending(self):
+        """Returns True if the collection is descending order, False if not.
+
+        This is part of the mandatory API for smartset."""
+        return False
+
+    def filter(self, condition):
+        """Returns this smartset filtered by condition as a new smartset.
+
+        `condition` is a callable which takes a revision number and returns a
+        boolean.
+
+        This is part of the mandatory API for smartset."""
+        return lazyset(self, condition)
 
 class lazyset(object):
     """Duck type for baseset class which iterates lazily over the revisions in
@@ -2235,7 +2283,7 @@ class lazyset(object):
         return lazyset(self, lambda r: r not in x)
 
     def __add__(self, x):
-        return lazyset(_addset(self, x))
+        return _addset(self, x)
 
     def __nonzero__(self):
         for r in self:
@@ -2253,8 +2301,8 @@ class lazyset(object):
         return l[x]
 
     def sort(self, reverse=False):
-        # Basic implementation to be changed in future patches.
-        self._subset = baseset(self._subset)
+        if not util.safehasattr(self._subset, 'sort'):
+            self._subset = baseset(self._subset)
         self._subset.sort(reverse=reverse)
 
     def reverse(self):
@@ -2262,6 +2310,12 @@ class lazyset(object):
 
     def set(self):
         return set([r for r in self])
+
+    def isascending(self):
+        return False
+
+    def isdescending(self):
+        return False
 
     def filter(self, l):
         return lazyset(self, l)
@@ -2293,6 +2347,14 @@ class orderedlazyset(lazyset):
         return orderedlazyset(self, lambda r: r not in x,
                 ascending=self._ascending)
 
+    def __add__(self, x):
+        kwargs = {}
+        if self.isascending() and x.isascending():
+            kwargs['ascending'] = True
+        if self.isdescending() and x.isdescending():
+            kwargs['ascending'] = False
+        return _addset(self, x, **kwargs)
+
     def sort(self, reverse=False):
         if reverse:
             if self._ascending:
@@ -2301,6 +2363,12 @@ class orderedlazyset(lazyset):
             if not self._ascending:
                 self._subset.sort(reverse=reverse)
         self._ascending = not reverse
+
+    def isascending(self):
+        return self._ascending
+
+    def isdescending(self):
+        return not self._ascending
 
     def reverse(self):
         self._subset.reverse()
@@ -2324,29 +2392,151 @@ class _addset(object):
         self._r2 = revs2
         self._iter = None
         self._ascending = ascending
+        self._genlist = None
+
+    @util.propertycache
+    def _list(self):
+        if not self._genlist:
+            self._genlist = baseset(self._iterator())
+        return self._genlist
+
+    def filter(self, condition):
+        if self._ascending is not None:
+            return orderedlazyset(self, condition, ascending=self._ascending)
+        return lazyset(self, condition)
+
+    def ascending(self):
+        if self._ascending is None:
+            self.sort()
+            self._ascending = True
+        else:
+            if not self._ascending:
+                self.reverse()
+
+    def descending(self):
+        if self._ascending is None:
+            self.sort(reverse=True)
+            self._ascending = False
+        else:
+            if self._ascending:
+                self.reverse()
+
+    def __and__(self, other):
+        filterfunc = other.__contains__
+        if self._ascending is not None:
+            return orderedlazyset(self, filterfunc, ascending=self._ascending)
+        return lazyset(self, filterfunc)
+
+    def __sub__(self, other):
+        filterfunc = lambda r: r not in other
+        if self._ascending is not None:
+            return orderedlazyset(self, filterfunc, ascending=self._ascending)
+        return lazyset(self, filterfunc)
+
+    def __add__(self, other):
+        """When both collections are ascending or descending, preserve the order
+        """
+        kwargs = {}
+        if self._ascending is not None:
+            if self.isascending() and other.isascending():
+                kwargs['ascending'] = True
+            if self.isdescending() and other.isdescending():
+                kwargs['ascending'] = False
+        return _addset(self, other, **kwargs)
 
     def _iterator(self):
+        """Iterate over both collections without repeating elements
+
+        If the ascending attribute is not set, iterate over the first one and
+        then over the second one checking for membership on the first one so we
+        dont yield any duplicates.
+
+        If the ascending attribute is set, iterate over both collections at the
+        same time, yielding only one value at a time in the given order.
+        """
         if not self._iter:
             def gen():
-                for r in self._r1:
-                    yield r
-                s = self._r1.set()
-                for r in self._r2:
-                    if r not in s:
+                if self._ascending is None:
+                    for r in self._r1:
                         yield r
+                    s = self._r1.set()
+                    for r in self._r2:
+                        if r not in s:
+                            yield r
+                else:
+                    iter1 = iter(self._r1)
+                    iter2 = iter(self._r2)
+
+                    val1 = None
+                    val2 = None
+
+                    choice = max
+                    if self._ascending:
+                        choice = min
+                    try:
+                        # Consume both iterators in an ordered way until one is
+                        # empty
+                        while True:
+                            if val1 is None:
+                                val1 = iter1.next()
+                            if val2 is None:
+                                val2 = iter2.next()
+                            next = choice(val1, val2)
+                            yield next
+                            if val1 == next:
+                                val1 = None
+                            if val2 == next:
+                                val2 = None
+                    except StopIteration:
+                        # Flush any remaining values and consume the other one
+                        it = iter2
+                        if val1 is not None:
+                            yield val1
+                            it = iter1
+                        elif val2 is not None:
+                            # might have been equality and both are empty
+                            yield val2
+                        for val in it:
+                            yield val
+
             self._iter = _generatorset(gen())
 
         return self._iter
 
     def __iter__(self):
-        for r in self._iterator():
-            yield r
+        if self._genlist:
+            return iter(self._genlist)
+        return iter(self._iterator())
 
     def __contains__(self, x):
         return x in self._r1 or x in self._r2
 
     def set(self):
         return self
+
+    def sort(self, reverse=False):
+        """Sort the added set
+
+        For this we use the cached list with all the generated values and if we
+        know they are ascending or descending we can sort them in a smart way.
+        """
+        if self._ascending is None:
+            self._list.sort(reverse=reverse)
+            self._ascending = not reverse
+        else:
+            if bool(self._ascending) == bool(reverse):
+                self.reverse()
+
+    def isascending(self):
+        return self._ascending is not None and self._ascending
+
+    def isdescending(self):
+        return self._ascending is not None and not self._ascending
+
+    def reverse(self):
+        self._list.reverse()
+        if self._ascending is not None:
+            self._ascending = not self._ascending
 
 class _generatorset(object):
     """Wrap a generator for lazy iteration
@@ -2490,6 +2680,11 @@ class spanset(object):
         return self._contained(x) and not (self._hiddenrevs and rev in
                 self._hiddenrevs)
 
+    def __nonzero__(self):
+        for r in self:
+            return True
+        return False
+
     def __and__(self, x):
         if isinstance(x, baseset):
             x = x.set()
@@ -2507,7 +2702,12 @@ class spanset(object):
             return orderedlazyset(self, lambda r: r not in x, ascending=False)
 
     def __add__(self, x):
-        return lazyset(_addset(self, x))
+        kwargs = {}
+        if self.isascending() and x.isascending():
+            kwargs['ascending'] = True
+        if self.isdescending() and x.isdescending():
+            kwargs['ascending'] = False
+        return _addset(self, x, **kwargs)
 
     def __len__(self):
         if not self._hiddenrevs:
@@ -2525,8 +2725,7 @@ class spanset(object):
         return l[x]
 
     def sort(self, reverse=False):
-        # Basic implementation to be changed in future patches.
-        if reverse:
+        if bool(reverse) != (self._start > self._end):
             self.reverse()
 
     def reverse(self):
@@ -2537,6 +2736,12 @@ class spanset(object):
 
     def set(self):
         return self
+
+    def isascending(self):
+        return self._start < self._end
+
+    def isdescending(self):
+        return self._start > self._end
 
     def filter(self, l):
         if self._start <= self._end:
