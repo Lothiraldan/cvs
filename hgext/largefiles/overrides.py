@@ -12,7 +12,7 @@ import os
 import copy
 
 from mercurial import hg, commands, util, cmdutil, scmutil, match as match_, \
-    node, archival, error, merge, discovery, pathutil
+        node, archival, error, merge, discovery, pathutil, revset
 from mercurial.i18n import _
 from mercurial.node import hex
 from hgext import rebase
@@ -365,8 +365,8 @@ def overridecheckunknownfile(origfn, repo, wctx, mctx, f):
 # Finally, the merge.applyupdates function will then take care of
 # writing the files into the working copy and lfcommands.updatelfiles
 # will update the largefiles.
-def overridemanifestmerge(origfn, repo, p1, p2, pa, branchmerge, force,
-                          partial, acceptremote=False):
+def overridecalculateupdates(origfn, repo, p1, p2, pa, branchmerge, force,
+                             partial, acceptremote=False):
     overwrite = force and not branchmerge
     actions = origfn(repo, p1, p2, pa, branchmerge, force, partial,
                      acceptremote)
@@ -420,16 +420,18 @@ def overridefilemerge(origfn, repo, mynode, orig, fcd, fco, fca):
     if not lfutil.isstandin(orig):
         return origfn(repo, mynode, orig, fcd, fco, fca)
 
-    if not fco.cmp(fcd): # files identical?
-        return None
-
-    if repo.ui.promptchoice(
-        _('largefile %s has a merge conflict\nancestor was %s\n'
-          'keep (l)ocal %s or\ntake (o)ther %s?'
-          '$$ &Local $$ &Other') %
-          (lfutil.splitstandin(orig),
-           fca.data().strip(), fcd.data().strip(), fco.data().strip()),
-        0) == 1:
+    ahash = fca.data().strip().lower()
+    dhash = fcd.data().strip().lower()
+    ohash = fco.data().strip().lower()
+    if (ohash != ahash and
+        ohash != dhash and
+        (dhash == ahash or
+         repo.ui.promptchoice(
+             _('largefile %s has a merge conflict\nancestor was %s\n'
+               'keep (l)ocal %s or\ntake (o)ther %s?'
+               '$$ &Local $$ &Other') %
+               (lfutil.splitstandin(orig), ahash, dhash, ohash),
+             0) == 1)):
         repo.wwrite(fcd.path(), fco.data(), fco.flags())
     return 0
 
@@ -752,7 +754,7 @@ def pulledrevsetsymbol(repo, subset, x):
         firstpulled = repo.firstpulled
     except AttributeError:
         raise util.Abort(_("pulled() only available in --lfrev"))
-    return [r for r in subset if r >= firstpulled]
+    return revset.baseset([r for r in subset if r >= firstpulled])
 
 def overrideclone(orig, ui, source, dest=None, **opts):
     d = dest

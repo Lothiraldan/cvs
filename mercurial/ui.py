@@ -8,6 +8,7 @@
 from i18n import _
 import errno, getpass, os, socket, sys, tempfile, traceback
 import config, scmutil, util, error, formatter
+from node import hex
 
 class ui(object):
     def __init__(self, src=None):
@@ -156,11 +157,9 @@ class ui(object):
         self._tcfg.restore(data[1])
         self._ucfg.restore(data[2])
 
-    def setconfig(self, section, name, value, overlay=True):
-        if overlay:
-            self._ocfg.set(section, name, value)
-        self._tcfg.set(section, name, value)
-        self._ucfg.set(section, name, value)
+    def setconfig(self, section, name, value, source=''):
+        for cfg in (self._ocfg, self._tcfg, self._ucfg):
+            cfg.set(section, name, value, source)
         self.fixconfig(section=section)
 
     def _data(self, untrusted):
@@ -449,7 +448,9 @@ class ui(object):
             except KeyError:
                 pass
         if not user:
-            raise util.Abort(_('no username supplied (see "hg help config")'))
+            raise util.Abort(_('no username supplied'),
+                             hint=_('use "hg config --edit" '
+                                    'to set your username'))
         if "\n" in user:
             raise util.Abort(_("username %s contains a newline\n") % repr(user))
         return user
@@ -712,7 +713,7 @@ class ui(object):
         if self.debugflag:
             opts['label'] = opts.get('label', '') + ' ui.debug'
             self.write(*msg, **opts)
-    def edit(self, text, user):
+    def edit(self, text, user, extra={}):
         (fd, name) = tempfile.mkstemp(prefix="hg-editor-", suffix=".txt",
                                       text=True)
         try:
@@ -720,10 +721,18 @@ class ui(object):
             f.write(text)
             f.close()
 
+            environ = {'HGUSER': user}
+            if 'transplant_source' in extra:
+                environ.update({'HGREVISION': hex(extra['transplant_source'])})
+            for label in ('source', 'rebase_source'):
+                if label in extra:
+                    environ.update({'HGREVISION': extra[label]})
+                    break
+
             editor = self.geteditor()
 
             util.system("%s \"%s\"" % (editor, name),
-                        environ={'HGUSER': user},
+                        environ=environ,
                         onerr=util.Abort, errprefix=_("edit failed"),
                         out=self.fout)
 

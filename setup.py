@@ -13,11 +13,18 @@ if sys.version_info[0] >= 3:
         '''A helper function to emulate 2.6+ bytes literals using string
         literals.'''
         return s.encode('latin1')
+    printf = eval('print')
+    libdir_escape = 'unicode_escape'
 else:
+    libdir_escape = 'string_escape'
     def b(s):
         '''A helper function to emulate 2.6+ bytes literals using string
         literals.'''
         return s
+    def printf(*args, **kwargs):
+        f = kwargs.get('file', sys.stdout)
+        end = kwargs.get('end', '\n')
+        f.write(b(' ').join(args) + end)
 
 # Solaris Python packaging brain damage
 try:
@@ -64,7 +71,6 @@ from distutils.command.build_ext import build_ext
 from distutils.command.build_py import build_py
 from distutils.command.install_scripts import install_scripts
 from distutils.spawn import spawn, find_executable
-from distutils.ccompiler import new_compiler
 from distutils import cygwinccompiler
 from distutils.errors import CCompilerError, DistutilsExecError
 from distutils.sysconfig import get_python_inc
@@ -152,8 +158,8 @@ def runhg(cmd, env):
               and not e.startswith(b('warning: Not importing')) \
               and not e.startswith(b('obsolete feature not enabled'))]
     if err:
-        print >> sys.stderr, "stderr from '%s':" % (' '.join(cmd))
-        print >> sys.stderr, '\n'.join(['  ' + e for e in err])
+        printf("stderr from '%s':" % (' '.join(cmd)), file=sys.stderr)
+        printf(b('\n').join([b('  ') + e for e in err]), file=sys.stderr)
         return ''
     return out
 
@@ -403,7 +409,7 @@ class hginstallscripts(install_scripts):
             if b('\0') in data:
                 continue
 
-            data = data.replace('@LIBDIR@', libdir.encode('string_escape'))
+            data = data.replace(b('@LIBDIR@'), libdir.encode(libdir_escape))
             fp = open(outfile, 'wb')
             fp.write(data)
             fp.close()
@@ -466,20 +472,6 @@ class HackedMingw32CCompiler(cygwinccompiler.Mingw32CCompiler):
                 pass
 
 cygwinccompiler.Mingw32CCompiler = HackedMingw32CCompiler
-
-if sys.platform.startswith('linux') and os.uname()[2] > '2.6':
-    # The inotify extension is only usable with Linux 2.6 kernels.
-    # You also need a reasonably recent C library.
-    # In any case, if it fails to build the error will be skipped ('optional').
-    cc = new_compiler()
-    if hasfunction(cc, 'inotify_add_watch'):
-        inotify = Extension('hgext.inotify.linux._inotify',
-                            ['hgext/inotify/linux/_inotify.c'],
-                            ['mercurial'],
-                            depends=common_depends)
-        inotify.optional = True
-        extmodules.append(inotify)
-        packages.extend(['hgext.inotify', 'hgext.inotify.linux'])
 
 packagedata = {'mercurial': ['locale/*/LC_MESSAGES/hg.mo',
                              'help/*.txt']}
@@ -569,9 +561,11 @@ setup(name='mercurial',
       package_data=packagedata,
       cmdclass=cmdclass,
       distclass=hgdist,
-      options=dict(py2exe=dict(packages=['hgext', 'email']),
-                   bdist_mpkg=dict(zipdist=True,
-                                   license='COPYING',
-                                   readme='contrib/macosx/Readme.html',
-                                   welcome='contrib/macosx/Welcome.html')),
+      options={'py2exe': {'packages': ['hgext', 'email']},
+               'bdist_mpkg': {'zipdist': True,
+                              'license': 'COPYING',
+                              'readme': 'contrib/macosx/Readme.html',
+                              'welcome': 'contrib/macosx/Welcome.html',
+                              },
+               },
       **extra)

@@ -509,5 +509,6 @@ def reposetup(ui, repo):
             repo.requirements.add('largefiles')
             repo._writerequirements()
 
-    ui.setconfig('hooks', 'changegroup.lfiles', checkrequireslfiles)
-    ui.setconfig('hooks', 'commit.lfiles', checkrequireslfiles)
+    ui.setconfig('hooks', 'changegroup.lfiles', checkrequireslfiles,
+                 'largefiles')
+    ui.setconfig('hooks', 'commit.lfiles', checkrequireslfiles, 'largefiles')

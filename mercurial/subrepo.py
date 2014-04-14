@@ -326,16 +326,6 @@ def _sanitize(ui, path):
                 os.unlink(os.path.join(dirname, f))
     os.walk(path, v, None)
 
-def itersubrepos(ctx1, ctx2):
-    """find subrepos in ctx1 or ctx2"""
-    # Create a (subpath, ctx) mapping where we prefer subpaths from
-    # ctx1. The subpaths from ctx2 are important when the .hgsub file
-    # has been modified (in ctx2) but not yet committed (in ctx1).
-    subpaths = dict.fromkeys(ctx2.substate, ctx2)
-    subpaths.update(dict.fromkeys(ctx1.substate, ctx1))
-    for subpath, ctx in sorted(subpaths.iteritems()):
-        yield subpath, ctx.sub(subpath)
-
 def subrepo(ctx, path):
     """return instance of the right subrepo class for subrepo in path"""
     # subrepo inherently violates our import layering rules
@@ -522,8 +512,8 @@ class hgsubrepo(abstractsubrepo):
         for s, k in [('ui', 'commitsubrepos')]:
             v = r.ui.config(s, k)
             if v:
-                self._repo.ui.setconfig(s, k, v)
-        self._repo.ui.setconfig('ui', '_usedassubrepo', 'True')
+                self._repo.ui.setconfig(s, k, v, 'subrepo')
+        self._repo.ui.setconfig('ui', '_usedassubrepo', 'True', 'subrepo')
         self._initrepo(r, state[0], create)
 
     def storeclean(self, path):
@@ -604,7 +594,7 @@ class hgsubrepo(abstractsubrepo):
             def addpathconfig(key, value):
                 if value:
                     fp.write('%s = %s\n' % (key, value))
-                    self._repo.ui.setconfig('paths', key, value)
+                    self._repo.ui.setconfig('paths', key, value, 'subrepo')
 
             defpath = _abssource(self._repo, abort=False)
             defpushpath = _abssource(self._repo, True, abort=False)
@@ -1117,18 +1107,50 @@ class gitsubrepo(abstractsubrepo):
                 raise
             self._gitexecutable = 'git.cmd'
             out, err = self._gitnodir(['--version'])
+        versionstatus = self._checkversion(out)
+        if versionstatus == 'unknown':
+            self._ui.warn(_('cannot retrieve git version\n'))
+        elif versionstatus == 'abort':
+            raise util.Abort(_('git subrepo requires at least 1.6.0 or later'))
+        elif versionstatus == 'warning':
+            self._ui.warn(_('git subrepo requires at least 1.6.0 or later\n'))
+
+    @staticmethod
+    def _checkversion(out):
+        '''ensure git version is new enough
+
+        >>> _checkversion = gitsubrepo._checkversion
+        >>> _checkversion('git version 1.6.0')
+        'ok'
+        >>> _checkversion('git version 1.8.5')
+        'ok'
+        >>> _checkversion('git version 1.4.0')
+        'abort'
+        >>> _checkversion('git version 1.5.0')
+        'warning'
+        >>> _checkversion('git version 1.9-rc0')
+        'ok'
+        >>> _checkversion('git version 1.9.0.265.g81cdec2')
+        'ok'
+        >>> _checkversion('git version 1.9.0.GIT')
+        'ok'
+        >>> _checkversion('git version 12345')
+        'unknown'
+        >>> _checkversion('no')
+        'unknown'
+        '''
         m = re.search(r'^git version (\d+)\.(\d+)', out)
         if not m:
-            self._ui.warn(_('cannot retrieve git version\n'))
-            return
+            return 'unknown'
         version = (int(m.group(1)), int(m.group(2)))
         # git 1.4.0 can't work at all, but 1.5.X can in at least some cases,
         # despite the docstring comment.  For now, error on 1.4.0, warn on
         # 1.5.0 but attempt to continue.
         if version < (1, 5):
-            raise util.Abort(_('git subrepo requires at least 1.6.0 or later'))
+            return 'abort'
         elif version < (1, 6):
-            self._ui.warn(_('git subrepo requires at least 1.6.0 or later\n'))
+            return 'warning'
+        return 'ok'
 
     def _gitcommand(self, commands, env=None, stream=False):
         return self._gitdir(commands, env=env, stream=stream)[0]
@@ -1441,8 +1463,8 @@ class gitsubrepo(abstractsubrepo):
                 return False
             self._ui.status(_('pushing branch %s of subrepo %s\n') %
                             (current.split('/', 2)[2], self._relpath))
-            self._gitcommand(cmd + ['origin', current])
-            return True
+            ret = self._gitdir(cmd + ['origin', current])
+            return ret[1] == 0
         else:
             self._ui.warn(_('no branch checked out in subrepo %s\n'
                             'cannot push revision %s\n') %

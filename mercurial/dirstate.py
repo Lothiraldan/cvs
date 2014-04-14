@@ -4,7 +4,6 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
-import errno
 
 from node import nullid
 from i18n import _
@@ -504,17 +503,13 @@ class dirstate(object):
         if not self._dirty:
             return
         st = self._opener("dirstate", "w", atomictemp=True)
-
-        def finish(s):
-            st.write(s)
-            st.close()
-            self._lastnormaltime = 0
-            self._dirty = self._dirtypl = False
-
         # use the modification time of the newly created temporary file as the
         # filesystem's notion of 'now'
         now = util.fstat(st).st_mtime
-        finish(parsers.pack_dirstate(self._map, self._copymap, self._pl, now))
+        st.write(parsers.pack_dirstate(self._map, self._copymap, self._pl, now))
+        st.close()
+        self._lastnormaltime = 0
+        self._dirty = self._dirtypl = False
 
     def _dirignore(self, f):
         if f == '.':

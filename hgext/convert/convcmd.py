@@ -120,6 +120,43 @@ class converter(object):
 
         self.splicemap = self.parsesplicemap(opts.get('splicemap'))
         self.branchmap = mapfile(ui, opts.get('branchmap'))
+        self.closemap = self.parseclosemap(opts.get('closemap'))
+        self.tagmap = mapfile(ui, opts.get('tagmap'))
+
+    def parseclosemap(self, path):
+        """ check and validate the closemap format and
+            return a list of revs to close.
+            Format checking has two parts.
+            1. generic format which is same across all source types
+            2. specific format checking which may be different for
+               different source type.  This logic is implemented in
+               checkrevformat function in source files like
+               hg.py, subversion.py etc.
+        """
+
+        if not path:
+            return []
+        m = []
+        try:
+            fp = open(path, 'r')
+            for i, line in enumerate(fp):
+                line = line.splitlines()[0].rstrip()
+                if not line:
+                    # Ignore blank lines
+                    continue
+                # split line
+                lex = shlex.shlex(line, posix=True)
+                lex.whitespace_split = True
+                lex.whitespace += ','
+                line = list(lex)
+                for part in line:
+                    self.source.checkrevformat(part, 'closemap')
+                m.extend(line)
+        # if file does not exist or error reading, exit
+        except IOError:
+            raise util.Abort(_('closemap file not found or error reading %s:')
+                               % path)
+        return m
 
     def parsesplicemap(self, path):
         """ check and validate the splicemap format and
@@ -408,8 +445,11 @@ class converter(object):
         except KeyError:
             parents = [b[0] for b in pbranches]
         source = progresssource(self.ui, self.source, len(files))
+        if self.closemap and rev in self.closemap:
+            commit.extra['close'] = 1
+
         newnode = self.dest.putcommit(files, copies, parents, commit,
-                                      source, self.map)
+                                      source, self.map, self.tagmap)
         source.close()
         self.source.converted(rev, newnode)
         self.map[rev] = newnode
@@ -445,6 +485,9 @@ class converter(object):
             self.ui.progress(_('converting'), None)
 
             tags = self.source.gettags()
+            tags = dict((self.tagmap.get(k, k), v)
+                        for k, v in tags.iteritems())
+
             ctags = {}
             for k in tags:
                 v = tags[k]

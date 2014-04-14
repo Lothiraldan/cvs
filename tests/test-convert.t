@@ -122,6 +122,14 @@
       can be used to (for instance) move code in one repository from "default"
       to a named branch.
   
+      The closemap is a file that allows closing of a branch. This is useful if
+      you want to close a branch. Each entry contains a revision or hash
+      separated by white space.
+  
+      The tagmap is a file that exactly analogous to the branchmap. This will
+      rename tags on the fly and prevent the 'update tags' commit usually found
+      at the end of a convert process.
+  
       Mercurial Source
       ################
   
@@ -267,6 +275,8 @@
       --filemap FILE     remap file names using contents of file
       --splicemap FILE   splice synthesized history into place
       --branchmap FILE   change branch names while converting
+      --closemap FILE    closes given revs
+      --tagmap FILE      change tag names while converting
       --branchsort       try to sort changesets by branches
       --datesort         try to sort changesets by date
       --sourcesort       preserve source changesets order
