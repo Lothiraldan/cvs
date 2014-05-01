@@ -2783,9 +2783,10 @@ class spanset(_orderedsetmixin):
             for r in iterrange:
                 yield r
 
-    def __contains__(self, x):
-        return self._contained(x) and not (self._hiddenrevs and rev in
-                self._hiddenrevs)
+    def __contains__(self, rev):
+        return (((self._end < rev <= self._start)
+                  or (self._start <= rev < self._end))
+                and not (self._hiddenrevs and rev in self._hiddenrevs))
 
     def __nonzero__(self):
         for r in self:
@@ -2796,9 +2797,9 @@ class spanset(_orderedsetmixin):
         if isinstance(x, baseset):
             x = x.set()
         if self._start <= self._end:
-            return orderedlazyset(self, lambda r: r in x)
+            return orderedlazyset(self, x.__contains__)
         else:
-            return orderedlazyset(self, lambda r: r in x, ascending=False)
+            return orderedlazyset(self, x.__contains__, ascending=False)
 
     def __sub__(self, x):
         if isinstance(x, baseset):
@@ -2821,8 +2822,10 @@ class spanset(_orderedsetmixin):
             return abs(self._end - self._start)
         else:
             count = 0
+            start = self._start
+            end = self._end
             for rev in self._hiddenrevs:
-                if self._contained(rev):
+                if (end < rev <= start) or (start <= rev and rev < end):
                     count += 1
             return abs(self._end - self._start) - count
 
