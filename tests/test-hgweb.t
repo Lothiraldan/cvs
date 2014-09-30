@@ -122,6 +122,24 @@ should give a 400 - bad command
   error: no such method: spam
   [1]
 
+  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT '?cmd=spam'
+  400 no such method: spam
+  [1]
+
+should give a 400 - bad command as a part of url path (issue4071)
+
+  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'spam'
+  400 no such method: spam
+  [1]
+
+  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'raw-spam'
+  400 no such method: spam
+  [1]
+
+  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'spam/tip/foo'
+  400 no such method: spam
+  [1]
+
 should give a 404 - file does not exist
 
   $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/bork?style=raw'
@@ -308,7 +326,7 @@ stop and restart
 Test the access/error files are opened in append mode
 
   $ python -c "print len(file('access.log').readlines()), 'log lines written'"
-  10 log lines written
+  14 log lines written
 
 static file
 
@@ -511,6 +529,50 @@ static file
       background-color: #FFCCCC !important;
   }
   304 Not Modified
+  
+
+phase changes are refreshed (issue4061)
+
+  $ echo bar >> foo
+  $ hg ci -msecret --secret
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'log?style=raw'
+  200 Script output follows
+  
+  
+  # HG changelog
+  # Node ID 2ef0ac749a14e4f57a5a822464a0902c6f7f448f
+  
+  changeset:   2ef0ac749a14e4f57a5a822464a0902c6f7f448f
+  revision:    0
+  user:        test
+  date:        Thu, 01 Jan 1970 00:00:00 +0000
+  summary:     base
+  branch:      default
+  tag:         tip
+  
+  
+  $ hg phase --draft tip
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'log?style=raw'
+  200 Script output follows
+  
+  
+  # HG changelog
+  # Node ID a084749e708a9c4c0a5b652a2a446322ce290e04
+  
+  changeset:   a084749e708a9c4c0a5b652a2a446322ce290e04
+  revision:    1
+  user:        test
+  date:        Thu, 01 Jan 1970 00:00:00 +0000
+  summary:     secret
+  branch:      default
+  tag:         tip
+  
+  changeset:   2ef0ac749a14e4f57a5a822464a0902c6f7f448f
+  revision:    0
+  user:        test
+  date:        Thu, 01 Jan 1970 00:00:00 +0000
+  summary:     base
+  
   
 
 errors

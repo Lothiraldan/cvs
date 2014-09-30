@@ -4118,9 +4118,8 @@ def log(ui, repo, *pats, **opts):
     .. note::
 
        for performance reasons, log FILE may omit duplicate changes
-       made on branches and will not show deletions. To see all
-       changes including duplicates and deletions, use the --removed
-       switch.
+       made on branches and will not show removals or mode changes. To
+       see all such changes, use the --removed switch.
 
     .. container:: verbose
 
@@ -4154,7 +4153,7 @@ def log(ui, repo, *pats, **opts):
 
           hg log -T list
 
-      - check if a given changeset is included is a tagged release::
+      - check if a given changeset is included in a tagged release::
 
           hg log -r "a21ccf and ancestor(1.9)"
 
@@ -4175,6 +4174,7 @@ def log(ui, repo, *pats, **opts):
     specifying custom templates.
 
     Returns 0 on success.
+
     """
     if opts.get('graph'):
         return cmdutil.graphlog(ui, repo, *pats, **opts)
