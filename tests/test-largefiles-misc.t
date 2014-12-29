@@ -67,6 +67,11 @@ Test copies and moves from a directory other than root (issue3516)
   dirc/baz/largefile
   dirc/dirb
   dirc/dirb/largefile
+
+  $ hg clone -q . ../fetch
+  $ hg --config extensions.fetch= fetch ../fetch
+  abort: uncommitted changes
+  [255]
   $ hg up -qC
   $ cd ..
 
@@ -492,7 +497,7 @@ check messages when there are files to upload:
   b
   
   $ hg -R clone2 outgoing --large --graph --template "{rev}"
-  comparing with $TESTTMP/issue3651/src
+  comparing with $TESTTMP/issue3651/src (glob)
   searching for changes
   @  1
   
@@ -599,7 +604,7 @@ check messages when there are files to upload:
       89e6c98d92887913cadf06b2adb97f26cde4849b
   
 
-Pusing revision #1 causes uploading entity 89e6c98d9288, which is
+Pushing revision #1 causes uploading entity 89e6c98d9288, which is
 shared also by largefiles b1, b2 in revision #2 and b in revision #5.
 
 Then, entity 89e6c98d9288 is not treated as "outgoing entity" at "hg
@@ -842,4 +847,33 @@ locally (issue4109)
   $ cd ..
 
 
+Test "pull --rebase" when rebase is enabled before largefiles (issue3861)
+=========================================================================
 
+  $ hg showconfig extensions | grep largefiles
+  extensions.largefiles=!
+
+  $ mkdir issue3861
+  $ cd issue3861
+  $ hg init src
+  $ hg clone -q src dst
+  $ echo a > src/a
+  $ hg -R src commit -Aqm "#0"
+  Invoking status precommit hook
+  A a
+
+  $ cat >> dst/.hg/hgrc <<EOF
+  > [extensions]
+  > largefiles=
+  > EOF
+  $ hg -R dst pull --rebase
+  pulling from $TESTTMP/issue3861/src (glob)
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  nothing to rebase - working directory parent is already an ancestor of destination bf5e395ced2c
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+  $ cd ..

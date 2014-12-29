@@ -76,22 +76,9 @@ class basectx(object):
         object oriented way for other contexts to customize the manifest
         generation.
         """
-        if match.always():
-            return self.manifest().copy()
+        return self.manifest().matches(match)
 
-        files = match.files()
-        if (match.matchfn == match.exact or
-            (not match.anypats() and util.all(fn in self for fn in files))):
-            return self.manifest().intersectfiles(files)
-
-        mf = self.manifest().copy()
-        for fn in mf.keys():
-            if not match(fn):
-                del mf[fn]
-        return mf
-
-    def _matchstatus(self, other, s, match, listignored, listclean,
-                     listunknown):
+    def _matchstatus(self, other, match):
         """return match.always if match is none
 
         This internal method provides a way for child objects to override the
@@ -99,33 +86,22 @@ class basectx(object):
         """
         return match or matchmod.always(self._repo.root, self._repo.getcwd())
 
-    def _prestatus(self, other, s, match, listignored, listclean, listunknown):
-        """provide a hook to allow child objects to preprocess status results
-
-        For example, this allows other contexts, such as workingctx, to query
-        the dirstate before comparing the manifests.
-        """
-        # load earliest manifest first for caching reasons
-        if self.rev() < other.rev():
-            self.manifest()
-        return s
-
-    def _poststatus(self, other, s, match, listignored, listclean, listunknown):
-        """provide a hook to allow child objects to postprocess status results
-
-        For example, this allows other contexts, such as workingctx, to filter
-        suspect symlinks in the case of FAT32 and NTFS filesytems.
-        """
-        return s
-
     def _buildstatus(self, other, s, match, listignored, listclean,
                      listunknown):
         """build a status with respect to another context"""
+        # Load earliest manifest first for caching reasons. More specifically,
+        # if you have revisions 1000 and 1001, 1001 is probably stored as a
+        # delta against 1000. Thus, if you read 1000 first, we'll reconstruct
+        # 1000 and cache it so that when you read 1001, we just need to apply a
+        # delta to what's in the cache. So that's one full reconstruction + one
+        # delta application.
+        if self.rev() is not None and self.rev() < other.rev():
+            self.manifest()
         mf1 = other._manifestmatches(match, s)
         mf2 = self._manifestmatches(match, s)
 
         modified, added, clean = [], [], []
-        deleted, unknown, ignored = s[3], s[4], s[5]
+        deleted, unknown, ignored = s.deleted, s.unknown, s.ignored
         deletedset = set(deleted)
         withflags = mf1.withflags() | mf2.withflags()
         for fn, mf2node in mf2.iteritems():
@@ -146,7 +122,8 @@ class basectx(object):
             unknown = [fn for fn in unknown if fn not in mf1]
             ignored = [fn for fn in ignored if fn not in mf1]
 
-        return [modified, added, removed, deleted, unknown, ignored, clean]
+        return scmutil.status(modified, added, removed, deleted, unknown,
+                              ignored, clean)
 
     @propertycache
     def substate(self):
@@ -316,18 +293,16 @@ class basectx(object):
             reversed = True
             ctx1, ctx2 = ctx2, ctx1
 
-        r = [[], [], [], [], [], [], []]
-        match = ctx2._matchstatus(ctx1, r, match, listignored, listclean,
-                                  listunknown)
-        r = ctx2._prestatus(ctx1, r, match, listignored, listclean, listunknown)
+        match = ctx2._matchstatus(ctx1, match)
+        r = scmutil.status([], [], [], [], [], [], [])
         r = ctx2._buildstatus(ctx1, r, match, listignored, listclean,
                               listunknown)
-        r = ctx2._poststatus(ctx1, r, match, listignored, listclean,
-                             listunknown)
 
         if reversed:
-            # reverse added and removed
-            r[1], r[2] = r[2], r[1]
+            # Reverse added and removed. Clear deleted, unknown and ignored as
+            # these make no sense to reverse.
+            r = scmutil.status(r.modified, r.removed, r.added, [], [], [],
+                               r.clean)
 
         if listsubrepos:
             for subpath, sub in scmutil.itersubrepos(ctx1, ctx2):
@@ -346,8 +321,7 @@ class basectx(object):
         for l in r:
             l.sort()
 
-        # we return a tuple to signify that this list isn't changing
-        return scmutil.status(*r)
+        return r
 
 
 def makememctx(repo, parents, text, user, date, branch, files, store,
@@ -438,18 +412,13 @@ class changectx(basectx):
                 except (TypeError, LookupError):
                     pass
 
-            if changeid in repo._bookmarks:
-                self._node = repo._bookmarks[changeid]
-                self._rev = repo.changelog.rev(self._node)
-                return
-            if changeid in repo._tagscache.tags:
-                self._node = repo._tagscache.tags[changeid]
-                self._rev = repo.changelog.rev(self._node)
-                return
+            # lookup bookmarks through the name interface
             try:
-                self._node = repo.branchtip(changeid)
+                self._node = repo.names.singlenode(repo, changeid)
                 self._rev = repo.changelog.rev(self._node)
                 return
+            except KeyError:
+                pass
             except error.FilteredRepoLookupError:
                 raise
             except error.RepoLookupError:
@@ -1066,7 +1035,13 @@ class committablectx(basectx):
 
     @propertycache
     def _manifest(self):
-        """generate a manifest corresponding to the values in self._status"""
+        """generate a manifest corresponding to the values in self._status
+
+        This reuse the file nodeid from parent, but we append an extra letter
+        when modified. Modified files get an extra 'm' while added files get
+        an extra 'a'. This is used by manifests merge to see that files
+        are different and by update logic to avoid deleting newly added files.
+        """
 
         man1 = self._parents[0].manifest()
         man = man1.copy()
@@ -1190,6 +1165,8 @@ class committablectx(basectx):
         return sorted(self._repo.dirstate.matches(match))
 
     def ancestors(self):
+        for p in self._parents:
+            yield p
         for a in self._repo.changelog.ancestors(
             [p.rev() for p in self._parents]):
             yield changectx(self._repo, a)
@@ -1411,36 +1388,13 @@ class workingctx(committablectx):
         need to build a manifest and return what matches.
         """
         mf = self._repo['.']._manifestmatches(match, s)
-        modified, added, removed = s[0:3]
-        for f in modified + added:
+        for f in s.modified + s.added:
             mf[f] = _newnode
             mf.setflag(f, self.flags(f))
-        for f in removed:
+        for f in s.removed:
             if f in mf:
                 del mf[f]
         return mf
-
-    def _prestatus(self, other, s, match, listignored, listclean, listunknown):
-        """override the parent hook with a dirstate query
-
-        We use this prestatus hook to populate the status with information from
-        the dirstate.
-        """
-        # doesn't need to call super; if that changes, be aware that super
-        # calls self.manifest which would slow down the common case of calling
-        # status against a workingctx's parent
-        return self._dirstatestatus(match, listignored, listclean, listunknown)
-
-    def _poststatus(self, other, s, match, listignored, listclean, listunknown):
-        """override the parent hook with a filter for suspect symlinks
-
-        We use this poststatus hook to filter out symlinks that might have
-        accidentally ended up with the entire contents of the file they are
-        susposed to be linking to.
-        """
-        s[0] = self._filtersuspectsymlink(s[0])
-        self._status = scmutil.status(*s)
-        return s
 
     def _dirstatestatus(self, match=None, ignored=False, clean=False,
                         unknown=False):
@@ -1452,18 +1406,17 @@ class workingctx(committablectx):
             subrepos = sorted(self.substate)
         cmp, s = self._repo.dirstate.status(match, subrepos, listignored,
                                             listclean, listunknown)
-        modified, added, removed, deleted, unknown, ignored, clean = s
 
         # check for any possibly clean files
         if cmp:
             modified2, fixup = self._checklookup(cmp)
-            modified += modified2
+            s.modified.extend(modified2)
 
             # update dirstate for files that are actually clean
             if fixup and listclean:
-                clean += fixup
+                s.clean.extend(fixup)
 
-        return [modified, added, removed, deleted, unknown, ignored, clean]
+        return s
 
     def _buildstatus(self, other, s, match, listignored, listclean,
                      listunknown):
@@ -1474,14 +1427,19 @@ class workingctx(committablectx):
         building a new manifest if self (working directory) is not comparing
         against its parent (repo['.']).
         """
+        s = self._dirstatestatus(match, listignored, listclean, listunknown)
+        # Filter out symlinks that, in the case of FAT32 and NTFS filesystems,
+        # might have accidentally ended up with the entire contents of the file
+        # they are supposed to be linking to.
+        s.modified[:] = self._filtersuspectsymlink(s.modified)
         if other != self._repo['.']:
             s = super(workingctx, self)._buildstatus(other, s, match,
                                                      listignored, listclean,
                                                      listunknown)
+        self._status = s
         return s
 
-    def _matchstatus(self, other, s, match, listignored, listclean,
-                     listunknown):
+    def _matchstatus(self, other, match):
         """override the match method with a filter for directory patterns
 
         We use inheritance to customize the match.bad method only in cases of
@@ -1492,8 +1450,7 @@ class workingctx(committablectx):
         just use the default match object sent to us.
         """
         superself = super(workingctx, self)
-        match = superself._matchstatus(other, s, match, listignored, listclean,
-                                       listunknown)
+        match = superself._matchstatus(other, match)
         if other != self._repo['.']:
             def bad(f, msg):
                 # 'f' may be a directory pattern from 'match.files()',
@@ -1503,14 +1460,6 @@ class workingctx(committablectx):
                                        (self._repo.dirstate.pathto(f), msg))
             match.bad = bad
         return match
-
-    def status(self, other='.', match=None, listignored=False,
-               listclean=False, listunknown=False, listsubrepos=False):
-        # yet to be determined: what to do if 'other' is a 'workingctx' or a
-        # 'memctx'?
-        return super(workingctx, self).status(other, match, listignored,
-                                              listclean, listunknown,
-                                              listsubrepos)
 
 class committablefilectx(basefilectx):
     """A committablefilectx provides common functionality for a file context
@@ -1641,8 +1590,7 @@ class memctx(committablectx):
         p1, p2 = parents
         self._parents = [changectx(self._repo, p) for p in (p1, p2)]
         files = sorted(set(files))
-        self._status = scmutil.status(files, [], [], [], [], [], [])
-        self._filectxfn = filectxfn
+        self._files = files
         self.substate = {}
 
         # if store is not callable, wrap it in a function
@@ -1658,6 +1606,10 @@ class memctx(committablectx):
                                   islink=fctx.islink(), isexec=fctx.isexec(),
                                   copied=copied, memctx=memctx)
             self._filectxfn = getfilectx
+        else:
+            # "util.cachefunc" reduces invocation of possibly expensive
+            # "filectxfn" for performance (e.g. converting from another VCS)
+            self._filectxfn = util.cachefunc(filectxfn)
 
         self._extra = extra and extra.copy() or {}
         if self._extra.get('branch', '') == '':
@@ -1685,7 +1637,7 @@ class memctx(committablectx):
         pctx = self._parents[0]
         man = pctx.manifest().copy()
 
-        for f, fnode in man.iteritems():
+        for f in self._status.modified:
             p1node = nullid
             p2node = nullid
             p = pctx[f].parents() # if file isn't in pctx, check p2?
@@ -1695,13 +1647,45 @@ class memctx(committablectx):
                     p2node = p[1].node()
             man[f] = revlog.hash(self[f].data(), p1node, p2node)
 
+        for f in self._status.added:
+            man[f] = revlog.hash(self[f].data(), nullid, nullid)
+
+        for f in self._status.removed:
+            if f in man:
+                del man[f]
+
         return man
 
+    @propertycache
+    def _status(self):
+        """Calculate exact status from ``files`` specified at construction
+        """
+        man1 = self.p1().manifest()
+        p2 = self._parents[1]
+        # "1 < len(self._parents)" can't be used for checking
+        # existence of the 2nd parent, because "memctx._parents" is
+        # explicitly initialized by the list, of which length is 2.
+        if p2.node() != nullid:
+            man2 = p2.manifest()
+            managing = lambda f: f in man1 or f in man2
+        else:
+            managing = lambda f: f in man1
+
+        modified, added, removed = [], [], []
+        for f in self._files:
+            if not managing(f):
+                added.append(f)
+            elif self[f]:
+                modified.append(f)
+            else:
+                removed.append(f)
+
+        return scmutil.status(modified, added, removed, [], [], [], [])
 
 class memfilectx(committablefilectx):
     """memfilectx represents an in-memory file to commit.
 
-    See memctx and commitablefilectx for more details.
+    See memctx and committablefilectx for more details.
     """
     def __init__(self, repo, path, data, islink=False,
                  isexec=False, copied=None, memctx=None):

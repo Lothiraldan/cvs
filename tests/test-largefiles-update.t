@@ -207,6 +207,8 @@ automated commit like rebase/transplant
   $ hg commit -m '#4'
 
   $ hg rebase -s 1 -d 2 --keep
+  rebasing 1:72518492caa6 "#1"
+  rebasing 4:07d6153b5c04 "#4" (tip)
 #if windows
   $ hg status -A large1
   large1: * (glob)
@@ -318,8 +320,6 @@ Test a linear merge to a revision containing same-name normal file
   $ hg update -q -C 2
   $ echo 'modified large2 for linear merge' > large2
   $ hg update -q 5
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   $ hg debugdirstate --nodates | grep large2
@@ -366,8 +366,6 @@ Test that the internal linear merging works correctly
   adding manifests
   adding file changes
   added 3 changesets with 5 changes to 5 files
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   largefile large1 has a merge conflict
@@ -401,8 +399,6 @@ Test that the internal linear merging works correctly
   adding manifests
   adding file changes
   added 3 changesets with 5 changes to 5 files
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   largefile large1 has a merge conflict
@@ -449,7 +445,6 @@ Test that the internal linear merging works correctly
   $ hg update --config ui.interactive=True --config debug.dirstate.delaywrite=2 <<EOF
   > m
   > r
-  > c
   > l
   > l
   > EOF
@@ -457,8 +452,6 @@ Test that the internal linear merging works correctly
   (M)erge, keep (l)ocal or keep (r)emote? m
    subrepository sources for sub differ (in checked out version)
   use (l)ocal source (f74e50bd9e55) or (r)emote source (d65e59e952a9)? r
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   largefile large1 has a merge conflict
@@ -495,6 +488,7 @@ it is aborted by conflict.
   $ hg rebase -s 1 -d 3 --keep --config ui.interactive=True <<EOF
   > o
   > EOF
+  rebasing 1:72518492caa6 "#1"
   largefile large1 has a merge conflict
   ancestor was 4669e532d5b2c093a78eca010077e708a071bb64
   keep (l)ocal e5bb990443d6a92aaf7223813720f7566c9dd05b or
@@ -509,8 +503,27 @@ it is aborted by conflict.
   $ cat large1
   large1 in #1
 
-  $ hg rebase -q --abort
-  rebase aborted
+Test that rebase updates standins for manually modified largefiles at
+the 1st commit of resuming.
+
+  $ echo "manually modified before 'hg rebase --continue'" > large1
+  $ hg resolve -m normal1
+  (no more unresolved files)
+  $ hg rebase --continue --config ui.interactive=True <<EOF
+  > c
+  > EOF
+  rebasing 1:72518492caa6 "#1"
+  rebasing 4:07d6153b5c04 "#4"
+  local changed .hglf/large1 which remote deleted
+  use (c)hanged version or (d)elete? c
+
+  $ hg diff -c "tip~1" --nodates .hglf/large1 | grep '^[+-][0-9a-z]'
+  -e5bb990443d6a92aaf7223813720f7566c9dd05b
+  +8a4f783556e7dea21139ca0466eafce954c75c13
+  $ rm -f large1
+  $ hg update -q -C tip
+  $ cat large1
+  manually modified before 'hg rebase --continue'
 
 Test that transplant updates largefiles, of which standins are safely
 changed, even if it is aborted by conflict of other.
@@ -542,6 +555,20 @@ changed, even if it is aborted by conflict of other.
   fa44618ea25181aff4f48b70428294790cec9f61
   $ cat largeX
   largeX
+
+Test that transplant updates standins for manually modified largefiles
+at the 1st commit of resuming.
+
+  $ echo "manually modified before 'hg transplant --continue'" > large1
+  $ hg transplant --continue
+  07d6153b5c04 transplanted as f1bf30eb88cc
+  $ hg diff -c tip .hglf/large1 | grep '^[+-][0-9a-z]'
+  -e5bb990443d6a92aaf7223813720f7566c9dd05b
+  +6a4f36d4075fbe0f30ec1d26ca44e63c05903671
+  $ rm -f large1
+  $ hg update -q -C tip
+  $ cat large1
+  manually modified before 'hg transplant --continue'
 
 Test that "hg status" doesn't show removal of largefiles not managed
 in the target context.
@@ -605,3 +632,16 @@ bit correctly on the platform being unaware of it.
 #endif
 
   $ cd ..
+
+Test that "hg convert" avoids copying largefiles from the working
+directory into store, because "hg convert" doesn't update largefiles
+in the working directory (removing files under ".cache/largefiles"
+forces "hg convert" to copy corresponding largefiles)
+
+  $ cat >> $HGRCPATH <<EOF
+  > [extensions]
+  > convert =
+  > EOF
+
+  $ rm $TESTTMP/.cache/largefiles/6a4f36d4075fbe0f30ec1d26ca44e63c05903671
+  $ hg convert -q repo repo.converted

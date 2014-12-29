@@ -204,6 +204,7 @@ class revlog(object):
         self._basecache = None
         self._chunkcache = (0, '')
         self._chunkcachesize = 65536
+        self._maxchainlen = None
         self.index = []
         self._pcache = {}
         self._nodecache = {nullid: nullrev}
@@ -219,6 +220,8 @@ class revlog(object):
                 v = 0
             if 'chunkcachesize' in opts:
                 self._chunkcachesize = opts['chunkcachesize']
+            if 'maxchainlen' in opts:
+                self._maxchainlen = opts['maxchainlen']
 
         if self._chunkcachesize <= 0:
             raise RevlogError(_('revlog chunk cache size %r is not greater '
@@ -267,6 +270,8 @@ class revlog(object):
             self.nodemap = self._nodecache = nodemap
         if not self._chunkcache:
             self._chunkclear()
+        # revnum -> (chain-length, sum-delta-length)
+        self._chaininfocache = {}
 
     def tip(self):
         return self.node(len(self.index) - 2)
@@ -350,6 +355,40 @@ class revlog(object):
             rev = base
             base = index[rev][3]
         return base
+    def chainlen(self, rev):
+        return self._chaininfo(rev)[0]
+
+    def _chaininfo(self, rev):
+        chaininfocache = self._chaininfocache
+        if rev in chaininfocache:
+            return chaininfocache[rev]
+        index = self.index
+        generaldelta = self._generaldelta
+        iterrev = rev
+        e = index[iterrev]
+        clen = 0
+        compresseddeltalen = 0
+        while iterrev != e[3]:
+            clen += 1
+            compresseddeltalen += e[1]
+            if generaldelta:
+                iterrev = e[3]
+            else:
+                iterrev -= 1
+            if iterrev in chaininfocache:
+                t = chaininfocache[iterrev]
+                clen += t[0]
+                compresseddeltalen += t[1]
+                break
+            e = index[iterrev]
+        else:
+            # Add text length of base since decompressing that also takes
+            # work. For cache hits the length is already included.
+            compresseddeltalen += e[1]
+        r = (clen, compresseddeltalen)
+        chaininfocache[rev] = r
+        return r
+
     def flags(self, rev):
         return self.index[rev][0] & 0xFFFF
     def rawsize(self, rev):
@@ -368,7 +407,7 @@ class revlog(object):
 
         See the documentation for ancestor.lazyancestors for more details."""
 
-        return ancestor.lazyancestors(self, revs, stoprev=stoprev,
+        return ancestor.lazyancestors(self.parentrevs, revs, stoprev=stoprev,
                                       inclusive=inclusive)
 
     def descendants(self, revs):
@@ -456,6 +495,20 @@ class revlog(object):
         missing.sort()
         return has, [self.node(r) for r in missing]
 
+    def incrementalmissingrevs(self, common=None):
+        """Return an object that can be used to incrementally compute the
+        revision numbers of the ancestors of arbitrary sets that are not
+        ancestors of common. This is an ancestor.incrementalmissingancestors
+        object.
+
+        'common' is a list of revision numbers. If common is not supplied, uses
+        nullrev.
+        """
+        if common is None:
+            common = [nullrev]
+
+        return ancestor.incrementalmissingancestors(self.parentrevs, common)
+
     def findmissingrevs(self, common=None, heads=None):
         """Return the revision numbers of the ancestors of heads that
         are not ancestors of common.
@@ -477,7 +530,8 @@ class revlog(object):
         if heads is None:
             heads = self.headrevs()
 
-        return ancestor.missingancestors(heads, common, self.parentrevs)
+        inc = self.incrementalmissingrevs(common=common)
+        return inc.missingancestors(heads)
 
     def findmissing(self, common=None, heads=None):
         """Return the ancestors of heads that are not ancestors of common.
@@ -502,8 +556,8 @@ class revlog(object):
         common = [self.rev(n) for n in common]
         heads = [self.rev(n) for n in heads]
 
-        return [self.node(r) for r in
-                ancestor.missingancestors(heads, common, self.parentrevs)]
+        inc = self.incrementalmissingrevs(common=common)
+        return [self.node(r) for r in inc.missingancestors(heads)]
 
     def nodesbetween(self, roots=None, heads=None):
         """Return a topological path from 'roots' to 'heads'.
@@ -1202,11 +1256,15 @@ class revlog(object):
                 base = rev
             else:
                 base = chainbase
-            return dist, l, data, base, chainbase
+            chainlen, compresseddeltalen = self._chaininfo(rev)
+            chainlen += 1
+            compresseddeltalen += l
+            return dist, l, data, base, chainbase, chainlen, compresseddeltalen
 
         curr = len(self)
         prev = curr - 1
         base = chainbase = curr
+        chainlen = None
         offset = self.end(prev)
         flags = 0
         d = None
@@ -1226,7 +1284,7 @@ class revlog(object):
                     d = builddelta(prev)
             else:
                 d = builddelta(prev)
-            dist, l, data, base, chainbase = d
+            dist, l, data, base, chainbase, chainlen, compresseddeltalen = d
 
         # full versions are inserted when the needed deltas
         # become comparable to the uncompressed text
@@ -1235,7 +1293,14 @@ class revlog(object):
                                         cachedelta[1])
         else:
             textlen = len(text)
-        if d is None or dist > textlen * 2:
+
+        # - 'dist' is the distance from the base revision -- bounding it limits
+        #   the amount of I/O we need to do.
+        # - 'compresseddeltalen' is the sum of the total size of deltas we need
+        #   to apply -- bounding it limits the amount of CPU we consume.
+        if (d is None or dist > textlen * 4 or l > textlen or
+            compresseddeltalen > textlen * 2 or
+            (self._maxchainlen and chainlen > self._maxchainlen)):
             text = buildtext()
             data = self.compress(text)
             l = len(data[1]) + len(data[0])
@@ -1419,6 +1484,7 @@ class revlog(object):
 
         # then reset internal state in memory to forget those revisions
         self._cache = None
+        self._chaininfocache = {}
         self._chunkclear()
         for x in xrange(rev, len(self)):
             del self.nodemap[self.node(x)]

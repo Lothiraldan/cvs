@@ -18,7 +18,36 @@
   dir/bar_2
   foo_2
   committed changeset 1:e65414bf35c5
-  $ cd ../..
+  $ cd ..
+  $ hg forget foo
+  $ hg -v addremove
+  adding foo
+  $ hg forget foo
+#if windows
+  $ hg -v addremove nonexistant
+  nonexistant: The system cannot find the file specified
+  [1]
+#else
+  $ hg -v addremove nonexistant
+  nonexistant: No such file or directory
+  [1]
+#endif
+  $ cd ..
+
+  $ hg init subdir
+  $ cd subdir
+  $ mkdir dir
+  $ cd dir
+  $ touch a.py
+  $ hg addremove 'glob:*.py'
+  adding a.py
+  $ hg forget a.py
+  $ hg addremove -I 'glob:*.py'
+  adding a.py
+  $ hg forget a.py
+  $ hg addremove
+  adding dir/a.py
+  $ cd ..
 
   $ hg init sim
   $ cd sim
@@ -45,4 +74,24 @@
   adding d
   recording removal of a as rename to b (100% similar)
   $ hg commit -mb
+  $ cp b c
+  $ hg forget b
+  $ hg addremove -s 50
+  adding b
+  adding c
+
+  $ rm c
+#if windows
+  $ hg ci -A -m "c" nonexistant
+  nonexistant: The system cannot find the file specified
+  abort: failed to mark all new/missing files as added/removed
+  [255]
+#else
+  $ hg ci -A -m "c" nonexistant
+  nonexistant: No such file or directory
+  abort: failed to mark all new/missing files as added/removed
+  [255]
+#endif
+  $ hg st
+  ! c
   $ cd ..
