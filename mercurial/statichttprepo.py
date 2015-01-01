@@ -8,7 +8,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import changelog, byterange, url, error
+import changelog, byterange, url, error, namespaces
 import localrepo, manifest, util, scmutil, store
 import urllib, urllib2, errno, os
 
@@ -70,7 +70,7 @@ def build_opener(ui, authinfo):
         def __init__(self, base):
             self.base = base
 
-        def __call__(self, path, mode="r", atomictemp=None):
+        def __call__(self, path, mode='r', *args, **kw):
             if mode not in ('r', 'rb'):
                 raise IOError('Permission denied')
             f = "/".join((self.base, urllib.quote(path)))
@@ -105,6 +105,8 @@ class statichttprepository(localrepo.localrepository):
         self.opener = opener(self.path)
         self.vfs = self.opener
         self._phasedefaults = []
+
+        self.names = namespaces.namespaces()
 
         try:
             requirements = scmutil.readrequires(self.opener, self.supported)

@@ -18,6 +18,7 @@ import tags as tagsmod
 from lock import release
 import weakref, errno, os, time, inspect
 import branchmap, pathutil
+import namespaces
 propertycache = util.propertycache
 filecache = scmutil.filecache
 
@@ -297,6 +298,9 @@ class localrepository(object):
         # - bookmark changes
         self.filteredrevcache = {}
 
+        # generic mapping between names and nodes
+        self.names = namespaces.namespaces()
+
     def close(self):
         pass
 
@@ -316,6 +320,9 @@ class localrepository(object):
         chunkcachesize = self.ui.configint('format', 'chunkcachesize')
         if chunkcachesize is not None:
             self.sopener.options['chunkcachesize'] = chunkcachesize
+        maxchainlen = self.ui.configint('format', 'maxchainlen')
+        if maxchainlen is not None:
+            self.sopener.options['maxchainlen'] = maxchainlen
 
     def _writerequirements(self):
         reqfile = self.opener("requires", "w")
@@ -447,6 +454,10 @@ class localrepository(object):
     def __getitem__(self, changeid):
         if changeid is None:
             return context.workingctx(self)
+        if isinstance(changeid, slice):
+            return [context.changectx(self, i)
+                    for i in xrange(*changeid.indices(len(self)))
+                    if i not in self.changelog.filteredrevs]
         return context.changectx(self, changeid)
 
     def __contains__(self, changeid):
@@ -747,8 +758,14 @@ class localrepository(object):
         # if publishing we can't copy if there is filtered content
         return not self.filtered('visible').changelog.filteredrevs
 
+    def shared(self):
+        '''the type of shared repository (None if not shared)'''
+        if self.sharedpath != self.path:
+            return 'store'
+        return None
+
     def join(self, f, *insidef):
-        return os.path.join(self.path, f, *insidef)
+        return self.vfs.join(os.path.join(f, *insidef))
 
     def wjoin(self, f, *insidef):
         return os.path.join(self.root, f, *insidef)
@@ -862,9 +879,16 @@ class localrepository(object):
     def wwritedata(self, filename, data):
         return self._filter(self._decodefilterpats, filename, data)
 
-    def transaction(self, desc, report=None):
+    def currenttransaction(self):
+        """return the current transaction or None if non exists"""
         tr = self._transref and self._transref() or None
         if tr and tr.running():
+            return tr
+        return None
+
+    def transaction(self, desc, report=None):
+        tr = self.currenttransaction()
+        if tr is not None:
             return tr.nest()
 
         # abort here if the journal already exists
@@ -873,17 +897,18 @@ class localrepository(object):
                 _("abandoned transaction found"),
                 hint=_("run 'hg recover' to clean up transaction"))
 
-        def onclose():
-            self.store.write(self._transref())
-
         self._writejournal(desc)
         renames = [(vfs, x, undoname(x)) for vfs, x in self._journalfiles()]
         rp = report and report or self.ui.warn
-        tr = transaction.transaction(rp, self.sopener,
+        vfsmap = {'plain': self.opener} # root of .hg/
+        tr = transaction.transaction(rp, self.sopener, vfsmap,
                                      "journal",
                                      aftertrans(renames),
-                                     self.store.createmode,
-                                     onclose)
+                                     self.store.createmode)
+        # note: writing the fncache only during finalize mean that the file is
+        # outdated when running hooks. As fncache is used for streaming clone,
+        # this is not expected to break anything that happen during the hooks.
+        tr.addfinalize('flush-fncache', self.store.write)
         self._transref = weakref.ref(tr)
         return tr
 
@@ -915,7 +940,9 @@ class localrepository(object):
         try:
             if self.svfs.exists("journal"):
                 self.ui.status(_("rolling back interrupted transaction\n"))
-                transaction.rollback(self.sopener, "journal",
+                vfsmap = {'': self.sopener,
+                          'plain': self.opener,}
+                transaction.rollback(self.sopener, vfsmap, "journal",
                                      self.ui.warn)
                 self.invalidate()
                 return True
@@ -971,7 +998,8 @@ class localrepository(object):
 
         parents = self.dirstate.parents()
         self.destroying()
-        transaction.rollback(self.sopener, 'undo', ui.warn)
+        vfsmap = {'plain': self.opener}
+        transaction.rollback(self.sopener, vfsmap, 'undo', ui.warn)
         if self.vfs.exists('undo.bookmarks'):
             self.vfs.rename('undo.bookmarks', 'bookmarks')
         if self.svfs.exists('undo.phaseroots'):
@@ -1437,15 +1465,14 @@ class localrepository(object):
                 files = []
 
             # update changelog
-            self.changelog.delayupdate()
+            self.changelog.delayupdate(tr)
             n = self.changelog.add(mn, files, ctx.description(),
                                    trp, p1.node(), p2.node(),
                                    user, ctx.date(), ctx.extra().copy())
-            p = lambda: self.changelog.writepending() and self.root or ""
+            p = lambda: tr.writepending() and self.root or ""
             xp1, xp2 = p1.hex(), p2 and p2.hex() or ''
             self.hook('pretxncommit', throw=True, node=hex(n), parent1=xp1,
                       parent2=xp2, pending=p)
-            self.changelog.finalize(trp)
             # set the new commit is proper phase
             targetphase = subrepo.newcommitphase(self.ui, ctx)
             if targetphase:
@@ -1713,7 +1740,7 @@ class localrepository(object):
         finally:
             lock.release()
 
-    def clone(self, remote, heads=[], stream=False):
+    def clone(self, remote, heads=[], stream=None):
         '''clone remote repository.
 
         keyword arguments:
@@ -1728,7 +1755,7 @@ class localrepository(object):
         # and format flags on "stream" capability, and use
         # uncompressed only if compatible.
 
-        if not stream:
+        if stream is None:
             # if the server explicitly prefers to stream (for fast LANs)
             stream = remote.capable('stream-preferred')
 
@@ -1764,8 +1791,10 @@ class localrepository(object):
             return False
         self.ui.debug('pushing key for "%s:%s"\n' % (namespace, key))
         ret = pushkey.push(self, namespace, key, old, new)
-        self.hook('pushkey', namespace=namespace, key=key, old=old, new=new,
-                  ret=ret)
+        def runhook():
+            self.hook('pushkey', namespace=namespace, key=key, old=old, new=new,
+                      ret=ret)
+        self._afterlock(runhook)
         return ret
 
     def listkeys(self, namespace):
