@@ -1,6 +1,6 @@
 # keyword.py - $Keyword$ expansion for Mercurial
 #
-# Copyright 2007-2014 Christian Ebert <blacktrash@gmx.net>
+# Copyright 2007-2015 Christian Ebert <blacktrash@gmx.net>
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
@@ -264,8 +264,17 @@ class kwtemplater(object):
             if util.binary(data):
                 continue
             if expand:
+                parents = ctx.parents()
                 if lookup:
                     ctx = self.linkctx(f, mf[f])
+                elif self.restrict and len(parents) > 1:
+                    # merge commit
+                    # in case of conflict f is in modified state during
+                    # merge, even if f does not differ from f in parent
+                    for p in parents:
+                        if f in p and not p[f].cmp(ctx[f]):
+                            ctx = p[f].changectx()
+                            break
                 data, found = self.substitute(data, f, ctx, re_kw.subn)
             elif self.restrict:
                 found = re_kw.search(data)
@@ -448,12 +457,9 @@ def demo(ui, repo, *args, **opts):
     repo.commit(text=msg)
     ui.status(_('\n\tkeywords expanded\n'))
     ui.write(repo.wread(fn))
-    for root, dirs, files in os.walk(tmpdir, topdown=False):
+    for root, dirs, files in os.walk(tmpdir):
         for f in files:
-            util.unlink(os.path.join(root, f))
-        for d in dirs:
-            os.rmdir(os.path.join(root, d))
-    os.rmdir(tmpdir)
+            util.unlinkpath(repo.vfs.reljoin(root, f))
 
 @command('kwexpand',
     commands.walkopts,
