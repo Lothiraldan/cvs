@@ -118,7 +118,7 @@ class transplanter(object):
         revs = sorted(revmap)
         p1, p2 = repo.dirstate.parents()
         pulls = []
-        diffopts = patch.diffopts(self.ui, opts)
+        diffopts = patch.difffeatureopts(self.ui, opts)
         diffopts.git = True
 
         lock = wlock = tr = None
@@ -233,13 +233,12 @@ class transplanter(object):
         fp.close()
 
         try:
-            util.system('%s %s %s' % (filter, util.shellquote(headerfile),
-                                   util.shellquote(patchfile)),
-                        environ={'HGUSER': changelog[1],
-                                 'HGREVISION': revlog.hex(node),
-                                 },
-                        onerr=util.Abort, errprefix=_('filter failed'),
-                        out=self.ui.fout)
+            self.ui.system('%s %s %s' % (filter, util.shellquote(headerfile),
+                                         util.shellquote(patchfile)),
+                           environ={'HGUSER': changelog[1],
+                                    'HGREVISION': revlog.hex(node),
+                                    },
+                           onerr=util.Abort, errprefix=_('filter failed'))
             user, date, msg = self.parselog(file(headerfile))[1:4]
         finally:
             os.unlink(headerfile)

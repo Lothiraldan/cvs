@@ -106,10 +106,72 @@ Check that deep archiving works
   $ hg --config extensions.largefiles=! add sub1/sub2/test.txt
   $ mkdir sub1/sub2/folder
   $ echo 'subfolder' > sub1/sub2/folder/test.txt
-  $ hg --config extensions.largefiles=! add sub1/sub2/folder/test.txt
-  $ hg ci -Sm "add test.txt"
+  $ hg ci -ASm "add test.txt"
+  adding sub1/sub2/folder/test.txt
   committing subrepository sub1
   committing subrepository sub1/sub2 (glob)
+
+.. but first take a detour through some deep removal testing
+
+  $ hg remove -S -I 're:.*.txt' .
+  removing sub1/sub2/folder/test.txt (glob)
+  removing sub1/sub2/test.txt (glob)
+  $ hg status -S
+  R sub1/sub2/folder/test.txt
+  R sub1/sub2/test.txt
+  $ hg update -Cq
+  $ hg remove -I 're:.*.txt' sub1
+  $ hg status -S
+  $ hg remove sub1/sub2/folder/test.txt
+  $ hg remove sub1/.hgsubstate
+  $ hg status -S
+  R sub1/.hgsubstate
+  R sub1/sub2/folder/test.txt
+  $ hg update -Cq
+  $ touch sub1/foo
+  $ hg forget sub1/sub2/folder/test.txt
+  $ rm sub1/sub2/test.txt
+
+Test relative path printing + subrepos
+  $ mkdir -p foo/bar
+  $ cd foo
+  $ touch bar/abc
+  $ hg addremove -S ..
+  adding ../sub1/sub2/folder/test.txt (glob)
+  removing ../sub1/sub2/test.txt (glob)
+  adding ../sub1/foo (glob)
+  adding bar/abc (glob)
+  $ cd ..
+  $ hg status -S
+  A foo/bar/abc
+  A sub1/foo
+  R sub1/sub2/test.txt
+  $ hg update -Cq
+  $ touch sub1/sub2/folder/bar
+  $ hg addremove sub1/sub2
+  adding sub1/sub2/folder/bar (glob)
+  $ hg status -S
+  A sub1/sub2/folder/bar
+  ? foo/bar/abc
+  ? sub1/foo
+  $ hg update -Cq
+  $ hg addremove sub1
+  adding sub1/sub2/folder/bar (glob)
+  adding sub1/foo (glob)
+  $ hg update -Cq
+  $ rm sub1/sub2/folder/test.txt
+  $ rm sub1/sub2/test.txt
+  $ hg ci -ASm "remove test.txt"
+  adding sub1/sub2/folder/bar
+  removing sub1/sub2/folder/test.txt
+  removing sub1/sub2/test.txt
+  adding sub1/foo
+  adding foo/bar/abc
+  committing subrepository sub1
+  committing subrepository sub1/sub2 (glob)
+  $ hg rollback -q
+  $ hg up -Cq
+
   $ hg --config extensions.largefiles=! archive -S ../archive_all
   $ find ../archive_all | sort
   ../archive_all

@@ -61,6 +61,8 @@ Try to call --continue:
 Conflicting rebase:
 
   $ hg rebase -s 3 -d 2
+  rebasing 3:3163e20567cc "L1"
+  rebasing 4:46f0b057b5c0 "L2"
   merging common
   warning: conflicts during merge.
   merging common incomplete! (edit conflicts, then use 'hg resolve --mark')
@@ -70,6 +72,8 @@ Conflicting rebase:
 Try to continue without solving the conflict:
 
   $ hg rebase --continue
+  already rebased 3:3163e20567cc "L1" as 3e046f2ecedb
+  rebasing 4:46f0b057b5c0 "L2"
   abort: unresolved merge conflicts (see hg help resolve)
   [255]
 
@@ -79,7 +83,10 @@ Conclude rebase:
   $ hg resolve -m common
   (no more unresolved files)
   $ hg rebase --continue
-  saved backup bundle to $TESTTMP/a/.hg/strip-backup/*-backup.hg (glob)
+  already rebased 3:3163e20567cc "L1" as 3e046f2ecedb
+  rebasing 4:46f0b057b5c0 "L2"
+  rebasing 5:8029388f38dc "L3" (mybook)
+  saved backup bundle to $TESTTMP/a/.hg/strip-backup/3163e20567cc-backup.hg (glob)
 
   $ hg tglog
   @  5:secret 'L3'  mybook
@@ -136,7 +143,6 @@ Check that the right ancestors is used while rebasing a merge (issue4041)
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd issue4041
-  $ hg phase --draft --force 9
   $ hg log -G
   o    changeset:   10:2f2496ddf49d
   |\   branch:      f1
@@ -212,6 +218,11 @@ Check that the right ancestors is used while rebasing a merge (issue4041)
   
   $ hg rebase -s9 -d2 --debug # use debug to really check merge base used
   rebase onto 2 starting from e31216eec445
+  ignoring null merge rebase of 3
+  ignoring null merge rebase of 4
+  ignoring null merge rebase of 6
+  ignoring null merge rebase of 8
+  rebasing 9:e31216eec445 "more changes to f1"
   rebasing: 9:e31216eec445 5/6 changesets (83.33%)
    future parents are 2 and -1
   rebase status stored
@@ -235,6 +246,8 @@ Check that the right ancestors is used while rebasing a merge (issue4041)
   getting f1.txt
   updating: f1.txt 1/1 files (100.00%)
   f1.txt
+  rebased as 19c888675e13
+  rebasing 10:2f2496ddf49d "merge" (tip)
   rebasing: 10:2f2496ddf49d 6/6 changesets (100.00%)
    future parents are 11 and 7
   rebase status stored
@@ -249,6 +262,7 @@ Check that the right ancestors is used while rebasing a merge (issue4041)
   getting f1.txt
   updating: f1.txt 1/1 files (100.00%)
   f1.txt
+  rebased as 2a7f09cac94c
   rebase merging completed
   update back to initial working directory parent
   resolving manifests
@@ -301,7 +315,6 @@ Check that the right ancestors is used while rebasing a merge (issue4041)
   adding f1.txt revisions
   files: 1/1 chunks (100.00%)
   added 2 changesets with 2 changes to 1 files
-  removing unknown node e31216eec445 from 1-phase boundary
   invalid branchheads cache (served): tip differs
   rebase completed
   updating the branch cache
