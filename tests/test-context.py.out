@@ -1,0 +1,13 @@
+workingfilectx.date = (1000, 0)
+ASCII   : Gr?ezi!
+Latin-1 : Grüezi!
+UTF-8   : GrÃ¼ezi!
+<status modified=['foo'], added=[], removed=[], deleted=[], unknown=[], ignored=[], clean=[]>
+diff --git a/foo b/foo
+
+--- a/foo
++++ b/foo
+@@ -1,1 +1,2 @@
+ foo
++bar
+
