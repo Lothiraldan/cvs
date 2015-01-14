@@ -158,7 +158,7 @@ def defaultdest(source):
         return ''
     return os.path.basename(os.path.normpath(path))
 
-def share(ui, source, dest=None, update=True):
+def share(ui, source, dest=None, update=True, bookmarks=True):
     '''create a shared repository'''
 
     if not islocal(source):
@@ -225,6 +225,9 @@ def share(ui, source, dest=None, update=True):
                 continue
         _update(r, uprev)
 
+    if bookmarks:
+        r.opener('bookmarks.shared', 'w').close()
+
 def copystore(ui, srcrepo, destpath):
     '''copy files from store of srcrepo in destpath
 
@@ -284,7 +287,8 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
     dest: URL of destination repository to create (defaults to base
     name of source repository)
 
-    pull: always pull from source repository, even in local case
+    pull: always pull from source repository, even in local case or if the
+    server prefers streaming
 
     stream: stream raw data uncompressed from repository (fast over
     LAN, slow over WAN)
@@ -390,7 +394,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
 
             dstcachedir = os.path.join(destpath, 'cache')
             # In local clones we're copying all nodes, not just served
-            # ones. Therefore copy all branchcaches over.
+            # ones. Therefore copy all branch caches over.
             copybranchcache('branch2')
             for cachename in repoview.filtertable:
                 copybranchcache('branch2-%s' % cachename)
@@ -420,6 +424,11 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                 revs = [srcpeer.lookup(r) for r in rev]
                 checkout = revs[0]
             if destpeer.local():
+                if not stream:
+                    if pull:
+                        stream = False
+                    else:
+                        stream = None
                 destpeer.local().clone(srcpeer, heads=revs, stream=stream)
             elif srcrepo:
                 exchange.push(srcrepo, destpeer, revs=revs,

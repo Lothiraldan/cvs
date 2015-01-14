@@ -67,6 +67,11 @@ Test copies and moves from a directory other than root (issue3516)
   dirc/baz/largefile
   dirc/dirb
   dirc/dirb/largefile
+
+  $ hg clone -q . ../fetch
+  $ hg --config extensions.fetch= fetch ../fetch
+  abort: uncommitted changes
+  [255]
   $ hg up -qC
   $ cd ..
 
@@ -252,23 +257,57 @@ Add a normal file to the subrepo, then test archiving
   $ echo 'normal file' > subrepo/normal.txt
   $ touch large.dat
   $ mv subrepo/large.txt subrepo/renamed-large.txt
-  $ hg -R subrepo addremove --dry-run
-  removing large.txt
-  adding normal.txt
-  adding renamed-large.txt
+  $ hg addremove -S --dry-run
+  adding large.dat as a largefile
+  removing subrepo/large.txt
+  adding subrepo/normal.txt
+  adding subrepo/renamed-large.txt
   $ hg status -S
   ! subrepo/large.txt
   ? large.dat
   ? subrepo/normal.txt
   ? subrepo/renamed-large.txt
-  $ mv subrepo/renamed-large.txt subrepo/large.txt
-  $ hg -R subrepo add subrepo/normal.txt
 
-  $ hg addremove
+  $ hg addremove --dry-run subrepo
+  removing subrepo/large.txt (glob)
+  adding subrepo/normal.txt (glob)
+  adding subrepo/renamed-large.txt (glob)
+  $ hg status -S
+  ! subrepo/large.txt
+  ? large.dat
+  ? subrepo/normal.txt
+  ? subrepo/renamed-large.txt
+  $ cd ..
+
+  $ hg -R statusmatch addremove --dry-run statusmatch/subrepo
+  removing statusmatch/subrepo/large.txt (glob)
+  adding statusmatch/subrepo/normal.txt (glob)
+  adding statusmatch/subrepo/renamed-large.txt (glob)
+  $ hg -R statusmatch status -S
+  ! subrepo/large.txt
+  ? large.dat
+  ? subrepo/normal.txt
+  ? subrepo/renamed-large.txt
+
+  $ hg -R statusmatch addremove --dry-run -S
   adding large.dat as a largefile
+  removing subrepo/large.txt
+  adding subrepo/normal.txt
+  adding subrepo/renamed-large.txt
+  $ cd statusmatch
+
+  $ mv subrepo/renamed-large.txt subrepo/large.txt
+  $ hg addremove subrepo
+  adding subrepo/normal.txt (glob)
+  $ hg forget subrepo/normal.txt
+
+  $ hg addremove -S
+  adding large.dat as a largefile
+  adding subrepo/normal.txt
   $ rm large.dat
 
-  $ hg addremove
+  $ hg addremove subrepo
+  $ hg addremove -S
   removing large.dat
 
 Lock in subrepo, otherwise the change isn't archived
@@ -322,6 +361,15 @@ Test update with subrepos.
   0 largefiles updated, 0 removed
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status -S
+
+  $ hg rm -v subrepo/large.txt
+  removing subrepo/large.txt (glob)
+  $ hg revert -R subrepo subrepo/large.txt
+  $ rm subrepo/large.txt
+  $ hg addremove -S
+  removing subrepo/large.txt
+  $ hg st -S
+  R subrepo/large.txt
 
 Test archiving a revision that references a subrepo that is not yet
 cloned (see test-subrepo-recursion.t):
@@ -501,7 +549,7 @@ check messages when there are files to upload:
   b
   
   $ hg -R clone2 outgoing --large --graph --template "{rev}"
-  comparing with $TESTTMP/issue3651/src
+  comparing with $TESTTMP/issue3651/src (glob)
   searching for changes
   @  1
   
@@ -608,7 +656,7 @@ check messages when there are files to upload:
       89e6c98d92887913cadf06b2adb97f26cde4849b
   
 
-Pusing revision #1 causes uploading entity 89e6c98d9288, which is
+Pushing revision #1 causes uploading entity 89e6c98d9288, which is
 shared also by largefiles b1, b2 in revision #2 and b in revision #5.
 
 Then, entity 89e6c98d9288 is not treated as "outgoing entity" at "hg
@@ -851,4 +899,33 @@ locally (issue4109)
   $ cd ..
 
 
+Test "pull --rebase" when rebase is enabled before largefiles (issue3861)
+=========================================================================
 
+  $ hg showconfig extensions | grep largefiles
+  extensions.largefiles=!
+
+  $ mkdir issue3861
+  $ cd issue3861
+  $ hg init src
+  $ hg clone -q src dst
+  $ echo a > src/a
+  $ hg -R src commit -Aqm "#0"
+  Invoking status precommit hook
+  A a
+
+  $ cat >> dst/.hg/hgrc <<EOF
+  > [extensions]
+  > largefiles=
+  > EOF
+  $ hg -R dst pull --rebase
+  pulling from $TESTTMP/issue3861/src (glob)
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  nothing to rebase - working directory parent is already an ancestor of destination bf5e395ced2c
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+  $ cd ..

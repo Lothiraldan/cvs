@@ -10,7 +10,6 @@ import parser, util, error, discovery, hbisect, phases
 import node
 import heapq
 import match as matchmod
-import ancestor as ancestormod
 from i18n import _
 import encoding
 import obsolete as obsmod
@@ -103,7 +102,8 @@ def _revsbetween(repo, roots, heads):
     return baseset(sorted(reachable))
 
 elements = {
-    "(": (20, ("group", 1, ")"), ("func", 1, ")")),
+    "(": (21, ("group", 1, ")"), ("func", 1, ")")),
+    "##": (20, None, ("_concat", 20)),
     "~": (18, None, ("ancestor", 18)),
     "^": (18, None, ("parent", 18), ("parentpost", 18)),
     "-": (5, ("negate", 19), ("minus", 5)),
@@ -116,6 +116,7 @@ elements = {
     "!": (10, ("not", 10)),
     "and": (5, None, ("and", 5)),
     "&": (5, None, ("and", 5)),
+    "%": (5, None, ("only", 5), ("onlypost", 5)),
     "or": (4, None, ("or", 4)),
     "|": (4, None, ("or", 4)),
     "+": (4, None, ("or", 4)),
@@ -149,7 +150,10 @@ def tokenize(program, lookup=None):
         elif c == '.' and program[pos:pos + 2] == '..': # look ahead carefully
             yield ('..', None, pos)
             pos += 1 # skip ahead
-        elif c in "():,-|&+!~^": # handle simple operators
+        elif c == '#' and program[pos:pos + 2] == '##': # look ahead carefully
+            yield ('##', None, pos)
+            pos += 1 # skip ahead
+        elif c in "():,-|&+!~^%": # handle simple operators
             yield (c, None, pos)
         elif (c in '"\'' or c == 'r' and
               program[pos:pos + 2] in ("r'", 'r"')): # handle quoted strings
@@ -265,9 +269,8 @@ def symbolset(repo, subset, x):
     return stringset(repo, subset, x)
 
 def rangeset(repo, subset, x, y):
-    cl = baseset(repo.changelog)
-    m = getset(repo, cl, x)
-    n = getset(repo, cl, y)
+    m = getset(repo, fullreposet(repo), x)
+    n = getset(repo, fullreposet(repo), y)
 
     if not m or not n:
         return baseset()
@@ -371,7 +374,7 @@ def ancestorspec(repo, subset, x, n):
         raise error.ParseError(_("~ expects a number"))
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, baseset(cl), x):
+    for r in getset(repo, fullreposet(repo), x):
         for i in range(n):
             r = cl.parentrevs(r)[0]
         ps.add(r)
@@ -385,30 +388,6 @@ def author(repo, subset, x):
     n = encoding.lower(getstring(x, _("author requires a string")))
     kind, pattern, matcher = _substringmatcher(n)
     return subset.filter(lambda x: matcher(encoding.lower(repo[x].user())))
-
-def only(repo, subset, x):
-    """``only(set, [set])``
-    Changesets that are ancestors of the first set that are not ancestors
-    of any other head in the repo. If a second set is specified, the result
-    is ancestors of the first set that are not ancestors of the second set
-    (i.e. ::<set1> - ::<set2>).
-    """
-    cl = repo.changelog
-    # i18n: "only" is a keyword
-    args = getargs(x, 1, 2, _('only takes one or two arguments'))
-    include = getset(repo, spanset(repo), args[0])
-    if len(args) == 1:
-        if not include:
-            return baseset()
-
-        descendants = set(_revdescendants(repo, include, False))
-        exclude = [rev for rev in cl.headrevs()
-            if not rev in descendants and not rev in include]
-    else:
-        exclude = getset(repo, spanset(repo), args[1])
-
-    results = set(ancestormod.missingancestors(include, exclude, cl.parentrevs))
-    return subset & results
 
 def bisect(repo, subset, x):
     """``bisect(string)``
@@ -478,6 +457,11 @@ def branch(repo, subset, x):
     a regular expression. To match a branch that actually starts with `re:`,
     use the prefix `literal:`.
     """
+    import branchmap
+    urepo = repo.unfiltered()
+    ucl = urepo.changelog
+    getbi = branchmap.revbranchcache(urepo).branchinfo
+
     try:
         b = getstring(x, '')
     except error.ParseError:
@@ -489,16 +473,16 @@ def branch(repo, subset, x):
             # note: falls through to the revspec case if no branch with
             # this name exists
             if pattern in repo.branchmap():
-                return subset.filter(lambda r: matcher(repo[r].branch()))
+                return subset.filter(lambda r: matcher(getbi(ucl, r)[0]))
         else:
-            return subset.filter(lambda r: matcher(repo[r].branch()))
+            return subset.filter(lambda r: matcher(getbi(ucl, r)[0]))
 
     s = getset(repo, spanset(repo), x)
     b = set()
     for r in s:
-        b.add(repo[r].branch())
+        b.add(getbi(ucl, r)[0])
     c = s.__contains__
-    return subset.filter(lambda r: c(r) or repo[r].branch() in b)
+    return subset.filter(lambda r: c(r) or getbi(ucl, r)[0] in b)
 
 def bumped(repo, subset, x):
     """``bumped()``
@@ -573,7 +557,7 @@ def children(repo, subset, x):
     """``children(set)``
     Child changesets of changesets in set.
     """
-    s = getset(repo, baseset(repo), x)
+    s = getset(repo, fullreposet(repo), x)
     cs = _children(repo, subset, s)
     return subset & cs
 
@@ -797,24 +781,106 @@ def filelog(repo, subset, x):
     The pattern without explicit kind like ``glob:`` is expected to be
     relative to the current directory and match against a file exactly
     for efficiency.
+
+    If some linkrev points to revisions filtered by the current repoview, we'll
+    work around it to return a non-filtered value.
     """
 
     # i18n: "filelog" is a keyword
     pat = getstring(x, _("filelog requires a pattern"))
     s = set()
+    cl = repo.changelog
 
     if not matchmod.patkind(pat):
         f = pathutil.canonpath(repo.root, repo.getcwd(), pat)
-        fl = repo.file(f)
-        for fr in fl:
-            s.add(fl.linkrev(fr))
+        files = [f]
     else:
         m = matchmod.match(repo.root, repo.getcwd(), [pat], ctx=repo[None])
-        for f in repo[None]:
-            if m(f):
-                fl = repo.file(f)
-                for fr in fl:
-                    s.add(fl.linkrev(fr))
+        files = (f for f in repo[None] if m(f))
+
+    for f in files:
+        backrevref = {}  # final value for: filerev -> changerev
+        lowestchild = {} # lowest known filerev child of a filerev
+        delayed = []     # filerev with filtered linkrev, for post-processing
+        lowesthead = None # cache for manifest content of all head revisions
+        fl = repo.file(f)
+        for fr in list(fl):
+            rev = fl.linkrev(fr)
+            if rev not in cl:
+                # changerev pointed in linkrev is filtered
+                # record it for post processing.
+                delayed.append((fr, rev))
+                continue
+            for p in fl.parentrevs(fr):
+                if 0 <= p and p not in lowestchild:
+                    lowestchild[p] = fr
+            backrevref[fr] = rev
+            s.add(rev)
+
+        # Post-processing of all filerevs we skipped because they were
+        # filtered. If such filerevs have known and unfiltered children, this
+        # means they have an unfiltered appearance out there. We'll use linkrev
+        # adjustment to find one of these appearances. The lowest known child
+        # will be used as a starting point because it is the best upper-bound we
+        # have.
+        #
+        # This approach will fail when an unfiltered but linkrev-shadowed
+        # appearance exists in a head changeset without unfiltered filerev
+        # children anywhere.
+        while delayed:
+            # must be a descending iteration. To slowly fill lowest child
+            # information that is of potential use by the next item.
+            fr, rev = delayed.pop()
+            lkr = rev
+
+            child = lowestchild.get(fr)
+
+            if child is None:
+                # search for existence of this file revision in a head revision.
+                # There are three possibilities:
+                # - the revision exists in a head and we can find an
+                #   introduction from there,
+                # - the revision does not exist in a head because it has been
+                #   changed since its introduction: we would have found a child
+                #   and be in the other 'else' clause,
+                # - all versions of the revision are hidden.
+                if lowesthead is None:
+                    lowesthead = {}
+                    for h in repo.heads():
+                        fnode = repo[h].manifest().get(f)
+                        if fnode is not None:
+                            lowesthead[fl.rev(fnode)] = h
+                headrev = lowesthead.get(fr)
+                if headrev is None:
+                    # content is nowhere unfiltered
+                    continue
+                rev = repo[headrev][f].introrev()
+            else:
+                # the lowest known child is a good upper bound
+                childcrev = backrevref[child]
+                # XXX this does not guarantee returning the lowest
+                # introduction of this revision, but this gives a
+                # result which is a good start and will fit in most
+                # cases. We probably need to fix the multiple
+                # introductions case properly (report each
+                # introduction, even for identical file revisions)
+                # once and for all at some point anyway.
+                for p in repo[childcrev][f].parents():
+                    if p.filerev() == fr:
+                        rev = p.rev()
+                        break
+                if rev == lkr:  # no shadowed entry found
+                    # XXX This should never happen unless some manifest points
+                    # to biggish file revisions (like a revision that uses a
+                    # parent that never appears in the manifest ancestors)
+                    continue
+
+            # Fill the data for the next iteration.
+            for p in fl.parentrevs(fr):
+                if 0 <= p and p not in lowestchild:
+                    lowestchild[p] = fr
+            backrevref[fr] = rev
+            s.add(rev)
 
     return subset & s
 
@@ -833,7 +899,7 @@ def _follow(repo, subset, x, name, followfirst=False):
             cx = c[x]
             s = set(ctx.rev() for ctx in cx.ancestors(followfirst=followfirst))
             # include the revision responsible for the most recent version
-            s.add(cx.linkrev())
+            s.add(cx.introrev())
         else:
             return baseset()
     else:
@@ -1140,6 +1206,30 @@ def obsolete(repo, subset, x):
     obsoletes = obsmod.getrevs(repo, 'obsolete')
     return subset & obsoletes
 
+def only(repo, subset, x):
+    """``only(set, [set])``
+    Changesets that are ancestors of the first set that are not ancestors
+    of any other head in the repo. If a second set is specified, the result
+    is ancestors of the first set that are not ancestors of the second set
+    (i.e. ::<set1> - ::<set2>).
+    """
+    cl = repo.changelog
+    # i18n: "only" is a keyword
+    args = getargs(x, 1, 2, _('only takes one or two arguments'))
+    include = getset(repo, spanset(repo), args[0])
+    if len(args) == 1:
+        if not include:
+            return baseset()
+
+        descendants = set(_revdescendants(repo, include, False))
+        exclude = [rev for rev in cl.headrevs()
+            if not rev in descendants and not rev in include]
+    else:
+        exclude = getset(repo, spanset(repo), args[1])
+
+    results = set(cl.findmissingrevs(common=exclude, heads=include))
+    return subset & results
+
 def origin(repo, subset, x):
     """``origin([set])``
     Changesets that were specified as a source for the grafts, transplants or
@@ -1258,7 +1348,7 @@ def parentspec(repo, subset, x, n):
         raise error.ParseError(_("^ expects a number 0, 1, or 2"))
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, baseset(cl), x):
+    for r in getset(repo, fullreposet(repo), x):
         if n == 0:
             ps.add(r)
         elif n == 1:
@@ -1384,7 +1474,7 @@ def matching(repo, subset, x):
     # i18n: "matching" is a keyword
     l = getargs(x, 1, 2, _("matching takes 1 or 2 arguments"))
 
-    revs = getset(repo, baseset(repo.changelog), l[0])
+    revs = getset(repo, fullreposet(repo), l[0])
 
     fieldlist = ['metadata']
     if len(l) > 1:
@@ -1689,7 +1779,6 @@ symbols = {
     "ancestors": ancestors,
     "_firstancestors": _firstancestors,
     "author": author,
-    "only": only,
     "bisect": bisect,
     "bisected": bisected,
     "bookmark": bookmark,
@@ -1729,6 +1818,7 @@ symbols = {
     "min": minrev,
     "modifies": modifies,
     "obsolete": obsolete,
+    "only": only,
     "origin": origin,
     "outgoing": outgoing,
     "p1": p1,
@@ -1800,6 +1890,7 @@ safesymbols = set([
     "min",
     "modifies",
     "obsolete",
+    "only",
     "origin",
     "outgoing",
     "p1",
@@ -1837,6 +1928,8 @@ methods = {
     "ancestor": ancestorspec,
     "parent": parentspec,
     "parentpost": p1,
+    "only": only,
+    "onlypost": only,
 }
 
 def optimize(x, small):
@@ -1850,6 +1943,9 @@ def optimize(x, small):
     op = x[0]
     if op == 'minus':
         return optimize(('and', x[1], ('not', x[2])), small)
+    elif op == 'only':
+        return optimize(('func', ('symbol', 'only'),
+                         ('list', x[1], x[2])), small)
     elif op == 'dagrangepre':
         return optimize(('func', ('symbol', 'ancestors'), x[1]), small)
     elif op == 'dagrangepost':
@@ -1957,6 +2053,12 @@ class revsetalias(object):
     funcre = re.compile('^([^(]+)\(([^)]+)\)$')
     args = None
 
+    # error message at parsing, or None
+    error = None
+    # whether own `error` information is already shown or not.
+    # this avoids showing same warning multiple times at each `findaliases`.
+    warned = False
+
     def __init__(self, name, value):
         '''Aliases like:
 
@@ -1976,11 +2078,17 @@ class revsetalias(object):
             self.name = name
             self.tree = ('symbol', name)
 
-        self.replacement, pos = parse(value)
-        if pos != len(value):
-            raise error.ParseError(_('invalid token'), pos)
-        # Check for placeholder injection
-        _checkaliasarg(self.replacement, self.args)
+        try:
+            self.replacement, pos = parse(value)
+            if pos != len(value):
+                raise error.ParseError(_('invalid token'), pos)
+            # Check for placeholder injection
+            _checkaliasarg(self.replacement, self.args)
+        except error.ParseError, inst:
+            if len(inst.args) > 1:
+                self.error = _('at %s: %s') % (inst.args[1], inst.args[0])
+            else:
+                self.error = inst.args[0]
 
 def _getalias(aliases, tree):
     """If tree looks like an unexpanded alias, return it. Return None
@@ -2022,6 +2130,9 @@ def _expandaliases(aliases, tree, expanding, cache):
         return tree
     alias = _getalias(aliases, tree)
     if alias is not None:
+        if alias.error:
+            raise util.Abort(_('failed to parse revset alias "%s": %s') %
+                             (alias.name, alias.error))
         if alias in expanding:
             raise error.ParseError(_('infinite expansion of revset alias "%s" '
                                      'detected') % alias.name)
@@ -2043,13 +2154,43 @@ def _expandaliases(aliases, tree, expanding, cache):
                        for t in tree)
     return result
 
-def findaliases(ui, tree):
+def findaliases(ui, tree, showwarning=None):
     _checkaliasarg(tree)
     aliases = {}
     for k, v in ui.configitems('revsetalias'):
         alias = revsetalias(k, v)
         aliases[alias.name] = alias
-    return _expandaliases(aliases, tree, [], {})
+    tree = _expandaliases(aliases, tree, [], {})
+    if showwarning:
+        # warn about problematic (but not referred) aliases
+        for name, alias in sorted(aliases.iteritems()):
+            if alias.error and not alias.warned:
+                msg = _('failed to parse revset alias "%s": %s'
+                        ) % (name, alias.error)
+                showwarning(_('warning: %s\n') % (msg))
+                alias.warned = True
+    return tree
+
+def foldconcat(tree):
+    """Fold elements to be concatenated by `##`
+    """
+    if not isinstance(tree, tuple) or tree[0] in ('string', 'symbol'):
+        return tree
+    if tree[0] == '_concat':
+        pending = [tree]
+        l = []
+        while pending:
+            e = pending.pop()
+            if e[0] == '_concat':
+                pending.extend(reversed(e[1:]))
+            elif e[0] in ('string', 'symbol'):
+                l.append(e[1])
+            else:
+                msg = _("\"##\" can't concatenate \"%s\" element") % (e[0])
+                raise error.ParseError(msg)
+        return ('string', ''.join(l))
+    else:
+        return tuple(foldconcat(t) for t in tree)
 
 def parse(spec, lookup=None):
     p = parser.parser(tokenize, elements)
@@ -2065,7 +2206,8 @@ def match(ui, spec, repo=None):
     if (pos != len(spec)):
         raise error.ParseError(_("invalid token"), pos)
     if ui:
-        tree = findaliases(ui, tree)
+        tree = findaliases(ui, tree, showwarning=ui.warn)
+    tree = foldconcat(tree)
     weight, tree = optimize(tree, True)
     def mfunc(repo, subset):
         if util.safehasattr(subset, 'isascending'):
@@ -2551,7 +2693,7 @@ class addset(abstractsmartset):
         return it()
 
     def _trysetasclist(self):
-        """populate the _asclist attribut if possible and necessary"""
+        """populate the _asclist attribute if possible and necessary"""
         if self._genlist is not None and self._asclist is None:
             self._asclist = sorted(self._genlist)
 
@@ -2744,7 +2886,7 @@ class generatorset(abstractsmartset):
 
         # We have to use this complex iteration strategy to allow multiple
         # iterations at the same time. We need to be able to catch revision
-        # removed from `consumegen` and added to genlist in another instance.
+        # removed from _consumegen and added to genlist in another instance.
         #
         # Getting rid of it would provide an about 15% speed up on this
         # iteration.
@@ -2939,17 +3081,15 @@ class _spanset(abstractsmartset):
 class fullreposet(_spanset):
     """a set containing all revisions in the repo
 
-    This class exists to host special optimisation.
+    This class exists to host special optimization.
     """
 
     def __init__(self, repo):
         super(fullreposet, self).__init__(repo)
 
     def __and__(self, other):
-        """fullrepo & other -> other
-
-        As self contains the whole repo, all of the other set should also be in
-        self. Therefor `self & other = other`.
+        """As self contains the whole repo, all of the other set should also be
+        in self. Therefore `self & other = other`.
 
         This boldly assumes the other contains valid revs only.
         """
@@ -2962,10 +3102,7 @@ class fullreposet(_spanset):
             # object.
             other = baseset(other - self._hiddenrevs)
 
-        if self.isascending():
-            other.sort()
-        else:
-            other.sort(reverse)
+        other.sort(reverse=self.isdescending())
         return other
 
 # tell hggettext to extract docstrings from these functions:

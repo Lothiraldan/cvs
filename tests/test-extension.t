@@ -424,10 +424,9 @@ Extension module help vs command help:
     #cmd.cdiff = gdiff
     #opts.cdiff = -Nprc5
   
-    # add new command called vdiff, runs kdiff3
-    vdiff = kdiff3
-  
-    # add new command called meld, runs meld (no need to name twice)
+    # add new command called meld, runs meld (no need to name twice).  If
+    # the meld executable is not available, the meld tool in [merge-tools]
+    # will be used, if available
     meld =
   
     # add new command called vimdiff, runs gvimdiff with DirDiff plugin
@@ -463,7 +462,7 @@ Extension module help vs command help:
   
    extdiff       use external program to diff repository (or selected files)
   
-  (use "hg help -v extdiff" to show built-in aliases and global options)
+  (use "hg help -v -e extdiff" to show built-in aliases and global options)
 
 
 
@@ -558,11 +557,13 @@ Issue811: Problem loading extensions twice (by site and by user)
   >     "yet another debug command"
   >     ui.write("%s\n" % '\n'.join([x for x, y in extensions.extensions()]))
   > EOF
-  $ echo "debugissue811 = $debugpath" >> $HGRCPATH
-  $ echo "mq=" >> $HGRCPATH
-  $ echo "strip=" >> $HGRCPATH
-  $ echo "hgext.mq=" >> $HGRCPATH
-  $ echo "hgext/mq=" >> $HGRCPATH
+  $ cat <<EOF >> $HGRCPATH
+  > debugissue811 = $debugpath
+  > mq =
+  > strip =
+  > hgext.mq =
+  > hgext/mq =
+  > EOF
 
 Show extensions:
 (note that mq force load strip, also checking it's not loaded twice)
@@ -571,6 +572,214 @@ Show extensions:
   debugissue811
   strip
   mq
+
+For extensions, which name matches one of its commands, help
+message should ask '-v -e' to get list of built-in aliases
+along with extension help itself
+
+  $ mkdir $TESTTMP/d
+  $ cat > $TESTTMP/d/dodo.py <<EOF
+  > """
+  > This is an awesome 'dodo' extension. It does nothing and
+  > writes 'Foo foo'
+  > """
+  > from mercurial import cmdutil, commands
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > @command('dodo', [], 'hg dodo')
+  > def dodo(ui, *args, **kwargs):
+  >     """Does nothing"""
+  >     ui.write("I do nothing. Yay\\n")
+  > @command('foofoo', [], 'hg foofoo')
+  > def foofoo(ui, *args, **kwargs):
+  >     """Writes 'Foo foo'"""
+  >     ui.write("Foo foo\\n")
+  > EOF
+  $ dodopath=$TESTTMP/d/dodo.py
+
+  $ echo "dodo = $dodopath" >> $HGRCPATH
+
+Make sure that user is asked to enter '-v -e' to get list of built-in aliases
+  $ hg help -e dodo
+  dodo extension -
+  
+  This is an awesome 'dodo' extension. It does nothing and writes 'Foo foo'
+  
+  list of commands:
+  
+   dodo          Does nothing
+   foofoo        Writes 'Foo foo'
+  
+  (use "hg help -v -e dodo" to show built-in aliases and global options)
+
+Make sure that '-v -e' prints list of built-in aliases along with
+extension help itself
+  $ hg help -v -e dodo
+  dodo extension -
+  
+  This is an awesome 'dodo' extension. It does nothing and writes 'Foo foo'
+  
+  list of commands:
+  
+   dodo          Does nothing
+   foofoo        Writes 'Foo foo'
+  
+  global options ([+] can be repeated):
+  
+   -R --repository REPO   repository root directory or name of overlay bundle
+                          file
+      --cwd DIR           change working directory
+   -y --noninteractive    do not prompt, automatically pick the first choice for
+                          all prompts
+   -q --quiet             suppress output
+   -v --verbose           enable additional output
+      --config CONFIG [+] set/override config option (use 'section.name=value')
+      --debug             enable debugging output
+      --debugger          start debugger
+      --encoding ENCODE   set the charset encoding (default: ascii)
+      --encodingmode MODE set the charset encoding mode (default: strict)
+      --traceback         always print a traceback on exception
+      --time              time how long the command takes
+      --profile           print command execution profile
+      --version           output version information and exit
+   -h --help              display help and exit
+      --hidden            consider hidden changesets
+
+Make sure that single '-v' option shows help and built-ins only for 'dodo' command
+  $ hg help -v dodo
+  hg dodo
+  
+  Does nothing
+  
+  (use "hg help -e dodo" to show help for the dodo extension)
+  
+  options:
+  
+    --mq operate on patch repository
+  
+  global options ([+] can be repeated):
+  
+   -R --repository REPO   repository root directory or name of overlay bundle
+                          file
+      --cwd DIR           change working directory
+   -y --noninteractive    do not prompt, automatically pick the first choice for
+                          all prompts
+   -q --quiet             suppress output
+   -v --verbose           enable additional output
+      --config CONFIG [+] set/override config option (use 'section.name=value')
+      --debug             enable debugging output
+      --debugger          start debugger
+      --encoding ENCODE   set the charset encoding (default: ascii)
+      --encodingmode MODE set the charset encoding mode (default: strict)
+      --traceback         always print a traceback on exception
+      --time              time how long the command takes
+      --profile           print command execution profile
+      --version           output version information and exit
+   -h --help              display help and exit
+      --hidden            consider hidden changesets
+
+In case when extension name doesn't match any of its commands,
+help message should ask for '-v' to get list of built-in aliases
+along with extension help
+  $ cat > $TESTTMP/d/dudu.py <<EOF
+  > """
+  > This is an awesome 'dudu' extension. It does something and
+  > also writes 'Beep beep'
+  > """
+  > from mercurial import cmdutil, commands
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > @command('something', [], 'hg something')
+  > def something(ui, *args, **kwargs):
+  >     """Does something"""
+  >     ui.write("I do something. Yaaay\\n")
+  > @command('beep', [], 'hg beep')
+  > def beep(ui, *args, **kwargs):
+  >     """Writes 'Beep beep'"""
+  >     ui.write("Beep beep\\n")
+  > EOF
+  $ dudupath=$TESTTMP/d/dudu.py
+
+  $ echo "dudu = $dudupath" >> $HGRCPATH
+
+  $ hg help -e dudu
+  dudu extension -
+  
+  This is an awesome 'dudu' extension. It does something and also writes 'Beep
+  beep'
+  
+  list of commands:
+  
+   beep          Writes 'Beep beep'
+   something     Does something
+  
+  (use "hg help -v dudu" to show built-in aliases and global options)
+
+In case when extension name doesn't match any of its commands,
+help options '-v' and '-v -e' should be equivalent
+  $ hg help -v dudu
+  dudu extension -
+  
+  This is an awesome 'dudu' extension. It does something and also writes 'Beep
+  beep'
+  
+  list of commands:
+  
+   beep          Writes 'Beep beep'
+   something     Does something
+  
+  global options ([+] can be repeated):
+  
+   -R --repository REPO   repository root directory or name of overlay bundle
+                          file
+      --cwd DIR           change working directory
+   -y --noninteractive    do not prompt, automatically pick the first choice for
+                          all prompts
+   -q --quiet             suppress output
+   -v --verbose           enable additional output
+      --config CONFIG [+] set/override config option (use 'section.name=value')
+      --debug             enable debugging output
+      --debugger          start debugger
+      --encoding ENCODE   set the charset encoding (default: ascii)
+      --encodingmode MODE set the charset encoding mode (default: strict)
+      --traceback         always print a traceback on exception
+      --time              time how long the command takes
+      --profile           print command execution profile
+      --version           output version information and exit
+   -h --help              display help and exit
+      --hidden            consider hidden changesets
+
+  $ hg help -v -e dudu
+  dudu extension -
+  
+  This is an awesome 'dudu' extension. It does something and also writes 'Beep
+  beep'
+  
+  list of commands:
+  
+   beep          Writes 'Beep beep'
+   something     Does something
+  
+  global options ([+] can be repeated):
+  
+   -R --repository REPO   repository root directory or name of overlay bundle
+                          file
+      --cwd DIR           change working directory
+   -y --noninteractive    do not prompt, automatically pick the first choice for
+                          all prompts
+   -q --quiet             suppress output
+   -v --verbose           enable additional output
+      --config CONFIG [+] set/override config option (use 'section.name=value')
+      --debug             enable debugging output
+      --debugger          start debugger
+      --encoding ENCODE   set the charset encoding (default: ascii)
+      --encodingmode MODE set the charset encoding mode (default: strict)
+      --traceback         always print a traceback on exception
+      --time              time how long the command takes
+      --profile           print command execution profile
+      --version           output version information and exit
+   -h --help              display help and exit
+      --hidden            consider hidden changesets
 
 Disabled extension commands:
 
@@ -813,9 +1022,11 @@ Commands handling multiple repositories at a time should invoke only
   $ hg -q -R pull-src1 pull src
   reposetup() for $TESTTMP/reposetup-test/src (glob)
 
-  $ echo '[extensions]' >> $HGRCPATH
-  $ echo '# disable extension globally and explicitly' >> $HGRCPATH
-  $ echo 'reposetuptest = !' >> $HGRCPATH
+  $ cat <<EOF >> $HGRCPATH
+  > [extensions]
+  > # disable extension globally and explicitly
+  > reposetuptest = !
+  > EOF
   $ hg clone -U src clone-dst2
   reposetup() for $TESTTMP/reposetup-test/src (glob)
   $ hg init push-dst2
@@ -825,9 +1036,11 @@ Commands handling multiple repositories at a time should invoke only
   $ hg -q -R pull-src2 pull src
   reposetup() for $TESTTMP/reposetup-test/src (glob)
 
-  $ echo '[extensions]' >> $HGRCPATH
-  $ echo '# enable extension globally' >> $HGRCPATH
-  $ echo "reposetuptest = $TESTTMP/reposetuptest.py" >> $HGRCPATH
+  $ cat <<EOF >> $HGRCPATH
+  > [extensions]
+  > # enable extension globally
+  > reposetuptest = $TESTTMP/reposetuptest.py
+  > EOF
   $ hg clone -U src clone-dst3
   reposetup() for $TESTTMP/reposetup-test/src (glob)
   reposetup() for $TESTTMP/reposetup-test/clone-dst3 (glob)
@@ -863,9 +1076,11 @@ disabling in command line overlays with all configuration
   $ hg --config extensions.reposetuptest=! init pull-src5
   $ hg --config extensions.reposetuptest=! -q -R pull-src5 pull src
 
-  $ echo '[extensions]' >> $HGRCPATH
-  $ echo '# disable extension globally and explicitly' >> $HGRCPATH
-  $ echo 'reposetuptest = !' >> $HGRCPATH
+  $ cat <<EOF >> $HGRCPATH
+  > [extensions]
+  > # disable extension globally and explicitly
+  > reposetuptest = !
+  > EOF
   $ hg init parent
   $ hg init parent/sub1
   $ echo 1 > parent/sub1/1

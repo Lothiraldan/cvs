@@ -13,6 +13,7 @@ import struct, os, bz2, zlib, tempfile
 import discovery, error, phases, branchmap
 
 _CHANGEGROUPV1_DELTA_HEADER = "20s20s20s20s"
+_CHANGEGROUPV2_DELTA_HEADER = "20s20s20s20s20s"
 
 def readexactly(stream, n):
     '''read n bytes from stream.read and abort if less was available'''
@@ -215,6 +216,14 @@ class cg1unpacker(object):
                     pos = next
             yield closechunk()
 
+class cg2unpacker(cg1unpacker):
+    deltaheader = _CHANGEGROUPV2_DELTA_HEADER
+    deltaheadersize = struct.calcsize(deltaheader)
+
+    def _deltaheader(self, headertuple, prevnode):
+        node, p1, p2, deltabase, cs = headertuple
+        return node, p1, p2, deltabase, cs
+
 class headerlessfixup(object):
     def __init__(self, fh, h):
         self._h = h
@@ -249,6 +258,11 @@ class cg1packer(object):
         self._repo = repo
         self._reorder = reorder
         self._progress = repo.ui.progress
+        if self._repo.ui.verbose and not self._repo.ui.debugflag:
+            self._verbosenote = self._repo.ui.note
+        else:
+            self._verbosenote = lambda s: None
+
     def close(self):
         return closechunk()
 
@@ -332,9 +346,13 @@ class cg1packer(object):
             mfs.setdefault(c[0], x)
             return x
 
+        self._verbosenote(_('uncompressed size of bundle content:\n'))
+        size = 0
         for chunk in self.group(clnodes, cl, lookupcl, units=_('changesets'),
                                 reorder=reorder):
+            size += len(chunk)
             yield chunk
+        self._verbosenote(_('%8.i (changelog)\n') % size)
         progress(msgbundling, None)
 
         # Callback for the manifest, used to collect linkrevs for filelog
@@ -355,9 +373,12 @@ class cg1packer(object):
             return clnode
 
         mfnodes = self.prune(mf, mfs, commonrevs, source)
+        size = 0
         for chunk in self.group(mfnodes, mf, lookupmf, units=_('manifests'),
                                 reorder=reorder):
+            size += len(chunk)
             yield chunk
+        self._verbosenote(_('%8.i (manifests)\n') % size)
         progress(msgbundling, None)
 
         mfs.clear()
@@ -408,15 +429,22 @@ class cg1packer(object):
             if filenodes:
                 progress(msgbundling, i + 1, item=fname, unit=msgfiles,
                          total=total)
-                yield self.fileheader(fname)
+                h = self.fileheader(fname)
+                size = len(h)
+                yield h
                 for chunk in self.group(filenodes, filerevlog, lookupfilelog,
                                         reorder=reorder):
+                    size += len(chunk)
                     yield chunk
+                self._verbosenote(_('%8.i  %s\n') % (size, fname))
+
+    def deltaparent(self, revlog, rev, p1, p2, prev):
+        return prev
 
     def revchunk(self, revlog, rev, prev, linknode):
         node = revlog.node(rev)
         p1, p2 = revlog.parentrevs(rev)
-        base = prev
+        base = self.deltaparent(revlog, rev, p1, p2, prev)
 
         prefix = ''
         if base == nullrev:
@@ -436,6 +464,30 @@ class cg1packer(object):
         # do nothing with basenode, it is implicitly the previous one in HG10
         return struct.pack(self.deltaheader, node, p1n, p2n, linknode)
 
+class cg2packer(cg1packer):
+
+    deltaheader = _CHANGEGROUPV2_DELTA_HEADER
+
+    def group(self, nodelist, revlog, lookup, units=None, reorder=None):
+        if (revlog._generaldelta and reorder is not True):
+            reorder = False
+        return super(cg2packer, self).group(nodelist, revlog, lookup,
+                                            units=units, reorder=reorder)
+
+    def deltaparent(self, revlog, rev, p1, p2, prev):
+        dp = revlog.deltaparent(rev)
+        # avoid storing full revisions; pick prev in those cases
+        # also pick prev when we can't be sure remote has dp
+        if dp == nullrev or (dp != p1 and dp != p2 and dp != prev):
+            return prev
+        return dp
+
+    def builddeltaheader(self, node, p1n, p2n, basenode, linknode):
+        return struct.pack(self.deltaheader, node, p1n, p2n, basenode, linknode)
+
+packermap = {'01': (cg1packer, cg1unpacker),
+             '02': (cg2packer, cg2unpacker)}
+
 def _changegroupinfo(repo, nodes, source):
     if repo.ui.verbose or source == 'bundle':
         repo.ui.status(_("%d changesets found\n") % len(nodes))
@@ -444,7 +496,7 @@ def _changegroupinfo(repo, nodes, source):
         for node in nodes:
             repo.ui.debug("%s\n" % hex(node))
 
-def getsubset(repo, outgoing, bundler, source, fastpath=False):
+def getsubsetraw(repo, outgoing, bundler, source, fastpath=False):
     repo = repo.unfiltered()
     commonrevs = outgoing.common
     csets = outgoing.missing
@@ -458,7 +510,10 @@ def getsubset(repo, outgoing, bundler, source, fastpath=False):
 
     repo.hook('preoutgoing', throw=True, source=source)
     _changegroupinfo(repo, csets, source)
-    gengroup = bundler.generate(commonrevs, csets, fastpathlinkrev, source)
+    return bundler.generate(commonrevs, csets, fastpathlinkrev, source)
+
+def getsubset(repo, outgoing, bundler, source, fastpath=False):
+    gengroup = getsubsetraw(repo, outgoing, bundler, source, fastpath)
     return cg1unpacker(util.chunkbuffer(gengroup), 'UN')
 
 def changegroupsubset(repo, roots, heads, source):
@@ -485,6 +540,17 @@ def changegroupsubset(repo, roots, heads, source):
     outgoing = discovery.outgoing(cl, discbases, heads)
     bundler = cg1packer(repo)
     return getsubset(repo, outgoing, bundler, source)
+
+def getlocalchangegroupraw(repo, source, outgoing, bundlecaps=None,
+                           version='01'):
+    """Like getbundle, but taking a discovery.outgoing as an argument.
+
+    This is only implemented for local repos and reuses potentially
+    precomputed sets in outgoing. Returns a raw changegroup generator."""
+    if not outgoing.missing:
+        return None
+    bundler = packermap[version][0](repo, bundlecaps)
+    return getsubsetraw(repo, outgoing, bundler, source)
 
 def getlocalchangegroup(repo, source, outgoing, bundlecaps=None):
     """Like getbundle, but taking a discovery.outgoing as an argument.
@@ -514,6 +580,22 @@ def _computeoutgoing(repo, heads, common):
     if not heads:
         heads = cl.heads()
     return discovery.outgoing(cl, common, heads)
+
+def getchangegroupraw(repo, source, heads=None, common=None, bundlecaps=None,
+                      version='01'):
+    """Like changegroupsubset, but returns the set difference between the
+    ancestors of heads and the ancestors common.
+
+    If heads is None, use the local heads. If common is None, use [nullid].
+
+    If version is None, use a version '1' changegroup.
+
+    The nodes in common might not all be known locally due to the way the
+    current discovery protocol works. Returns a raw changegroup generator.
+    """
+    outgoing = _computeoutgoing(repo, heads, common)
+    return getlocalchangegroupraw(repo, source, outgoing, bundlecaps=bundlecaps,
+                                  version=version)
 
 def getchangegroup(repo, source, heads=None, common=None, bundlecaps=None):
     """Like changegroupsubset, but returns the set difference between the
@@ -598,12 +680,6 @@ def addchangegroup(repo, source, srctype, url, emptyok=False,
     changesets = files = revisions = 0
     efiles = set()
 
-    # write changelog data to temp files so concurrent readers will not see
-    # inconsistent view
-    cl = repo.changelog
-    cl.delayupdate()
-    oldheads = cl.heads()
-
     tr = repo.transaction("\n".join([srctype, util.hidepassword(url)]))
     # The transaction could have been created before and already carries source
     # information. In this case we use the top level data. We overwrite the
@@ -611,6 +687,12 @@ def addchangegroup(repo, source, srctype, url, emptyok=False,
     # this function.
     srctype = tr.hookargs.setdefault('source', srctype)
     url = tr.hookargs.setdefault('url', url)
+
+    # write changelog data to temp files so concurrent readers will not see
+    # inconsistent view
+    cl = repo.changelog
+    cl.delayupdate(tr)
+    oldheads = cl.heads()
     try:
         repo.hook('prechangegroup', throw=True, **tr.hookargs)
 
@@ -693,7 +775,7 @@ def addchangegroup(repo, source, srctype, url, emptyok=False,
         repo.invalidatevolatilesets()
 
         if changesets > 0:
-            p = lambda: cl.writepending() and repo.root or ""
+            p = lambda: tr.writepending() and repo.root or ""
             if 'node' not in tr.hookargs:
                 tr.hookargs['node'] = hex(cl.node(clstart))
                 hookargs = dict(tr.hookargs)
@@ -725,11 +807,6 @@ def addchangegroup(repo, source, srctype, url, emptyok=False,
             # strip should not touch boundary at all
             phases.retractboundary(repo, tr, targetphase, added)
 
-        # make changelog see real files again
-        cl.finalize(trp)
-
-        tr.close()
-
         if changesets > 0:
             if srctype != 'strip':
                 # During strip, branchcache is invalid but coming call to
@@ -758,7 +835,11 @@ def addchangegroup(repo, source, srctype, url, emptyok=False,
                             "%s incoming changes - new heads: %s\n",
                             len(added),
                             ', '.join([hex(c[:6]) for c in newheads]))
-            repo._afterlock(runhooks)
+
+            tr.addpostclose('changegroup-runhooks-%020i' % clstart,
+                            lambda tr: repo._afterlock(runhooks))
+
+        tr.close()
 
     finally:
         tr.release()

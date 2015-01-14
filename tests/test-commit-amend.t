@@ -106,11 +106,22 @@ No changes, just a different message:
   $ hg ci -v --amend -m 'no changes, new message'
   amending changeset 74609c7f506e
   copying changeset 74609c7f506e to ad120869acf0
+  committing files:
   a
+  committing manifest
+  committing changelog
   stripping amended changeset 74609c7f506e
   1 changesets found
+  uncompressed size of bundle content:
+       250 (changelog)
+       143 (manifests)
+       109  a
   saved backup bundle to $TESTTMP/.hg/strip-backup/74609c7f506e-amend-backup.hg (glob)
   1 changesets found
+  uncompressed size of bundle content:
+       246 (changelog)
+       143 (manifests)
+       109  a
   adding branch
   adding changesets
   adding manifests
@@ -182,7 +193,10 @@ at first, test saving last-message.txt
   $ hg commit --amend -v -m "message given from command line"
   amending changeset 5f357c7560ab
   copying changeset 5f357c7560ab to ad120869acf0
+  committing files:
   a
+  committing manifest
+  committing changelog
   running hook pretxncommit.test-saving-last-message: false
   transaction abort!
   rollback completed
@@ -204,7 +218,10 @@ at first, test saving last-message.txt
   HG: user: foo
   HG: branch 'default'
   HG: changed a
+  committing files:
   a
+  committing manifest
+  committing changelog
   running hook pretxncommit.test-saving-last-message: false
   transaction abort!
   rollback completed
@@ -233,11 +250,22 @@ then, test editing custom commit message
   HG: user: foo
   HG: branch 'default'
   HG: changed a
+  committing files:
   a
+  committing manifest
+  committing changelog
   stripping amended changeset 5f357c7560ab
   1 changesets found
+  uncompressed size of bundle content:
+       238 (changelog)
+       143 (manifests)
+       111  a
   saved backup bundle to $TESTTMP/.hg/strip-backup/5f357c7560ab-amend-backup.hg (glob)
   1 changesets found
+  uncompressed size of bundle content:
+       246 (changelog)
+       143 (manifests)
+       111  a
   adding branch
   adding changesets
   adding manifests
@@ -250,7 +278,10 @@ Same, but with changes in working dir (different code path):
   $ echo a >> a
   $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg commit --amend -v
   amending changeset 7ab3bf440b54
+  committing files:
   a
+  committing manifest
+  committing changelog
   copying changeset a0ea9b1a4c8c to ad120869acf0
   another precious commit message
   
@@ -261,12 +292,23 @@ Same, but with changes in working dir (different code path):
   HG: user: foo
   HG: branch 'default'
   HG: changed a
+  committing files:
   a
+  committing manifest
+  committing changelog
   stripping intermediate changeset a0ea9b1a4c8c
   stripping amended changeset 7ab3bf440b54
   2 changesets found
+  uncompressed size of bundle content:
+       450 (changelog)
+       282 (manifests)
+       209  a
   saved backup bundle to $TESTTMP/.hg/strip-backup/7ab3bf440b54-amend-backup.hg (glob)
   1 changesets found
+  uncompressed size of bundle content:
+       246 (changelog)
+       143 (manifests)
+       113  a
   adding branch
   adding changesets
   adding manifests
@@ -447,7 +489,7 @@ first graft something so there's an additional entry:
   $ hg up 11
   5 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg graft 12
-  grafting revision 12
+  grafting 12:2647734878ef "fork" (tip)
   $ hg ci --amend -m 'graft amend'
   saved backup bundle to $TESTTMP/.hg/strip-backup/bd010aea3f39-amend-backup.hg (glob)
   $ hg log -r . --debug | grep extra
@@ -805,7 +847,7 @@ This shouldn't be possible:
   $ hg branch closewithamend
   marked working directory as branch closewithamend
   (branches are permanent and global, did you want a bookmark?)
-  $ touch foo
+  $ echo foo > foo
   $ hg add foo
   $ hg ci -m..
   $ hg ci --amend --close-branch -m 'closing'
@@ -842,6 +884,8 @@ Test that amend with --edit invokes editor forcibly
   $ hg parents --template "{desc}\n"
   editor should be suppressed
 
+  $ hg status --rev '.^1::.'
+  A foo
   $ HGEDITOR=cat hg commit --amend -m "editor should be invoked" --edit
   editor should be invoked
   
@@ -851,9 +895,110 @@ Test that amend with --edit invokes editor forcibly
   HG: --
   HG: user: test
   HG: branch 'silliness'
-  HG: changed foo
+  HG: added foo
   $ hg parents --template "{desc}\n"
   editor should be invoked
+
+Test that "diff()" in committemplate works correctly for amending
+-----------------------------------------------------------------
+
+  $ cat >> .hg/hgrc <<EOF
+  > [committemplate]
+  > changeset.commit.amend = {desc}\n
+  >     HG: M: {file_mods}
+  >     HG: A: {file_adds}
+  >     HG: R: {file_dels}
+  >     {splitlines(diff()) % 'HG: {line}\n'}
+  > EOF
+
+  $ hg parents --template "M: {file_mods}\nA: {file_adds}\nR: {file_dels}\n"
+  M: 
+  A: foo
+  R: 
+  $ hg status -amr
+  $ HGEDITOR=cat hg commit --amend -e -m "expecting diff of foo"
+  expecting diff of foo
+  
+  HG: M: 
+  HG: A: foo
+  HG: R: 
+  HG: diff -r 6de0c1bde1c8 foo
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/foo	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +foo
+
+  $ echo y > y
+  $ hg add y
+  $ HGEDITOR=cat hg commit --amend -e -m "expecting diff of foo and y"
+  expecting diff of foo and y
+  
+  HG: M: 
+  HG: A: foo y
+  HG: R: 
+  HG: diff -r 6de0c1bde1c8 foo
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/foo	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +foo
+  HG: diff -r 6de0c1bde1c8 y
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/y	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +y
+
+  $ hg rm a
+  $ HGEDITOR=cat hg commit --amend -e -m "expecting diff of a, foo and y"
+  expecting diff of a, foo and y
+  
+  HG: M: 
+  HG: A: foo y
+  HG: R: a
+  HG: diff -r 6de0c1bde1c8 a
+  HG: --- a/a	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -1,2 +0,0 @@
+  HG: -a
+  HG: -a
+  HG: diff -r 6de0c1bde1c8 foo
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/foo	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +foo
+  HG: diff -r 6de0c1bde1c8 y
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/y	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +y
+
+  $ hg rm x
+  $ HGEDITOR=cat hg commit --amend -e -m "expecting diff of a, foo, x and y"
+  expecting diff of a, foo, x and y
+  
+  HG: M: 
+  HG: A: foo y
+  HG: R: a x
+  HG: diff -r 6de0c1bde1c8 a
+  HG: --- a/a	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -1,2 +0,0 @@
+  HG: -a
+  HG: -a
+  HG: diff -r 6de0c1bde1c8 foo
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/foo	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +foo
+  HG: diff -r 6de0c1bde1c8 x
+  HG: --- a/x	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -1,1 +0,0 @@
+  HG: -x
+  HG: diff -r 6de0c1bde1c8 y
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/y	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +y
 
 Check for issue4405
 -------------------
@@ -889,9 +1034,9 @@ in the file revlog topology and the changelog topology.
 
 The way mercurial does amends is to create a temporary commit (rev 3) and then
 fold the new and old commits together into another commit (rev 4). During this
-process, findlimit is called to check how far back to look for the transitive
+process, _findlimit is called to check how far back to look for the transitive
 closure of file copy information, but due to the divergence of the filelog
-and changelog graph topologies, before findlimit was fixed, it returned a rev
+and changelog graph topologies, before _findlimit was fixed, it returned a rev
 which was not far enough back in this case.
   $ hg mv a1 a2
   $ hg status --copies --rev 0

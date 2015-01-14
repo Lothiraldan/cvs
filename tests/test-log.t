@@ -1031,7 +1031,25 @@ log -b 2
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     commit on default
   
+#if gettext
 
+Test that all log names are translated (e.g. branches, bookmarks, tags):
+
+  $ hg bookmark babar -r tip
+
+  $ HGENCODING=UTF-8 LANGUAGE=de hg log -r tip
+  \xc3\x84nderung:        3:f5d8de11c2e2 (esc)
+  Zweig:           test
+  Lesezeichen:     babar
+  Marke:           tip
+  Vorg\xc3\xa4nger:       1:d32277701ccb (esc)
+  Nutzer:          test
+  Datum:           Thu Jan 01 00:00:00 1970 +0000
+  Zusammenfassung: commit on test
+  
+  $ hg bookmark -d babar
+
+#endif
 
 log -p --cwd dir (in subdir)
 
@@ -1541,7 +1559,31 @@ issue3772: hg log -r :null showing revision 0 as well
   user:        
   date:        Thu Jan 01 00:00:00 1970 +0000
   
+Check that adding an arbitrary name shows up in log automatically
 
+  $ cat > ../names.py <<EOF
+  > """A small extension to test adding arbitrary names to a repo"""
+  > from mercurial.namespaces import namespace
+  > 
+  > def reposetup(ui, repo):
+  >     foo = {'foo': repo[0].node()}
+  >     ns = namespace("bars", "bar",
+  >                    lambda r: foo.keys(),
+  >                    lambda r, name: foo.get(name),
+  >                    lambda r, node: [name for name, n
+  >                                     in foo.iteritems()
+  >                                     if n == node])
+  >     repo.names.addnamespace(ns)
+  > EOF
+
+  $ hg --config extensions.names=../names.py log -r 0
+  changeset:   0:65624cd9070a
+  tag:         tip
+  bar:         foo
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     a bunch of weird directories
+  
   $ cd ..
 
 hg log -f dir across branches
@@ -1559,8 +1601,244 @@ hg log -f dir across branches
   o  a
   
   $ hg log -f d/a -T '{desc}' -G
-  o  b
+  @  c
   |
   o  a
   
   $ cd ..
+
+hg log -f with linkrev pointing to another branch
+-------------------------------------------------
+
+create history with a filerev whose linkrev points to another branch
+
+  $ hg init branchedlinkrev
+  $ cd branchedlinkrev
+  $ echo 1 > a
+  $ hg commit -Am 'content1'
+  adding a
+  $ echo 2 > a
+  $ hg commit -m 'content2'
+  $ hg up --rev 'desc(content1)'
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ echo unrelated > unrelated
+  $ hg commit -Am 'unrelated'
+  adding unrelated
+  created new head
+  $ hg graft -r 'desc(content2)'
+  grafting 1:2294ae80ad84 "content2"
+  $ echo 3 > a
+  $ hg commit -m 'content3'
+  $ hg log -G
+  @  changeset:   4:50b9b36e9c5d
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content3
+  |
+  o  changeset:   3:15b2327059e5
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content2
+  |
+  o  changeset:   2:2029acd1168c
+  |  parent:      0:ae0a3c9f9e95
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     unrelated
+  |
+  | o  changeset:   1:2294ae80ad84
+  |/   user:        test
+  |    date:        Thu Jan 01 00:00:00 1970 +0000
+  |    summary:     content2
+  |
+  o  changeset:   0:ae0a3c9f9e95
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     content1
+  
+
+log -f on the file should list the graft result.
+
+  $ hg log -Gf a
+  @  changeset:   4:50b9b36e9c5d
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content3
+  |
+  o  changeset:   3:15b2327059e5
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content2
+  |
+  o  changeset:   0:ae0a3c9f9e95
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     content1
+  
+
+plain log lists the original version
+(XXX we should probably list both)
+
+  $ hg log -G a
+  @  changeset:   4:50b9b36e9c5d
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content3
+  |
+  | o  changeset:   1:2294ae80ad84
+  |/   user:        test
+  |    date:        Thu Jan 01 00:00:00 1970 +0000
+  |    summary:     content2
+  |
+  o  changeset:   0:ae0a3c9f9e95
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     content1
+  
+
+hg log -f from the grafted changeset
+(The bootstrap should properly take the topology in account)
+
+  $ hg up 'desc(content3)^'
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg log -Gf a
+  @  changeset:   3:15b2327059e5
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content2
+  |
+  o  changeset:   0:ae0a3c9f9e95
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     content1
+  
+
+Test that we use the first non-hidden changeset in that case.
+
+(hide the changeset)
+
+  $ hg log -T '{node}\n' -r 1
+  2294ae80ad8447bc78383182eeac50cb049df623
+  $ hg debugobsolete 2294ae80ad8447bc78383182eeac50cb049df623
+  $ hg log -G
+  o  changeset:   4:50b9b36e9c5d
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content3
+  |
+  @  changeset:   3:15b2327059e5
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content2
+  |
+  o  changeset:   2:2029acd1168c
+  |  parent:      0:ae0a3c9f9e95
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     unrelated
+  |
+  o  changeset:   0:ae0a3c9f9e95
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     content1
+  
+
+Check that log on the file does not drop the file revision.
+
+  $ hg log -G a
+  o  changeset:   4:50b9b36e9c5d
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content3
+  |
+  @  changeset:   3:15b2327059e5
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content2
+  |
+  o  changeset:   0:ae0a3c9f9e95
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     content1
+  
+
+Even when a head revision is linkrev-shadowed.
+
+  $ hg log -T '{node}\n' -r 4
+  50b9b36e9c5df2c6fc6dcefa8ad0da929e84aed2
+  $ hg debugobsolete 50b9b36e9c5df2c6fc6dcefa8ad0da929e84aed2
+  $ hg log -G a
+  @  changeset:   3:15b2327059e5
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     content2
+  |
+  o  changeset:   0:ae0a3c9f9e95
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     content1
+  
+
+  $ cd ..
+
+Even when the file revision is missing from some head:
+
+  $ hg init issue4490
+  $ cd issue4490
+  $ echo '[experimental]' >> .hg/hgrc
+  $ echo 'evolution=createmarkers' >> .hg/hgrc
+  $ echo a > a
+  $ hg ci -Am0
+  adding a
+  $ echo b > b
+  $ hg ci -Am1
+  adding b
+  $ echo B > b
+  $ hg ci --amend -m 1
+  $ hg up 0
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo c > c
+  $ hg ci -Am2
+  adding c
+  created new head
+  $ hg up 'head() and not .'
+  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg log -G
+  o  changeset:   4:db815d6d32e6
+  |  tag:         tip
+  |  parent:      0:f7b1eb17ad24
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     2
+  |
+  | @  changeset:   3:9bc8ce7f9356
+  |/   parent:      0:f7b1eb17ad24
+  |    user:        test
+  |    date:        Thu Jan 01 00:00:00 1970 +0000
+  |    summary:     1
+  |
+  o  changeset:   0:f7b1eb17ad24
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     0
+  
+  $ hg log -f -G b
+  @  changeset:   3:9bc8ce7f9356
+  |  parent:      0:f7b1eb17ad24
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     1
+  |
+  $ hg log -G b
+  @  changeset:   3:9bc8ce7f9356
+  |  parent:      0:f7b1eb17ad24
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     1
+  |

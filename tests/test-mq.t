@@ -5,11 +5,12 @@
   >     fi
   > }
 
-  $ echo "[extensions]" >> $HGRCPATH
-  $ echo "mq=" >> $HGRCPATH
-
-  $ echo "[mq]" >> $HGRCPATH
-  $ echo "plain=true" >> $HGRCPATH
+  $ cat <<EOF >> $HGRCPATH
+  > [extensions]
+  > mq =
+  > [mq]
+  > plain = true
+  > EOF
 
 
 help
@@ -1399,7 +1400,10 @@ apply force, should discard changes in hello, but not bye
   applying empty
   saving current version of hello.txt as hello.txt.orig
   patching file hello.txt
+  committing files:
   hello.txt
+  committing manifest
+  committing changelog
   now at: empty
   $ hg st
   M bye.txt
@@ -1582,7 +1586,7 @@ Test that secret mq patch does not break hgweb
 
   $ cd ..
 
-Test interraction with revset (issue4426)
+Test interaction with revset (issue4426)
 
   $ hg init issue4426
   $ cd issue4426
