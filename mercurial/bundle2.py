@@ -285,7 +285,7 @@ def _notransaction():
     to be created"""
     raise TransactionUnavailable()
 
-def processbundle(repo, unbundler, transactiongetter=None):
+def processbundle(repo, unbundler, transactiongetter=None, op=None):
     """This function process a bundle, apply effect to/from a repo
 
     It iterates over each part then searches for and uses the proper handling
@@ -295,10 +295,16 @@ def processbundle(repo, unbundler, transactiongetter=None):
     before final usage.
 
     Unknown Mandatory part will abort the process.
+
+    It is temporarily possible to provide a prebuilt bundleoperation to the
+    function. This is used to ensure output is properly propagated in case of
+    an error during the unbundling. This output capturing part will likely be
+    reworked and this ability will probably go away in the process.
     """
-    if transactiongetter is None:
-        transactiongetter = _notransaction
-    op = bundleoperation(repo, transactiongetter)
+    if op is None:
+        if transactiongetter is None:
+            transactiongetter = _notransaction
+        op = bundleoperation(repo, transactiongetter)
     # todo:
     # - replace this is a init function soon.
     # - exception catching
@@ -354,7 +360,7 @@ def _processpart(op, part):
         # itself represents a defect of a different variety).
         output = None
         if op.reply is not None:
-            op.ui.pushbuffer(error=True)
+            op.ui.pushbuffer(error=True, subproc=True)
             output = ''
         try:
             handler(op, part)
@@ -1171,7 +1177,7 @@ def handlecheckheads(op, inpart):
 def handleoutput(op, inpart):
     """forward output captured on the server to the client"""
     for line in inpart.read().splitlines():
-        op.ui.write(('remote: %s\n' % line))
+        op.ui.status(('remote: %s\n' % line))
 
 @parthandler('replycaps')
 def handlereplycaps(op, inpart):

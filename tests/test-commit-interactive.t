@@ -1395,8 +1395,40 @@ Test --user when ui.username not set
   $ export HGUSER
 
 
+Moving files
+
+  $ hg update -C .
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg mv plain plain3
+  $ echo somechange >> plain3
+  $ hg commit -i -d '23 0' -mmoving_files << EOF
+  > y
+  > y
+  > EOF
+  diff --git a/plain b/plain3
+  rename from plain
+  rename to plain3
+  1 hunks, 1 lines changed
+  examine changes to 'plain' and 'plain3'? [Ynesfdaq?] y
+  
+  @@ -11,3 +11,4 @@
+   9
+   10
+   11
+  +somechange
+  record this change to 'plain3'? [Ynesfdaq?] y
+  
+  $ hg tip
+  changeset:   30:542e1f362a22
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:23 1970 +0000
+  summary:     moving_files
+  
 Editing patch of newly added file
 
+  $ hg update -C .
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cat > editor.sh << '__EOF__'
   > cat "$1"  | sed "s/first/very/g"  > tt
   > mv tt  "$1"
@@ -1430,5 +1462,4 @@ Editing patch of newly added file
   This is the first line
   This is the second line
   This is the third line
-
   $ cd ..
