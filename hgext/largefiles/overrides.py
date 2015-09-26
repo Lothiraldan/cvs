@@ -50,8 +50,10 @@ def composenormalfilematcher(match, manifest, exclude=None):
 
 def installnormalfilesmatchfn(manifest):
     '''installmatchfn with a matchfn that ignores all largefiles'''
-    def overridematch(ctx, pats=[], opts={}, globbed=False,
+    def overridematch(ctx, pats=(), opts=None, globbed=False,
             default='relpath', badfn=None):
+        if opts is None:
+            opts = {}
         match = oldmatch(ctx, pats, opts, globbed, default, badfn=badfn)
         return composenormalfilematcher(match, manifest)
     oldmatch = installmatchfn(overridematch)
@@ -287,13 +289,15 @@ def overridedirty(orig, repo, ignoreupdate=False):
         repo._repo.lfstatus = False
 
 def overridelog(orig, ui, repo, *pats, **opts):
-    def overridematchandpats(ctx, pats=[], opts={}, globbed=False,
+    def overridematchandpats(ctx, pats=(), opts=None, globbed=False,
             default='relpath', badfn=None):
         """Matcher that merges root directory with .hglf, suitable for log.
         It is still possible to match .hglf directly.
         For any listed files run log on the standin too.
         matchfn tries both the given filename and with .hglf stripped.
         """
+        if opts is None:
+            opts = {}
         matchandpats = oldmatchandpats(ctx, pats, opts, globbed, default,
                                        badfn=badfn)
         m, p = copy.copy(matchandpats)
@@ -613,8 +617,10 @@ def overridecopy(orig, ui, repo, pats, opts, rename=False):
         wlock = repo.wlock()
 
         manifest = repo[None].manifest()
-        def overridematch(ctx, pats=[], opts={}, globbed=False,
+        def overridematch(ctx, pats=(), opts=None, globbed=False,
                 default='relpath', badfn=None):
+            if opts is None:
+                opts = {}
             newpats = []
             # The patterns were previously mangled to add the standin
             # directory; we need to remove that now
@@ -722,8 +728,10 @@ def overriderevert(orig, ui, repo, ctx, parents, *pats, **opts):
 
         oldstandins = lfutil.getstandinsstate(repo)
 
-        def overridematch(mctx, pats=[], opts={}, globbed=False,
+        def overridematch(mctx, pats=(), opts=None, globbed=False,
                 default='relpath', badfn=None):
+            if opts is None:
+                opts = {}
             match = oldmatch(mctx, pats, opts, globbed, default, badfn=badfn)
             m = copy.copy(match)
 
@@ -1164,8 +1172,10 @@ def overridesummary(orig, ui, repo, *pats, **opts):
     finally:
         repo.lfstatus = False
 
-def scmutiladdremove(orig, repo, matcher, prefix, opts={}, dry_run=None,
+def scmutiladdremove(orig, repo, matcher, prefix, opts=None, dry_run=None,
                      similarity=None):
+    if opts is None:
+        opts = {}
     if not lfutil.islfilesrepo(repo):
         return orig(repo, matcher, prefix, opts, dry_run, similarity)
     # Get the list of missing largefiles so we can remove them

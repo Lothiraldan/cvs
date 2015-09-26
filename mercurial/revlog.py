@@ -100,11 +100,10 @@ def decompress(bin):
 #  4 bytes: compressed length
 #  4 bytes: base rev
 #  4 bytes: link rev
-# 32 bytes: parent 1 nodeid
-# 32 bytes: parent 2 nodeid
-# 32 bytes: nodeid
+# 20 bytes: parent 1 nodeid
+# 20 bytes: parent 2 nodeid
+# 20 bytes: nodeid
 indexformatv0 = ">4l20s20s20s"
-v0shaoffset = 56
 
 class revlogoldio(object):
     def __init__(self):
@@ -150,7 +149,6 @@ class revlogoldio(object):
 #  4 bytes: parent 2 rev
 # 32 bytes: nodeid
 indexformatng = ">Qiiiiii20s12x"
-ngshaoffset = 32
 versionformat = ">I"
 
 # corresponds to uncompressed length of indexformatng (2 gigs, 4-byte
@@ -212,6 +210,7 @@ class revlog(object):
         self._chunkcache = (0, '')
         self._chunkcachesize = 65536
         self._maxchainlen = None
+        self._aggressivemergedeltas = False
         self.index = []
         self._pcache = {}
         self._nodecache = {nullid: nullrev}
@@ -229,6 +228,8 @@ class revlog(object):
                 self._chunkcachesize = opts['chunkcachesize']
             if 'maxchainlen' in opts:
                 self._maxchainlen = opts['maxchainlen']
+            if 'aggressivemergedeltas' in opts:
+                self._aggressivemergedeltas = opts['aggressivemergedeltas']
 
         if self._chunkcachesize <= 0:
             raise RevlogError(_('revlog chunk cache size %r is not greater '
@@ -237,14 +238,14 @@ class revlog(object):
             raise RevlogError(_('revlog chunk cache size %r is not a power '
                                 'of 2') % self._chunkcachesize)
 
-        i = ''
+        indexdata = ''
         self._initempty = True
         try:
             f = self.opener(self.indexfile)
-            i = f.read()
+            indexdata = f.read()
             f.close()
-            if len(i) > 0:
-                v = struct.unpack(versionformat, i[:4])[0]
+            if len(indexdata) > 0:
+                v = struct.unpack(versionformat, indexdata[:4])[0]
                 self._initempty = False
         except IOError as inst:
             if inst.errno != errno.ENOENT:
@@ -269,7 +270,7 @@ class revlog(object):
         if self.version == REVLOGV0:
             self._io = revlogoldio()
         try:
-            d = self._io.parseindex(i, self._inline)
+            d = self._io.parseindex(indexdata, self._inline)
         except (ValueError, IndexError):
             raise RevlogError(_("index %s is corrupted") % (self.indexfile))
         self.index, nodemap, self._chunkcache = d
@@ -1048,14 +1049,13 @@ class revlog(object):
             node = nodeorrev
             rev = None
 
-        _cache = self._cache # grab local copy of cache to avoid thread race
         cachedrev = None
         if node == nullid:
             return ""
-        if _cache:
-            if _cache[0] == node:
-                return _cache[2]
-            cachedrev = _cache[1]
+        if self._cache:
+            if self._cache[0] == node:
+                return self._cache[2]
+            cachedrev = self._cache[1]
 
         # look up what we need to read
         text = None
@@ -1083,7 +1083,7 @@ class revlog(object):
 
         if iterrev == cachedrev:
             # cache hit
-            text = _cache[2]
+            text = self._cache[2]
         else:
             chain.append(iterrev)
         chain.reverse()
@@ -1235,8 +1235,27 @@ class revlog(object):
             return ('u', text)
         return ("", bin)
 
+    def _isgooddelta(self, d, textlen):
+        """Returns True if the given delta is good. Good means that it is within
+        the disk span, disk size, and chain length bounds that we know to be
+        performant."""
+        if d is None:
+            return False
+
+        # - 'dist' is the distance from the base revision -- bounding it limits
+        #   the amount of I/O we need to do.
+        # - 'compresseddeltalen' is the sum of the total size of deltas we need
+        #   to apply -- bounding it limits the amount of CPU we consume.
+        dist, l, data, base, chainbase, chainlen, compresseddeltalen = d
+        if (dist > textlen * 4 or l > textlen or
+            compresseddeltalen > textlen * 2 or
+            (self._maxchainlen and chainlen > self._maxchainlen)):
+            return False
+
+        return True
+
     def _addrevision(self, node, text, transaction, link, p1, p2, flags,
-                     cachedelta, ifh, dfh):
+                     cachedelta, ifh, dfh, alwayscache=False):
         """internal function to add revisions to the log
 
         see addrevision for argument descriptions.
@@ -1315,19 +1334,6 @@ class revlog(object):
         basecache = self._basecache
         p1r, p2r = self.rev(p1), self.rev(p2)
 
-        # should we try to build a delta?
-        if prev != nullrev:
-            if self._generaldelta:
-                if p1r >= basecache[1]:
-                    d = builddelta(p1r)
-                elif p2r >= basecache[1]:
-                    d = builddelta(p2r)
-                else:
-                    d = builddelta(prev)
-            else:
-                d = builddelta(prev)
-            dist, l, data, base, chainbase, chainlen, compresseddeltalen = d
-
         # full versions are inserted when the needed deltas
         # become comparable to the uncompressed text
         if text is None:
@@ -1336,13 +1342,42 @@ class revlog(object):
         else:
             textlen = len(text)
 
-        # - 'dist' is the distance from the base revision -- bounding it limits
-        #   the amount of I/O we need to do.
-        # - 'compresseddeltalen' is the sum of the total size of deltas we need
-        #   to apply -- bounding it limits the amount of CPU we consume.
-        if (d is None or dist > textlen * 4 or l > textlen or
-            compresseddeltalen > textlen * 2 or
-            (self._maxchainlen and chainlen > self._maxchainlen)):
+        # should we try to build a delta?
+        if prev != nullrev:
+            if self._generaldelta:
+                if p2r != nullrev and self._aggressivemergedeltas:
+                    d = builddelta(p1r)
+                    d2 = builddelta(p2r)
+                    p1good = self._isgooddelta(d, textlen)
+                    p2good = self._isgooddelta(d2, textlen)
+                    if p1good and p2good:
+                        # If both are good deltas, choose the smallest
+                        if d2[1] < d[1]:
+                            d = d2
+                    elif p2good:
+                        # If only p2 is good, use it
+                        d = d2
+                    elif p1good:
+                        pass
+                    else:
+                        # Neither is good, try against prev to hopefully save us
+                        # a fulltext.
+                        d = builddelta(prev)
+                else:
+                    # Pick whichever parent is closer to us (to minimize the
+                    # chance of having to build a fulltext). Since
+                    # nullrev == -1, any non-merge commit will always pick p1r.
+                    drev = p2r if p2r > p1r else p1r
+                    d = builddelta(drev)
+                    # If the chosen delta will result in us making a full text,
+                    # give it one last try against prev.
+                    if drev != prev and not self._isgooddelta(d, textlen):
+                        d = builddelta(prev)
+            else:
+                d = builddelta(prev)
+            dist, l, data, base, chainbase, chainlen, compresseddeltalen = d
+
+        if not self._isgooddelta(d, textlen):
             text = buildtext()
             data = self.compress(text)
             l = len(data[1]) + len(data[0])
@@ -1355,6 +1390,9 @@ class revlog(object):
 
         entry = self._io.packentry(e, self.node, self.version, curr)
         self._writeentry(transaction, ifh, dfh, entry, data, link, offset)
+
+        if alwayscache and text is None:
+            text = buildtext()
 
         if type(text) == str: # only accept immutable objects
             self._cache = (node, curr, text)
@@ -1459,15 +1497,16 @@ class revlog(object):
                 if self._peek_iscensored(baserev, delta, flush):
                     flags |= REVIDX_ISCENSORED
 
+                # We assume consumers of addrevisioncb will want to retrieve
+                # the added revision, which will require a call to
+                # revision(). revision() will fast path if there is a cache
+                # hit. So, we tell _addrevision() to always cache in this case.
                 chain = self._addrevision(node, None, transaction, link,
                                           p1, p2, flags, (baserev, delta),
-                                          ifh, dfh)
+                                          ifh, dfh,
+                                          alwayscache=bool(addrevisioncb))
 
                 if addrevisioncb:
-                    # Data for added revision can't be read unless flushed
-                    # because _loadchunk always opensa new file handle and
-                    # there is no guarantee data was actually written yet.
-                    flush()
                     addrevisioncb(self, chain)
 
                 if not dfh and not self._inline:

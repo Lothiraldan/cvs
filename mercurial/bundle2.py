@@ -145,19 +145,25 @@ future, dropping the stream may become an option for channel we do not care to
 preserve.
 """
 
-import errno
-import sys
-import util
-import struct
-import urllib
-import string
-import obsolete
-import pushkey
-import url
-import re
+from __future__ import absolute_import
 
-import changegroup, error, tags
-from i18n import _
+import errno
+import re
+import string
+import struct
+import sys
+import urllib
+
+from .i18n import _
+from . import (
+    changegroup,
+    error,
+    obsolete,
+    pushkey,
+    tags,
+    url,
+    util,
+)
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -841,6 +847,12 @@ class bundlepart(object):
                 outdebug(ui, 'payload chunk size: %i' % len(chunk))
                 yield _pack(_fpayloadsize, len(chunk))
                 yield chunk
+        except GeneratorExit:
+            # GeneratorExit means that nobody is listening for our
+            # results anyway, so just bail quickly rather than trying
+            # to produce an error part.
+            ui.debug('bundle2-generatorexit\n')
+            raise
         except BaseException as exc:
             # backup exception data for later
             ui.debug('bundle2-input-stream-interrupt: encoding exception %s'
@@ -1162,7 +1174,7 @@ def handlechangegroup(op, inpart):
     unpackerversion = inpart.params.get('version', '01')
     # We should raise an appropriate exception here
     unpacker = changegroup.packermap[unpackerversion][1]
-    cg = unpacker(inpart, 'UN')
+    cg = unpacker(inpart, None)
     # the source and url passed here are overwritten by the one contained in
     # the transaction.hookargs argument. So 'bundle2' is a placeholder
     nbchangesets = None
@@ -1233,7 +1245,7 @@ def handleremotechangegroup(op, inpart):
     # we need to make sure we trigger the creation of a transaction object used
     # for the whole processing scope.
     op.gettransaction()
-    import exchange
+    from . import exchange
     cg = exchange.readbundle(op.repo.ui, real_part, raw_url)
     if not isinstance(cg, changegroup.cg1unpacker):
         raise util.Abort(_('%s: not a bundle version 1.0') %

@@ -179,7 +179,7 @@ def addtopichook(topic, rewriter):
 
 def makeitemsdoc(topic, doc, marker, items, dedent=False):
     """Extract docstring from the items key to function mapping, build a
-    .single documentation block and use it to overwrite the marker in doc
+    single documentation block and use it to overwrite the marker in doc.
     """
     entries = []
     for name in sorted(items):
@@ -475,11 +475,18 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
     rst = []
     kw = opts.get('keyword')
     if kw:
-        matches = topicmatch(kw)
-        for t, title in (('topics', _('Topics')),
+        matches = topicmatch(name)
+        helpareas = []
+        if opts.get('extension'):
+            helpareas += [('extensions', _('Extensions'))]
+        if opts.get('command'):
+            helpareas += [('commands', _('Commands'))]
+        if not helpareas:
+            helpareas = [('topics', _('Topics')),
                          ('commands', _('Commands')),
                          ('extensions', _('Extensions')),
-                         ('extensioncommands', _('Extension Commands'))):
+                         ('extensioncommands', _('Extension Commands'))]
+        for t, title in helpareas:
             if matches[t]:
                 rst.append('%s:\n\n' % title)
                 rst.extend(minirst.maketable(sorted(matches[t]), 1))
@@ -489,13 +496,14 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             hint = _('try "hg help" for a list of topics')
             raise util.Abort(msg, hint=hint)
     elif name and name != 'shortlist':
+        queries = []
         if unknowncmd:
-            queries = (helpextcmd,)
-        elif opts.get('extension'):
-            queries = (helpext,)
-        elif opts.get('command'):
-            queries = (helpcmd,)
-        else:
+            queries += [helpextcmd]
+        if opts.get('extension'):
+            queries += [helpext]
+        if opts.get('command'):
+            queries += [helpcmd]
+        if not queries:
             queries = (helptopic, helpcmd, helpext, helpextcmd)
         for f in queries:
             try:

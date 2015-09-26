@@ -79,17 +79,30 @@ def geturlcgivars(baseurl, port):
     return name, str(port), path
 
 class hgwebdir(object):
-    refreshinterval = 20
+    """HTTP server for multiple repositories.
 
+    Given a configuration, different repositories will be served depending
+    on the request path.
+
+    Instances are typically used as WSGI applications.
+    """
     def __init__(self, conf, baseui=None):
         self.conf = conf
         self.baseui = baseui
+        self.ui = None
         self.lastrefresh = 0
         self.motd = None
         self.refresh()
 
     def refresh(self):
-        if self.lastrefresh + self.refreshinterval > time.time():
+        refreshinterval = 20
+        if self.ui:
+            refreshinterval = self.ui.configint('web', 'refreshinterval',
+                                                refreshinterval)
+
+        # refreshinterval <= 0 means to always refresh.
+        if (refreshinterval > 0 and
+            self.lastrefresh + refreshinterval > time.time()):
             return
 
         if self.baseui:

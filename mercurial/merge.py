@@ -5,13 +5,28 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
+import errno
+import os
+import shutil
 import struct
 
-from node import nullid, nullrev, hex, bin
-from i18n import _
-from mercurial import obsolete
-import error as errormod, util, filemerge, copies, subrepo, worker
-import errno, os, shutil
+from .i18n import _
+from .node import (
+    bin,
+    hex,
+    nullid,
+    nullrev,
+)
+from . import (
+    copies,
+    filemerge,
+    obsolete,
+    subrepo,
+    util,
+    worker,
+)
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -27,7 +42,7 @@ class mergestate(object):
 
     it is stored on disk when needed. Two file are used, one with an old
     format, one with a new format. Both contains similar data, but the new
-    format can store new kind of field.
+    format can store new kinds of field.
 
     Current new format is a list of arbitrary record of the form:
 
@@ -581,10 +596,14 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force, partial,
                 repo, wctx, mctx, ancestor, branchmerge, force, partial,
                 acceptremote, followcopies)
             _checkunknownfiles(repo, wctx, mctx, force, actions)
-            if diverge is None: # and renamedelete is None.
-                # Arbitrarily pick warnings from first iteration
+
+            # Track the shortest set of warning on the theory that bid
+            # merge will correctly incorporate more information
+            if diverge is None or len(diverge1) < len(diverge):
                 diverge = diverge1
+            if renamedelete is None or len(renamedelete) < len(renamedelete1):
                 renamedelete = renamedelete1
+
             for f, a in sorted(actions.iteritems()):
                 m, args, msg = a
                 repo.ui.debug(' %s: %s -> %s\n' % (f, msg, m))
@@ -779,25 +798,6 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
         repo.ui.debug(" %s: %s -> k\n" % (f, msg))
         # no progress
 
-    # merge
-    for f, args, msg in actions['m']:
-        repo.ui.debug(" %s: %s -> m\n" % (f, msg))
-        z += 1
-        progress(_updating, z, item=f, total=numupdates, unit=_files)
-        if f == '.hgsubstate': # subrepo states need updating
-            subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx),
-                             overwrite)
-            continue
-        audit(f)
-        r = ms.resolve(f, wctx, labels=labels)
-        if r is not None and r > 0:
-            unresolved += 1
-        else:
-            if r is None:
-                updated += 1
-            else:
-                merged += 1
-
     # directory rename, move local
     for f, args, msg in actions['dm']:
         repo.ui.debug(" %s: %s -> dm\n" % (f, msg))
@@ -829,6 +829,25 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
         audit(f)
         util.setflags(repo.wjoin(f), 'l' in flags, 'x' in flags)
         updated += 1
+
+    # merge
+    for f, args, msg in actions['m']:
+        repo.ui.debug(" %s: %s -> m\n" % (f, msg))
+        z += 1
+        progress(_updating, z, item=f, total=numupdates, unit=_files)
+        if f == '.hgsubstate': # subrepo states need updating
+            subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx),
+                             overwrite)
+            continue
+        audit(f)
+        r = ms.resolve(f, wctx, labels=labels)
+        if r is not None and r > 0:
+            unresolved += 1
+        else:
+            if r is None:
+                updated += 1
+            else:
+                merged += 1
 
     ms.commit()
     progress(_updating, None, total=numupdates, unit=_files)
@@ -969,42 +988,10 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
             pas = [repo[ancestor]]
 
         if node is None:
-            # Here is where we should consider bookmarks, divergent bookmarks,
-            # foreground changesets (successors), and tip of current branch;
-            # but currently we are only checking the branch tips.
-            try:
-                node = repo.branchtip(wc.branch())
-            except errormod.RepoLookupError:
-                if wc.branch() == 'default': # no default branch!
-                    node = repo.lookup('tip') # update to tip
-                else:
-                    raise util.Abort(_("branch %s not found") % wc.branch())
-
-            if p1.obsolete() and not p1.children():
-                # allow updating to successors
-                successors = obsolete.successorssets(repo, p1.node())
-
-                # behavior of certain cases is as follows,
-                #
-                # divergent changesets: update to highest rev, similar to what
-                #     is currently done when there are more than one head
-                #     (i.e. 'tip')
-                #
-                # replaced changesets: same as divergent except we know there
-                # is no conflict
-                #
-                # pruned changeset: no update is done; though, we could
-                #     consider updating to the first non-obsolete parent,
-                #     similar to what is current done for 'hg prune'
-
-                if successors:
-                    # flatten the list here handles both divergent (len > 1)
-                    # and the usual case (len = 1)
-                    successors = [n for sub in successors for n in sub]
-
-                    # get the max revision for the given successors set,
-                    # i.e. the 'tip' of a set
-                    node = repo.revs('max(%ln)', successors).first()
+            nodes = list(repo.set('_updatedefaultdest()'))
+            if nodes:
+                node = nodes[0].node()
+                if p1.obsolete() and not p1.children():
                     pas = [p1]
 
         overwrite = force and not branchmerge

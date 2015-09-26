@@ -13,13 +13,13 @@ import sys, socket
 import hg, scmutil, util, revlog, copies, error, bookmarks
 import patch, help, encoding, templatekw, discovery
 import archival, changegroup, cmdutil, hbisect
-import sshserver, hgweb, commandserver
+import sshserver, hgweb
 import extensions
 from hgweb import server as hgweb_server
 import merge as mergemod
 import minirst, revset, fileset
 import dagparser, context, simplemerge, graphmod, copies
-import random
+import random, operator
 import setdiscovery, treediscovery, dagutil, pvec, localrepo
 import phases, obsolete, exchange, bundle2, repair, lock as lockmod
 import ui as uimod
@@ -875,7 +875,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
     [('f', 'force', False, _('force')),
     ('r', 'rev', '', _('revision'), _('REV')),
     ('d', 'delete', False, _('delete a given bookmark')),
-    ('m', 'rename', '', _('rename a given bookmark'), _('NAME')),
+    ('m', 'rename', '', _('rename a given bookmark'), _('OLD')),
     ('i', 'inactive', False, _('mark a bookmark inactive')),
     ] + formatteropts,
     _('hg bookmarks [OPTIONS]... [NAME]...'))
@@ -915,6 +915,10 @@ def bookmark(ui, repo, *names, **opts):
       - create an inactive bookmark on another changeset::
 
           hg book -r .^ tested
+
+      - rename bookmark turkey to dinner::
+
+          hg book -m turkey dinner
 
       - move the '@' bookmark from another branch::
 
@@ -2167,6 +2171,45 @@ def debugdiscovery(ui, repo, remoteurl="default", **opts):
         localrevs = opts.get('local_head')
         doit(localrevs, remoterevs)
 
+@command('debugextensions', formatteropts, [], norepo=True)
+def debugextensions(ui, **opts):
+    '''show information about active extensions'''
+    exts = extensions.extensions(ui)
+    fm = ui.formatter('debugextensions', opts)
+    for extname, extmod in sorted(exts, key=operator.itemgetter(0)):
+        extsource = extmod.__file__
+        exttestedwith = getattr(extmod, 'testedwith', None)
+        if exttestedwith is not None:
+            exttestedwith = exttestedwith.split()
+        extbuglink = getattr(extmod, 'buglink', None)
+
+        fm.startitem()
+
+        if ui.quiet or ui.verbose:
+            fm.write('name', '%s\n', extname)
+        else:
+            fm.write('name', '%s', extname)
+            if not exttestedwith:
+                fm.plain(_(' (untested!)\n'))
+            else:
+                if exttestedwith == ['internal'] or \
+                                util.version() in exttestedwith:
+                    fm.plain('\n')
+                else:
+                    lasttestedversion = exttestedwith[-1]
+                    fm.plain(' (%s!)\n' % lasttestedversion)
+
+        fm.condwrite(ui.verbose and extsource, 'source',
+                 _('  location: %s\n'), extsource or "")
+
+        fm.condwrite(ui.verbose and exttestedwith, 'testedwith',
+                 _('  tested with: %s\n'), ' '.join(exttestedwith or []))
+
+        fm.condwrite(ui.verbose and extbuglink, 'buglink',
+                 _('  bug reporting: %s\n'), extbuglink or "")
+
+    fm.end()
+
 @command('debugfileset',
     [('r', 'rev', '', _('apply the filespec on this revision'), _('REV'))],
     _('[-r REV] FILESPEC'))
@@ -2700,9 +2743,12 @@ def debugpvec(ui, repo, a, b=None):
               pa.distance(pb), rel))
 
 @command('debugrebuilddirstate|debugrebuildstate',
-    [('r', 'rev', '', _('revision to rebuild to'), _('REV'))],
+    [('r', 'rev', '', _('revision to rebuild to'), _('REV')),
+     ('', 'minimal', None, _('only rebuild files that are inconsistent with '
+                             'the working copy parent')),
+    ],
     _('[-r REV]'))
-def debugrebuilddirstate(ui, repo, rev):
+def debugrebuilddirstate(ui, repo, rev, **opts):
     """rebuild the dirstate as it would look like for the given revision
 
     If no revision is specified the first current parent will be used.
@@ -2711,13 +2757,33 @@ def debugrebuilddirstate(ui, repo, rev):
     The actual working directory content or existing dirstate
     information such as adds or removes is not considered.
 
+    ``minimal`` will only rebuild the dirstate status for files that claim to be
+    tracked but are not in the parent manifest, or that exist in the parent
+    manifest but are not in the dirstate. It will not change adds, removes, or
+    modified files that are in the working copy parent.
+
     One use of this command is to make the next :hg:`status` invocation
     check the actual file content.
     """
     ctx = scmutil.revsingle(repo, rev)
     wlock = repo.wlock()
     try:
-        repo.dirstate.rebuild(ctx.node(), ctx.manifest())
+        dirstate = repo.dirstate
+
+        # See command doc for what minimal does.
+        if opts.get('minimal'):
+            dirstatefiles = set(dirstate)
+            ctxfiles = set(ctx.manifest().keys())
+            for file in (dirstatefiles | ctxfiles):
+                indirstate = file in dirstatefiles
+                inctx = file in ctxfiles
+
+                if indirstate and not inctx and dirstate[file] != 'a':
+                    dirstate.drop(file)
+                elif inctx and not indirstate:
+                    dirstate.normallookup(file)
+        else:
+            dirstate.rebuild(ctx.node(), ctx.manifest())
     finally:
         wlock.release()
 
@@ -2933,7 +2999,7 @@ def debugrevspec(ui, repo, expr, **opts):
     expansion.
     """
     if ui.verbose:
-        tree = revset.parse(expr)
+        tree = revset.parse(expr, lookup=repo.__contains__)
         ui.note(revset.prettyformat(tree), "\n")
         newtree = revset.findaliases(ui, tree)
         if newtree != tree:
@@ -2945,7 +3011,7 @@ def debugrevspec(ui, repo, expr, **opts):
         if opts["optimize"]:
             weight, optimizedtree = revset.optimize(newtree, True)
             ui.note("* optimized:\n", revset.prettyformat(optimizedtree), "\n")
-    func = revset.match(ui, expr)
+    func = revset.match(ui, expr, repo)
     revs = func(repo)
     if ui.verbose:
         ui.note("* set:\n", revset.prettyformatset(revs), "\n")
@@ -3915,9 +3981,9 @@ def heads(ui, repo, *branchrevs, **opts):
 @command('help',
     [('e', 'extension', None, _('show only help for extensions')),
      ('c', 'command', None, _('show only help for commands')),
-     ('k', 'keyword', '', _('show topics matching keyword')),
+     ('k', 'keyword', None, _('show topics matching keyword')),
      ],
-    _('[-ec] [TOPIC]'),
+    _('[-eck] [TOPIC]'),
     norepo=True)
 def help_(ui, name=None, **opts):
     """show help for a given topic or a help overview
@@ -3948,12 +4014,17 @@ def help_(ui, name=None, **opts):
     section = None
     if name and '.' in name:
         name, section = name.split('.', 1)
+        section = section.lower()
 
     text = help.help_(ui, name, **opts)
 
     formatted, pruned = minirst.format(text, textwidth, keep=keep,
                                        section=section)
-    if section and not formatted:
+
+    # We could have been given a weird ".foo" section without a name
+    # to look for, or we could have simply failed to found "foo.bar"
+    # because bar isn't a section of foo
+    if section and not (formatted and name):
         raise util.Abort(_("help section not found"))
 
     if 'verbose' in pruned:
@@ -4740,58 +4811,8 @@ def merge(ui, repo, node=None, **opts):
     if node:
         node = scmutil.revsingle(repo, node).node()
 
-    if not node and repo._activebookmark:
-        bmheads = repo.bookmarkheads(repo._activebookmark)
-        curhead = repo[repo._activebookmark].node()
-        if len(bmheads) == 2:
-            if curhead == bmheads[0]:
-                node = bmheads[1]
-            else:
-                node = bmheads[0]
-        elif len(bmheads) > 2:
-            raise util.Abort(_("multiple matching bookmarks to merge - "
-                "please merge with an explicit rev or bookmark"),
-                hint=_("run 'hg heads' to see all heads"))
-        elif len(bmheads) <= 1:
-            raise util.Abort(_("no matching bookmark to merge - "
-                "please merge with an explicit rev or bookmark"),
-                hint=_("run 'hg heads' to see all heads"))
-
-    if not node and not repo._activebookmark:
-        branch = repo[None].branch()
-        bheads = repo.branchheads(branch)
-        nbhs = [bh for bh in bheads if not repo[bh].bookmarks()]
-
-        if len(nbhs) > 2:
-            raise util.Abort(_("branch '%s' has %d heads - "
-                               "please merge with an explicit rev")
-                             % (branch, len(bheads)),
-                             hint=_("run 'hg heads .' to see heads"))
-
-        parent = repo.dirstate.p1()
-        if len(nbhs) <= 1:
-            if len(bheads) > 1:
-                raise util.Abort(_("heads are bookmarked - "
-                                   "please merge with an explicit rev"),
-                                 hint=_("run 'hg heads' to see all heads"))
-            if len(repo.heads()) > 1:
-                raise util.Abort(_("branch '%s' has one head - "
-                                   "please merge with an explicit rev")
-                                 % branch,
-                                 hint=_("run 'hg heads' to see all heads"))
-            msg, hint = _('nothing to merge'), None
-            if parent != repo.lookup(branch):
-                hint = _("use 'hg update' instead")
-            raise util.Abort(msg, hint=hint)
-
-        if parent not in bheads:
-            raise util.Abort(_('working directory not at a head revision'),
-                             hint=_("use 'hg update' or merge with an "
-                                    "explicit revision"))
-        if parent == nbhs[0]:
-            node = nbhs[-1]
-        else:
-            node = nbhs[0]
+    if not node:
+        node = scmutil.revsingle(repo, '_mergedefaultdest()').node()
 
     if opts.get('preview'):
         # find nodes that are ancestors of p2 but not of p1
@@ -5004,8 +5025,7 @@ def phase(ui, repo, *revs, **opts):
 
         public < draft < secret
 
-    Returns 0 on success, 1 if no phases were changed or some could not
-    be changed.
+    Returns 0 on success, 1 if some phases could not be changed.
 
     (For more information about the phases concept, see :hg:`help phases`.)
     """
@@ -5074,7 +5094,6 @@ def phase(ui, repo, *revs, **opts):
                 ui.note(msg)
         else:
             ui.warn(_('no phases changed\n'))
-            ret = 1
     return ret
 
 def postincoming(ui, repo, modheads, optupdate, checkout):
@@ -5251,18 +5270,14 @@ def push(ui, repo, dest=None, **opts):
                 # this lets simultaneous -r, -b options continue working
                 opts.setdefault('rev', []).append("null")
 
-    dest = ui.expandpath(dest or 'default-push', dest or 'default')
-    dest, branches = hg.parseurl(dest, opts.get('branch'))
+    path = ui.paths.getpath(dest, default='default')
+    if not path:
+        raise util.Abort(_('default repository not configured!'),
+                         hint=_('see the "path" section in "hg help config"'))
+    dest, branches = path.pushloc, (path.branch, opts.get('branch') or [])
     ui.status(_('pushing to %s\n') % util.hidepassword(dest))
     revs, checkout = hg.addbranchrevs(repo, repo, branches, opts.get('rev'))
-    try:
-        other = hg.peer(repo, opts, dest)
-    except error.RepoError:
-        if dest == "default-push":
-            raise util.Abort(_("default repository not configured!"),
-                    hint=_('see the "path" section in "hg help config"'))
-        else:
-            raise
+    other = hg.peer(repo, opts, dest)
 
     if revs:
         revs = [repo.lookup(r) for r in scmutil.revrange(repo, revs)]
@@ -5446,7 +5461,7 @@ def resolve(ui, repo, *pats, **opts):
         raise util.Abort(_("can't specify --all and patterns"))
     if not (all or pats or show or mark or unmark):
         raise util.Abort(_('no files or directories specified'),
-                         hint=('use --all to remerge all files'))
+                         hint=('use --all to re-merge all unresolved files'))
 
     if show:
         fm = ui.formatter('resolve', opts)
@@ -5713,6 +5728,7 @@ def serve(ui, repo, **opts):
         s.serve_forever()
 
     if opts["cmdserver"]:
+        import commandserver
         service = commandserver.createservice(ui, repo, opts)
         return cmdutil.service(opts, initfn=service.init, runfn=service.run)
 
@@ -6248,7 +6264,7 @@ def tag(ui, repo, name1, *names, **opts):
                         raise util.Abort(_("tag '%s' is not a global tag") % n)
                     else:
                         raise util.Abort(_("tag '%s' is not a local tag") % n)
-            rev_ = nullid
+            rev_ = 'null'
             if not message:
                 # we don't translate commit messages
                 message = 'Removed tag %s' % ', '.join(names)
@@ -6461,6 +6477,11 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False,
     try:
         cmdutil.clearunfinished(repo)
 
+        if date:
+            if rev is not None:
+                raise util.Abort(_("you can't specify a revision and a date"))
+            rev = cmdutil.finddate(ui, repo, date)
+
         # with no argument, we also move the active bookmark, if any
         rev, movemarkfrom = bookmarks.calculateupdate(ui, repo, rev)
 
@@ -6470,11 +6491,6 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False,
 
         if check and clean:
             raise util.Abort(_("cannot specify both -c/--check and -C/--clean"))
-
-        if date:
-            if rev is not None:
-                raise util.Abort(_("you can't specify a revision and a date"))
-            rev = cmdutil.finddate(ui, repo, date)
 
         if check:
             cmdutil.bailifchanged(repo, merge=False)

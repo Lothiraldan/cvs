@@ -5,9 +5,18 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import util, error
-import errno, os, socket, time
+from __future__ import absolute_import
+
+import errno
+import os
+import socket
+import time
 import warnings
+
+from . import (
+    error,
+    util,
+)
 
 class lock(object):
     '''An advisory lock held by one process to control access to a set
@@ -29,16 +38,23 @@ class lock(object):
 
     _host = None
 
-    def __init__(self, vfs, file, timeout=-1, releasefn=None, desc=None):
+    def __init__(self, vfs, file, timeout=-1, releasefn=None, acquirefn=None,
+                 desc=None, parentlock=None):
         self.vfs = vfs
         self.f = file
         self.held = 0
         self.timeout = timeout
         self.releasefn = releasefn
+        self.acquirefn = acquirefn
         self.desc = desc
+        self.parentlock = parentlock
+        self._parentheld = False
+        self._inherited = False
         self.postrelease  = []
         self.pid = os.getpid()
         self.delay = self.lock()
+        if self.acquirefn:
+            self.acquirefn()
 
     def __del__(self):
         if self.held:
@@ -56,7 +72,7 @@ class lock(object):
         timeout = self.timeout
         while True:
             try:
-                self.trylock()
+                self._trylock()
                 return self.timeout - timeout
             except error.LockHeld as inst:
                 if timeout != 0:
@@ -67,14 +83,16 @@ class lock(object):
                 raise error.LockHeld(errno.ETIMEDOUT, inst.filename, self.desc,
                                      inst.locker)
 
-    def trylock(self):
+    def _trylock(self):
         if self.held:
             self.held += 1
             return
         if lock._host is None:
             lock._host = socket.gethostname()
         lockname = '%s:%s' % (lock._host, self.pid)
-        while not self.held:
+        retry = 5
+        while not self.held and retry:
+            retry -= 1
             try:
                 self.vfs.makelock(lockname, self.f)
                 self.held = 1
@@ -89,23 +107,22 @@ class lock(object):
                     raise error.LockUnavailable(why.errno, why.strerror,
                                                 why.filename, self.desc)
 
-    def testlock(self):
-        """return id of locker if lock is valid, else None.
+    def _readlock(self):
+        """read lock and return its value
 
-        If old-style lock, we cannot tell what machine locker is on.
-        with new-style lock, if locker is on this machine, we can
-        see if locker is alive.  If locker is on this machine but
-        not alive, we can safely break lock.
-
-        The lock file is only deleted when None is returned.
-
+        Returns None if no lock exists, pid for old-style locks, and host:pid
+        for new-style locks.
         """
         try:
-            locker = self.vfs.readlock(self.f)
+            return self.vfs.readlock(self.f)
         except (OSError, IOError) as why:
             if why.errno == errno.ENOENT:
                 return None
             raise
+
+    def _testlock(self, locker):
+        if locker is None:
+            return None
         try:
             host, pid = locker.split(":", 1)
         except ValueError:
@@ -127,6 +144,50 @@ class lock(object):
         except error.LockError:
             return locker
 
+    def testlock(self):
+        """return id of locker if lock is valid, else None.
+
+        If old-style lock, we cannot tell what machine locker is on.
+        with new-style lock, if locker is on this machine, we can
+        see if locker is alive.  If locker is on this machine but
+        not alive, we can safely break lock.
+
+        The lock file is only deleted when None is returned.
+
+        """
+        locker = self._readlock()
+        return self._testlock(locker)
+
+    def prepinherit(self):
+        """prepare for the lock to be inherited by a Mercurial subprocess
+
+        Returns a string that will be recognized by the lock in the
+        subprocess. Communicating this string to the subprocess needs to be done
+        separately -- typically by an environment variable.
+        """
+        if not self.held:
+            raise error.LockInheritanceContractViolation(
+                'prepinherit can only be called while lock is held')
+        if self._inherited:
+            raise error.LockInheritanceContractViolation(
+                'prepinherit cannot be called while lock is already inherited')
+        if self.releasefn:
+            self.releasefn()
+        if self._parentheld:
+            lockname = self.parentlock
+        else:
+            lockname = '%s:%s' % (lock._host, self.pid)
+        self._inherited = True
+        return lockname
+
+    def reacquire(self):
+        if not self._inherited:
+            raise error.LockInheritanceContractViolation(
+                'reacquire can only be called after prepinherit')
+        if self.acquirefn:
+            self.acquirefn()
+        self._inherited = False
+
     def release(self):
         """release the lock and execute callback function if any
 
@@ -143,10 +204,11 @@ class lock(object):
                 if self.releasefn:
                     self.releasefn()
             finally:
-                try:
-                    self.vfs.unlink(self.f)
-                except OSError:
-                    pass
+                if not self._parentheld:
+                    try:
+                        self.vfs.unlink(self.f)
+                    except OSError:
+                        pass
             for callback in self.postrelease:
                 callback()
 

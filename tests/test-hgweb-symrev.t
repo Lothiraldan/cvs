@@ -376,8 +376,8 @@ Set up the repo
    annotate foo @ 1:<a href="/rev/a7c1559b7bba?style=coal">a7c1559b7bba</a>
    <td class="author"><a href="/file/43c799df6e75/foo?style=coal">43c799df6e75</a> </td>
    <td class="author"><a href="/file/9d8c40cba617/foo?style=coal">9d8c40cba617</a> </td>
-  <a href="/annotate/43c799df6e75/foo?style=coal#1"
-  <a href="/annotate/a7c1559b7bba/foo?style=coal#2"
+  <a href="/annotate/43c799df6e75/foo?style=coal#l1"
+  <a href="/annotate/a7c1559b7bba/foo?style=coal#l2"
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'diff/xyzzy/foo?style=coal' | egrep $REVLINKS
   <li><a href="/shortlog/xyzzy?style=coal">log</a></li>
@@ -639,6 +639,7 @@ Set up the repo
 (De)referencing symbolic revisions (monoblue)
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'summary?style=monoblue' | egrep $REVLINKS
+              <li><a href="/archive/tip.zip">zip</a></li>
   <a href="/rev/9d8c40cba617?style=monoblue">
   <a href="/rev/9d8c40cba617?style=monoblue">changeset</a> |
   <a href="/file/9d8c40cba617?style=monoblue">files</a>
@@ -800,9 +801,13 @@ Set up the repo
           <li><a href="/comparison/xyzzy/foo?style=monoblue">comparison</a></li>
           <li><a href="/rss-log/tip/foo">rss</a></li>
   <a href="/rev/a7c1559b7bba?style=monoblue">
-  <a href="/file/a7c1559b7bba/foo?style=monoblue">file</a>&nbsp;|&nbsp;<a href="/diff/a7c1559b7bba/foo?style=monoblue">diff</a>&nbsp;|&nbsp;<a href="/annotate/a7c1559b7bba/foo?style=monoblue">annotate</a>
+  <a href="/file/a7c1559b7bba/foo?style=monoblue">file</a> |
+  <a href="/diff/a7c1559b7bba/foo?style=monoblue">diff</a> |
+  <a href="/annotate/a7c1559b7bba/foo?style=monoblue">annotate</a>
   <a href="/rev/43c799df6e75?style=monoblue">
-  <a href="/file/43c799df6e75/foo?style=monoblue">file</a>&nbsp;|&nbsp;<a href="/diff/43c799df6e75/foo?style=monoblue">diff</a>&nbsp;|&nbsp;<a href="/annotate/43c799df6e75/foo?style=monoblue">annotate</a>
+  <a href="/file/43c799df6e75/foo?style=monoblue">file</a> |
+  <a href="/diff/43c799df6e75/foo?style=monoblue">diff</a> |
+  <a href="/annotate/43c799df6e75/foo?style=monoblue">annotate</a>
       <a href="/log/43c799df6e75/foo?style=monoblue">(0)</a><a href="/log/tip/foo?style=monoblue">tip</a>
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'annotate/xyzzy/foo?style=monoblue' | egrep $REVLINKS
