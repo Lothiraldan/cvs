@@ -5,9 +5,16 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import hex
-import patch, scmutil, util, error
-import hbisect
+from __future__ import absolute_import
+
+from .node import hex
+from . import (
+    error,
+    hbisect,
+    patch,
+    scmutil,
+    util,
+)
 
 # This helper class allows us to handle both:
 #  "{files}" (legacy command-line-specific list hack) and
@@ -401,6 +408,14 @@ def showphaseidx(repo, ctx, templ, **args):
 def showrev(repo, ctx, templ, **args):
     """:rev: Integer. The repository-local changeset revision number."""
     return scmutil.intrev(ctx.rev())
+
+def showrevslist(name, revs, **args):
+    """helper to generate a list of revisions in which a mapped template will
+    be evaluated"""
+    repo = args['ctx'].repo()
+    f = _showlist(name, revs, **args)
+    return _hybrid(f, revs,
+                   lambda x: {name: x, 'ctx': repo[x], 'revcache': {}})
 
 def showsubrepos(**args):
     """:subrepos: List of strings. Updated subrepositories in the changeset."""

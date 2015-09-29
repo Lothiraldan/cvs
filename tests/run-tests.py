@@ -35,6 +35,8 @@
 #      ./run-tests.py -j2 -c --local test-s*  # unsupported (and broken)
 #  9) parallel, custom tmp dir:
 #      ./run-tests.py -j2 --tmpdir /tmp/myhgtests
+#  10) parallel, pure, tests that call run-tests:
+#      ./run-tests.py --pure `grep -l run-tests.py *.t`
 #
 # (You could use any subset of the tests: test-s* happens to match
 # enough that it's worth doing parallel runs, few enough that it
@@ -259,6 +261,8 @@ def getparser():
                       help='run tests in random order')
     parser.add_option('--profile-runner', action='store_true',
                       help='run statprof on run-tests')
+    parser.add_option('--allow-slow-tests', action='store_true',
+                      help='allow extremely slow tests')
 
     for option, (envvar, default) in defaults.items():
         defaults[option] = type(default)(os.environ.get(envvar, default))
@@ -1835,6 +1839,11 @@ class TestRunner(object):
         if self.options.pure:
             os.environ["HGTEST_RUN_TESTS_PURE"] = "--pure"
 
+        if self.options.allow_slow_tests:
+            os.environ["HGTEST_SLOW"] = "slow"
+        elif 'HGTEST_SLOW' in os.environ:
+            del os.environ['HGTEST_SLOW']
+
         self._coveragefile = os.path.join(self._testdir, b'.coverage')
 
         vlog("# Using TESTDIR", self._testdir)
@@ -2078,7 +2087,11 @@ class TestRunner(object):
         vlog("# Running", cmd)
         if os.system(cmd) == 0:
             if not self.options.verbose:
-                os.remove(installerrs)
+                try:
+                    os.remove(installerrs)
+                except OSError as e:
+                    if e.errno != errno.ENOENT:
+                        raise
         else:
             f = open(installerrs, 'rb')
             for line in f:

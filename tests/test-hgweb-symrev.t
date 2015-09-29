@@ -376,8 +376,8 @@ Set up the repo
    annotate foo @ 1:<a href="/rev/a7c1559b7bba?style=coal">a7c1559b7bba</a>
    <td class="author"><a href="/file/43c799df6e75/foo?style=coal">43c799df6e75</a> </td>
    <td class="author"><a href="/file/9d8c40cba617/foo?style=coal">9d8c40cba617</a> </td>
-  <a href="/annotate/43c799df6e75/foo?style=coal#1"
-  <a href="/annotate/a7c1559b7bba/foo?style=coal#2"
+  <a href="/annotate/43c799df6e75/foo?style=coal#l1"
+  <a href="/annotate/a7c1559b7bba/foo?style=coal#l2"
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'diff/xyzzy/foo?style=coal' | egrep $REVLINKS
   <li><a href="/shortlog/xyzzy?style=coal">log</a></li>
@@ -422,11 +422,11 @@ Set up the repo
   <a class="list" href="/rev/43c799df6e75?style=gitweb">
   <a href="/rev/43c799df6e75?style=gitweb">changeset</a> |
   <a href="/file/43c799df6e75?style=gitweb">files</a>
-  <td><a class="list" href="/rev/a7c1559b7bba?style=gitweb"><b>xyzzy</b></a></td>
+  <td><a class="list" href="/rev/xyzzy?style=gitweb"><b>xyzzy</b></a></td>
   <a href="/rev/a7c1559b7bba?style=gitweb">changeset</a> |
   <a href="/log/a7c1559b7bba?style=gitweb">changelog</a> |
   <a href="/file/a7c1559b7bba?style=gitweb">files</a>
-  <td><a class="list" href="/shortlog/9d8c40cba617?style=gitweb"><b>9d8c40cba617</b></a></td>
+  <td class="open"><a class="list" href="/shortlog/default?style=gitweb"><b>default</b></a></td>
   <a href="/changeset/9d8c40cba617?style=gitweb">changeset</a> |
   <a href="/log/9d8c40cba617?style=gitweb">changelog</a> |
   <a href="/file/9d8c40cba617?style=gitweb">files</a>
@@ -469,19 +469,19 @@ Set up the repo
   | <a href="/graph/43c799df6e75?style=gitweb">(0)</a> <a href="/graph/tip?style=gitweb">tip</a> 
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'tags?style=gitweb' | egrep $REVLINKS
-  <td><a class="list" href="/rev/9d8c40cba617?style=gitweb"><b>tip</b></a></td>
+  <td><a class="list" href="/rev/tip?style=gitweb"><b>tip</b></a></td>
   <a href="/rev/9d8c40cba617?style=gitweb">changeset</a> |
   <a href="/log/9d8c40cba617?style=gitweb">changelog</a> |
   <a href="/file/9d8c40cba617?style=gitweb">files</a>
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'bookmarks?style=gitweb' | egrep $REVLINKS
-  <td><a class="list" href="/rev/a7c1559b7bba?style=gitweb"><b>xyzzy</b></a></td>
+  <td><a class="list" href="/rev/xyzzy?style=gitweb"><b>xyzzy</b></a></td>
   <a href="/rev/a7c1559b7bba?style=gitweb">changeset</a> |
   <a href="/log/a7c1559b7bba?style=gitweb">changelog</a> |
   <a href="/file/a7c1559b7bba?style=gitweb">files</a>
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'branches?style=gitweb' | egrep $REVLINKS
-  <td><a class="list" href="/shortlog/9d8c40cba617?style=gitweb"><b>9d8c40cba617</b></a></td>
+  <td class="open"><a class="list" href="/shortlog/default?style=gitweb"><b>default</b></a></td>
   <a href="/changeset/9d8c40cba617?style=gitweb">changeset</a> |
   <a href="/log/9d8c40cba617?style=gitweb">changelog</a> |
   <a href="/file/9d8c40cba617?style=gitweb">files</a>
@@ -639,6 +639,7 @@ Set up the repo
 (De)referencing symbolic revisions (monoblue)
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'summary?style=monoblue' | egrep $REVLINKS
+              <li><a href="/archive/tip.zip">zip</a></li>
   <a href="/rev/9d8c40cba617?style=monoblue">
   <a href="/rev/9d8c40cba617?style=monoblue">changeset</a> |
   <a href="/file/9d8c40cba617?style=monoblue">files</a>
@@ -648,11 +649,11 @@ Set up the repo
   <a href="/rev/43c799df6e75?style=monoblue">
   <a href="/rev/43c799df6e75?style=monoblue">changeset</a> |
   <a href="/file/43c799df6e75?style=monoblue">files</a>
-  <td><a href="/rev/a7c1559b7bba?style=monoblue">xyzzy</a></td>
+  <td><a href="/rev/xyzzy?style=monoblue">xyzzy</a></td>
   <a href="/rev/a7c1559b7bba?style=monoblue">changeset</a> |
   <a href="/log/a7c1559b7bba?style=monoblue">changelog</a> |
   <a href="/file/a7c1559b7bba?style=monoblue">files</a>
-  <td><a href="/shortlog/9d8c40cba617?style=monoblue">9d8c40cba617</a></td>
+  <td class="open"><a href="/shortlog/default?style=monoblue">default</a></td>
   <a href="/rev/9d8c40cba617?style=monoblue">changeset</a> |
   <a href="/log/9d8c40cba617?style=monoblue">changelog</a> |
   <a href="/file/9d8c40cba617?style=monoblue">files</a>
@@ -688,19 +689,19 @@ Set up the repo
           | <a href="/graph/43c799df6e75?style=monoblue">(0)</a> <a href="/graph/tip?style=monoblue">tip</a> 
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'tags?style=monoblue' | egrep $REVLINKS
-  <td><a href="/rev/9d8c40cba617?style=monoblue">tip</a></td>
+  <td><a href="/rev/tip?style=monoblue">tip</a></td>
   <a href="/rev/9d8c40cba617?style=monoblue">changeset</a> |
   <a href="/log/9d8c40cba617?style=monoblue">changelog</a> |
   <a href="/file/9d8c40cba617?style=monoblue">files</a>
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'bookmarks?style=monoblue' | egrep $REVLINKS
-  <td><a href="/rev/a7c1559b7bba?style=monoblue">xyzzy</a></td>
+  <td><a href="/rev/xyzzy?style=monoblue">xyzzy</a></td>
   <a href="/rev/a7c1559b7bba?style=monoblue">changeset</a> |
   <a href="/log/a7c1559b7bba?style=monoblue">changelog</a> |
   <a href="/file/a7c1559b7bba?style=monoblue">files</a>
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'branches?style=monoblue' | egrep $REVLINKS
-  <td><a href="/shortlog/9d8c40cba617?style=monoblue">9d8c40cba617</a></td>
+  <td class="open"><a href="/shortlog/default?style=monoblue">default</a></td>
   <a href="/rev/9d8c40cba617?style=monoblue">changeset</a> |
   <a href="/log/9d8c40cba617?style=monoblue">changelog</a> |
   <a href="/file/9d8c40cba617?style=monoblue">files</a>
@@ -800,9 +801,13 @@ Set up the repo
           <li><a href="/comparison/xyzzy/foo?style=monoblue">comparison</a></li>
           <li><a href="/rss-log/tip/foo">rss</a></li>
   <a href="/rev/a7c1559b7bba?style=monoblue">
-  <a href="/file/a7c1559b7bba/foo?style=monoblue">file</a>&nbsp;|&nbsp;<a href="/diff/a7c1559b7bba/foo?style=monoblue">diff</a>&nbsp;|&nbsp;<a href="/annotate/a7c1559b7bba/foo?style=monoblue">annotate</a>
+  <a href="/file/a7c1559b7bba/foo?style=monoblue">file</a> |
+  <a href="/diff/a7c1559b7bba/foo?style=monoblue">diff</a> |
+  <a href="/annotate/a7c1559b7bba/foo?style=monoblue">annotate</a>
   <a href="/rev/43c799df6e75?style=monoblue">
-  <a href="/file/43c799df6e75/foo?style=monoblue">file</a>&nbsp;|&nbsp;<a href="/diff/43c799df6e75/foo?style=monoblue">diff</a>&nbsp;|&nbsp;<a href="/annotate/43c799df6e75/foo?style=monoblue">annotate</a>
+  <a href="/file/43c799df6e75/foo?style=monoblue">file</a> |
+  <a href="/diff/43c799df6e75/foo?style=monoblue">diff</a> |
+  <a href="/annotate/43c799df6e75/foo?style=monoblue">annotate</a>
       <a href="/log/43c799df6e75/foo?style=monoblue">(0)</a><a href="/log/tip/foo?style=monoblue">tip</a>
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'annotate/xyzzy/foo?style=monoblue' | egrep $REVLINKS

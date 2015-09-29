@@ -115,8 +115,6 @@ Check hgweb's load order:
   3) bar extsetup
   4) foo reposetup
   4) bar reposetup
-  4) foo reposetup
-  4) bar reposetup
 
   $ echo 'foo = !' >> $HGRCPATH
   $ echo 'bar = !' >> $HGRCPATH
@@ -289,17 +287,23 @@ hide outer repo
   $ echo "debugextension = $debugpath" >> $HGRCPATH
 
   $ hg help debugextension
-  debugextension extension - only debugcommands
+  hg debugextensions
   
-  no commands defined
+  show information about active extensions
+  
+  options:
+  
+  (some details hidden, use --verbose to show complete help)
 
 
   $ hg --verbose help debugextension
-  debugextension extension - only debugcommands
+  hg debugextensions
   
-  list of commands:
+  show information about active extensions
   
-   foo           yet another foo command
+  options:
+  
+   -T --template TEMPLATE display with template (EXPERIMENTAL)
   
   global options ([+] can be repeated):
   
@@ -328,12 +332,13 @@ hide outer repo
 
 
   $ hg --debug help debugextension
-  debugextension extension - only debugcommands
+  hg debugextensions
   
-  list of commands:
+  show information about active extensions
   
-   debugfoobar   yet another debug command
-   foo           yet another foo command
+  options:
+  
+   -T --template TEMPLATE display with template (EXPERIMENTAL)
   
   global options ([+] can be repeated):
   
@@ -392,6 +397,7 @@ Extension module help vs command help:
    -o --option OPT [+]      pass option to comparison program
    -r --rev REV [+]         revision
    -c --change REV          change made by revision
+      --patch               compare patches for two revisions
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
    -S --subrepos            recurse into subrepositories
@@ -546,20 +552,7 @@ Test help topic with same name as extension
 
 Issue811: Problem loading extensions twice (by site and by user)
 
-  $ debugpath=`pwd`/debugissue811.py
-  $ cat > debugissue811.py <<EOF
-  > '''show all loaded extensions
-  > '''
-  > from mercurial import cmdutil, commands, extensions
-  > cmdtable = {}
-  > command = cmdutil.command(cmdtable)
-  > @command('debugextensions', [], 'hg debugextensions', norepo=True)
-  > def debugextensions(ui):
-  >     "yet another debug command"
-  >     ui.write("%s\n" % '\n'.join([x for x, y in extensions.extensions()]))
-  > EOF
   $ cat <<EOF >> $HGRCPATH
-  > debugissue811 = $debugpath
   > mq =
   > strip =
   > hgext.mq =
@@ -570,9 +563,8 @@ Show extensions:
 (note that mq force load strip, also checking it's not loaded twice)
 
   $ hg debugextensions
-  debugissue811
-  strip
   mq
+  strip
 
 For extensions, which name matches one of its commands, help
 message should ask '-v -e' to get list of built-in aliases
@@ -942,6 +934,15 @@ Older extension is tested with current version, the other only with newer:
   ** If that fixes the bug please report it to http://example.com/bts
   ** Python * (glob)
   ** Mercurial Distributed SCM (version 1.9.3)
+  ** Extensions loaded: throw, older
+
+Ability to point to a different point
+  $ hg --config extensions.throw=throw.py --config extensions.older=older.py \
+  >   --config ui.supportcontact='Your Local Goat Lenders' throw 2>&1 | egrep '^\*\*'
+  ** unknown exception encountered, please report by visiting
+  ** Your Local Goat Lenders
+  ** Python * (glob)
+  ** Mercurial Distributed SCM (*) (glob)
   ** Extensions loaded: throw, older
 
 Declare the version as supporting this hg version, show regular bts link:

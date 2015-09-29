@@ -1335,9 +1335,8 @@ File-related
   <div class="overflow">
   <div class="sourcefirst linewraptoggle">line wrap: <a class="linewraplink" href="javascript:toggleLinewrap()">on</a></div>
   <div class="sourcefirst"> line source</div>
-  <pre class="sourcelines stripes4 wrap">
+  <pre class="sourcelines stripes4 wrap bottomline">
   <span id="l1">foo</span><a href="#l1"></a></pre>
-  <div class="sourcelast"></div>
   </div>
   </div>
   </div>
@@ -1462,9 +1461,8 @@ File-related
   <div class="overflow">
   <div class="sourcefirst linewraptoggle">line wrap: <a class="linewraplink" href="javascript:toggleLinewrap()">on</a></div>
   <div class="sourcefirst"> line source</div>
-  <pre class="sourcelines stripes4 wrap">
+  <pre class="sourcelines stripes4 wrap bottomline">
   <span id="l1">another</span><a href="#l1"></a></pre>
-  <div class="sourcelast"></div>
   </div>
   </div>
   </div>
@@ -1613,7 +1611,7 @@ Overviews
   
   <tr class="parity0">
   <td class="age"><i class="age">Thu, 01 Jan 1970 00:00:00 +0000</i></td>
-  <td><a class="list" href="/rev/2ef0ac749a14?style=gitweb"><b>1.0</b></a></td>
+  <td><a class="list" href="/rev/1.0?style=gitweb"><b>1.0</b></a></td>
   <td class="link">
   <a href="/rev/2ef0ac749a14?style=gitweb">changeset</a> |
   <a href="/log/2ef0ac749a14?style=gitweb">changelog</a> |
@@ -1628,7 +1626,7 @@ Overviews
   
   <tr class="parity0">
   <td class="age"><i class="age">Thu, 01 Jan 1970 00:00:00 +0000</i></td>
-  <td><a class="list" href="/rev/2ef0ac749a14?style=gitweb"><b>anotherthing</b></a></td>
+  <td><a class="list" href="/rev/anotherthing?style=gitweb"><b>anotherthing</b></a></td>
   <td class="link">
   <a href="/rev/2ef0ac749a14?style=gitweb">changeset</a> |
   <a href="/log/2ef0ac749a14?style=gitweb">changelog</a> |
@@ -1637,7 +1635,7 @@ Overviews
   </tr>
   <tr class="parity1">
   <td class="age"><i class="age">Thu, 01 Jan 1970 00:00:00 +0000</i></td>
-  <td><a class="list" href="/rev/cad8025a2e87?style=gitweb"><b>something</b></a></td>
+  <td><a class="list" href="/rev/something?style=gitweb"><b>something</b></a></td>
   <td class="link">
   <a href="/rev/cad8025a2e87?style=gitweb">changeset</a> |
   <a href="/log/cad8025a2e87?style=gitweb">changelog</a> |
@@ -1652,8 +1650,7 @@ Overviews
   
   <tr class="parity0">
   <td class="age"><i class="age">Thu, 01 Jan 1970 00:00:00 +0000</i></td>
-  <td><a class="list" href="/shortlog/cad8025a2e87?style=gitweb"><b>cad8025a2e87</b></a></td>
-  <td class="">unstable</td>
+  <td class="open"><a class="list" href="/shortlog/unstable?style=gitweb"><b>unstable</b></a></td>
   <td class="link">
   <a href="/changeset/cad8025a2e87?style=gitweb">changeset</a> |
   <a href="/log/cad8025a2e87?style=gitweb">changelog</a> |
@@ -1662,8 +1659,7 @@ Overviews
   </tr>
   <tr class="parity1">
   <td class="age"><i class="age">Thu, 01 Jan 1970 00:00:00 +0000</i></td>
-  <td><a class="list" href="/shortlog/1d22e65f027e?style=gitweb"><b>1d22e65f027e</b></a></td>
-  <td class="">stable</td>
+  <td class="inactive"><a class="list" href="/shortlog/stable?style=gitweb"><b>stable</b></a></td>
   <td class="link">
   <a href="/changeset/1d22e65f027e?style=gitweb">changeset</a> |
   <a href="/log/1d22e65f027e?style=gitweb">changelog</a> |
@@ -1672,8 +1668,7 @@ Overviews
   </tr>
   <tr class="parity0">
   <td class="age"><i class="age">Thu, 01 Jan 1970 00:00:00 +0000</i></td>
-  <td><a class="list" href="/shortlog/a4f92ed23982?style=gitweb"><b>a4f92ed23982</b></a></td>
-  <td class="">default</td>
+  <td class="inactive"><a class="list" href="/shortlog/default?style=gitweb"><b>default</b></a></td>
   <td class="link">
   <a href="/changeset/a4f92ed23982?style=gitweb">changeset</a> |
   <a href="/log/a4f92ed23982?style=gitweb">changelog</a> |
@@ -2051,6 +2046,35 @@ Static files
   	position: relative;
   	top: -1px;
   }
+
+Stop and restart the server at the directory different from the repository
+root. Even in such case, file patterns should be resolved relative to the
+repository root. (issue4568)
+
+  $ killdaemons.py
+  $ hg serve --config server.preferuncompressed=True -n test \
+  > -p $HGPORT -d --pid-file=`pwd`/hg.pid -E `pwd`/errors.log \
+  > --cwd .. -R `pwd`
+  $ cat hg.pid >> $DAEMON_PIDS
+
+  $ get-with-headers.py 127.0.0.1:$HGPORT 'log?rev=adds("foo")&style=raw'
+  200 Script output follows
+  
+  
+  # HG changesets search
+  # Node ID cad8025a2e87f88c06259790adfa15acb4080123
+  # Query "adds("foo")"
+  # Mode revset expression search
+  
+  changeset:   2ef0ac749a14e4f57a5a822464a0902c6f7f448f
+  revision:    0
+  user:        test
+  date:        Thu, 01 Jan 1970 00:00:00 +0000
+  summary:     base
+  tag:         1.0
+  bookmark:    anotherthing
+  
+  
 
 Stop and restart with HGENCODING=cp932 and preferuncompressed
 

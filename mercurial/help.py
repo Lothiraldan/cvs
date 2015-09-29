@@ -14,13 +14,22 @@ import encoding, util, minirst
 import cmdutil
 import hgweb.webcommands as webcommands
 
+_exclkeywords = [
+    "(DEPRECATED)",
+    "(EXPERIMENTAL)",
+    # i18n: "(DEPRECATED)" is a keyword, must be translated consistently
+    _("(DEPRECATED)"),
+    # i18n: "(EXPERIMENTAL)" is a keyword, must be translated consistently
+    _("(EXPERIMENTAL)"),
+    ]
+
 def listexts(header, exts, indent=1, showdeprecated=False):
     '''return a text listing of the given extensions'''
     rst = []
     if exts:
         rst.append('\n%s\n\n' % header)
         for name, desc in sorted(exts.iteritems()):
-            if '(DEPRECATED)' in desc and not showdeprecated:
+            if not showdeprecated and any(w in desc for w in _exclkeywords):
                 continue
             rst.append('%s:%s: %s\n' % (' ' * indent, name, desc))
     return rst
@@ -43,9 +52,7 @@ def optrst(header, options, verbose):
             shortopt, longopt, default, desc = option
             optlabel = _("VALUE") # default label
 
-        if not verbose and ("DEPRECATED" in desc or _("DEPRECATED") in desc or
-                            "EXPERIMENTAL" in desc or
-                            _("EXPERIMENTAL") in desc):
+        if not verbose and any(w in desc for w in _exclkeywords):
             continue
 
         so = ''
@@ -179,7 +186,7 @@ def addtopichook(topic, rewriter):
 
 def makeitemsdoc(topic, doc, marker, items, dedent=False):
     """Extract docstring from the items key to function mapping, build a
-    .single documentation block and use it to overwrite the marker in doc
+    single documentation block and use it to overwrite the marker in doc.
     """
     entries = []
     for name in sorted(items):
@@ -334,7 +341,7 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             if not ui.debugflag and f.startswith("debug") and name != "debug":
                 continue
             doc = e[0].__doc__
-            if doc and 'DEPRECATED' in doc and not ui.verbose:
+            if not ui.verbose and doc and any(w in doc for w in _exclkeywords):
                 continue
             doc = gettext(doc)
             if not doc:
@@ -475,11 +482,18 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
     rst = []
     kw = opts.get('keyword')
     if kw:
-        matches = topicmatch(kw)
-        for t, title in (('topics', _('Topics')),
+        matches = topicmatch(name)
+        helpareas = []
+        if opts.get('extension'):
+            helpareas += [('extensions', _('Extensions'))]
+        if opts.get('command'):
+            helpareas += [('commands', _('Commands'))]
+        if not helpareas:
+            helpareas = [('topics', _('Topics')),
                          ('commands', _('Commands')),
                          ('extensions', _('Extensions')),
-                         ('extensioncommands', _('Extension Commands'))):
+                         ('extensioncommands', _('Extension Commands'))]
+        for t, title in helpareas:
             if matches[t]:
                 rst.append('%s:\n\n' % title)
                 rst.extend(minirst.maketable(sorted(matches[t]), 1))
@@ -489,13 +503,14 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             hint = _('try "hg help" for a list of topics')
             raise util.Abort(msg, hint=hint)
     elif name and name != 'shortlist':
+        queries = []
         if unknowncmd:
-            queries = (helpextcmd,)
-        elif opts.get('extension'):
-            queries = (helpext,)
-        elif opts.get('command'):
-            queries = (helpcmd,)
-        else:
+            queries += [helpextcmd]
+        if opts.get('extension'):
+            queries += [helpext]
+        if opts.get('command'):
+            queries += [helpcmd]
+        if not queries:
             queries = (helptopic, helpcmd, helpext, helpextcmd)
         for f in queries:
             try:

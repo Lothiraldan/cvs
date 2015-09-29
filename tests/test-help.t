@@ -616,6 +616,23 @@ Test command without options
   [255]
 
 
+Make sure that we don't run afoul of the help system thinking that
+this is a section and erroring out weirdly.
+
+  $ hg .log
+  hg: unknown command '.log'
+  (did you mean one of log?)
+  [255]
+
+  $ hg log.
+  hg: unknown command 'log.'
+  (did you mean one of log?)
+  [255]
+  $ hg pu.lh
+  hg: unknown command 'pu.lh'
+  (did you mean one of pull, push?)
+  [255]
+
   $ cat > helpext.py <<EOF
   > import os
   > from mercurial import cmdutil, commands
@@ -629,8 +646,8 @@ Test command without options
   >     ('', 'newline', '', 'line1\nline2')],
   >     'hg nohelp',
   >     norepo=True)
-  > @command('debugoptDEP', [('', 'dopt', None, 'option is DEPRECATED')])
-  > @command('debugoptEXP', [('', 'eopt', None, 'option is EXPERIMENTAL')])
+  > @command('debugoptDEP', [('', 'dopt', None, 'option is (DEPRECATED)')])
+  > @command('debugoptEXP', [('', 'eopt', None, 'option is (EXPERIMENTAL)')])
   > def nohelp(ui, *args, **kwargs):
   >     pass
   > 
@@ -775,6 +792,8 @@ Test list of internal help commands
                  show the contents of the current dirstate
    debugdiscovery
                  runs the changeset discovery protocol in isolation
+   debugextensions
+                 show information about active extensions
    debugfileset  parse and apply a fileset specification
    debugfsinfo   show information detected about current filesystem
    debuggetbundle
@@ -849,9 +868,9 @@ test deprecated and experimental options are hidden in command help
 
 test deprecated and experimental options is shown with -v
   $ hg help -v debugoptDEP | grep dopt
-    --dopt option is DEPRECATED
+    --dopt option is (DEPRECATED)
   $ hg help -v debugoptEXP | grep eopt
-    --eopt option is EXPERIMENTAL
+    --eopt option is (EXPERIMENTAL)
 
 #if gettext
 test deprecated option is hidden with translation with untranslated description
@@ -912,6 +931,47 @@ Test a help topic
       working directory is checked out, it is equivalent to null. If an
       uncommitted merge is in progress, "." is the revision of the first parent.
 
+Test repeated config section name
+
+  $ hg help config.host
+      "http_proxy.host"
+          Host name and (optional) port of the proxy server, for example
+          "myproxy:8000".
+  
+      "smtp.host"
+          Host name of mail server, e.g. "mail.example.com".
+  
+Unrelated trailing paragraphs shouldn't be included
+
+  $ hg help config.extramsg | grep '^$'
+  
+
+Test capitalized section name
+
+  $ hg help scripting.HGPLAIN > /dev/null
+
+Help subsection:
+
+  $ hg help config.charsets |grep "Email example:" > /dev/null
+  [1]
+
+Show nested definitions
+("profiling.type"[break]"ls"[break]"stat"[break])
+
+  $ hg help config.type | egrep '^$'|wc -l
+  \s*3 (re)
+
+Last item in help config.*:
+
+  $ hg help config.`hg help config|grep '^    "'| \
+  >       tail -1|sed 's![ "]*!!g'`| \
+  >   grep "hg help -c config" > /dev/null
+  [1]
+
+note to use help -c for general hg help config:
+
+  $ hg help config |grep "hg help -c config" > /dev/null
+
 Test templating help
 
   $ hg help templating | egrep '(desc|diffstat|firstline|nonempty)  '
@@ -946,6 +1006,28 @@ Test help hooks
   $ hg help revsets | grep helphook
       helphook1
       helphook2
+
+Test -e / -c / -k combinations
+
+  $ hg help -c progress
+  abort: no such help topic: progress
+  (try "hg help --keyword progress")
+  [255]
+  $ hg help -e progress |head -1
+  progress extension - show progress bars for some actions (DEPRECATED)
+  $ hg help -c -k dates |egrep '^(Topics|Extensions|Commands):'
+  Commands:
+  $ hg help -e -k a |egrep '^(Topics|Extensions|Commands):'
+  Extensions:
+  $ hg help -e -c -k date |egrep '^(Topics|Extensions|Commands):'
+  Extensions:
+  Commands:
+  $ hg help -c commit > /dev/null
+  $ hg help -e -c commit > /dev/null
+  $ hg help -e commit > /dev/null
+  abort: no such help topic: commit
+  (try "hg help --keyword commit")
+  [255]
 
 Test keyword search help
 
@@ -1095,8 +1177,7 @@ Test section lookup
   
       "default"
           Directory or URL to use when pulling if no source is specified.
-          Default is set to repository from which the current repository was
-          cloned.
+          (default: repository from which the current repository was cloned)
   
       "default-push"
           Optional. Directory or URL to use when pushing if no destination is
@@ -1186,6 +1267,14 @@ Test dynamic list of merge tools only shows up once
         partially merged file. Markers will have two sections, one for each side
         of merge.
   
+      ":merge-local"
+        Like :merge, but resolve all conflicts non-interactively in favor of the
+        local changes.
+  
+      ":merge-other"
+        Like :merge, but resolve all conflicts non-interactively in favor of the
+        other changes.
+  
       ":merge3"
         Uses the internal non-interactive simple merge algorithm for merging
         files. It will fail if there are any conflicts and leave markers in the
@@ -1201,6 +1290,11 @@ Test dynamic list of merge tools only shows up once
   
       ":tagmerge"
         Uses the internal tag merge algorithm (experimental).
+  
+      ":union"
+        Uses the internal non-interactive simple merge algorithm for merging
+        files. It will use both left and right sides for conflict regions. No
+        markers are inserted.
   
       Internal tools are always available and do not require a GUI but will by
       default not handle symlinks or binary files.

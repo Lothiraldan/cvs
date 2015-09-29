@@ -145,19 +145,25 @@ future, dropping the stream may become an option for channel we do not care to
 preserve.
 """
 
-import errno
-import sys
-import util
-import struct
-import urllib
-import string
-import obsolete
-import pushkey
-import url
-import re
+from __future__ import absolute_import
 
-import changegroup, error, tags
-from i18n import _
+import errno
+import re
+import string
+import struct
+import sys
+import urllib
+
+from .i18n import _
+from . import (
+    changegroup,
+    error,
+    obsolete,
+    pushkey,
+    tags,
+    url,
+    util,
+)
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -370,17 +376,17 @@ def _processpart(op, part):
             handler = parthandlermapping.get(part.type)
             if handler is None:
                 status = 'unsupported-type'
-                raise error.UnsupportedPartError(parttype=part.type)
+                raise error.BundleUnknownFeatureError(parttype=part.type)
             indebug(op.ui, 'found a handler for part %r' % part.type)
             unknownparams = part.mandatorykeys - handler.params
             if unknownparams:
                 unknownparams = list(unknownparams)
                 unknownparams.sort()
                 status = 'unsupported-params (%s)' % unknownparams
-                raise error.UnsupportedPartError(parttype=part.type,
-                                               params=unknownparams)
+                raise error.BundleUnknownFeatureError(parttype=part.type,
+                                                      params=unknownparams)
             status = 'supported'
-        except error.UnsupportedPartError as exc:
+        except error.BundleUnknownFeatureError as exc:
             if part.mandatory: # mandatory parts
                 raise
             indebug(op.ui, 'ignoring unsupported advisory part %s' % exc)
@@ -473,6 +479,15 @@ class bundle20(object):
         self._params = []
         self._parts = []
         self.capabilities = dict(capabilities)
+        self._compressor = util.compressors[None]()
+
+    def setcompression(self, alg):
+        """setup core part compression to <alg>"""
+        if alg is None:
+            return
+        assert not any(n.lower() == 'Compression' for n, v in self._params)
+        self.addparam('Compression', alg)
+        self._compressor = util.compressors[alg]()
 
     @property
     def nbparts(self):
@@ -524,14 +539,10 @@ class bundle20(object):
         yield _pack(_fstreamparamsize, len(param))
         if param:
             yield param
-
-        outdebug(self.ui, 'start of parts')
-        for part in self._parts:
-            outdebug(self.ui, 'bundle part: "%s"' % part.type)
-            for chunk in part.getchunks(ui=self.ui):
-                yield chunk
-        outdebug(self.ui, 'end of bundle')
-        yield _pack(_fpartheadersize, 0)
+        # starting compression
+        for chunk in self._getcorechunk():
+            yield self._compressor.compress(chunk)
+        yield self._compressor.flush()
 
     def _paramchunk(self):
         """return a encoded version of all stream parameters"""
@@ -543,6 +554,19 @@ class bundle20(object):
                 par = '%s=%s' % (par, value)
             blocks.append(par)
         return ' '.join(blocks)
+
+    def _getcorechunk(self):
+        """yield chunk for the core part of the bundle
+
+        (all but headers and parameters)"""
+        outdebug(self.ui, 'start of parts')
+        for part in self._parts:
+            outdebug(self.ui, 'bundle part: "%s"' % part.type)
+            for chunk in part.getchunks(ui=self.ui):
+                yield chunk
+        outdebug(self.ui, 'end of bundle')
+        yield _pack(_fpartheadersize, 0)
+
 
     def salvageoutput(self):
         """return a list with a copy of all output parts in the bundle
@@ -620,6 +644,7 @@ class unbundle20(unpackermixin):
     def __init__(self, ui, fp):
         """If header is specified, we do not read it out of the stream."""
         self.ui = ui
+        self._decompressor = util.decompressors[None]
         super(unbundle20, self).__init__(fp)
 
     @util.propertycache
@@ -655,18 +680,22 @@ class unbundle20(unpackermixin):
             raise ValueError('empty parameter name')
         if name[0] not in string.letters:
             raise ValueError('non letter first character: %r' % name)
-        # Some logic will be later added here to try to process the option for
-        # a dict of known parameter.
-        if name[0].islower():
-            indebug(self.ui, "ignoring unknown parameter %r" % name)
+        try:
+            handler = b2streamparamsmap[name.lower()]
+        except KeyError:
+            if name[0].islower():
+                indebug(self.ui, "ignoring unknown parameter %r" % name)
+            else:
+                raise error.BundleUnknownFeatureError(params=(name,))
         else:
-            raise error.UnsupportedPartError(params=(name,))
-
+            handler(self, name, value)
 
     def iterparts(self):
         """yield all parts contained in the stream"""
         # make sure param have been loaded
         self.params
+        # From there, payload need to be decompressed
+        self._fp = self._decompressor(self._fp)
         indebug(self.ui, 'start extraction of bundle2 parts')
         headerblock = self._readpartheader()
         while headerblock is not None:
@@ -693,6 +722,24 @@ class unbundle20(unpackermixin):
         return False
 
 formatmap = {'20': unbundle20}
+
+b2streamparamsmap = {}
+
+def b2streamparamhandler(name):
+    """register a handler for a stream level parameter"""
+    def decorator(func):
+        assert name not in formatmap
+        b2streamparamsmap[name] = func
+        return func
+    return decorator
+
+@b2streamparamhandler('compression')
+def processcompression(unbundler, param, value):
+    """read compression parameter and install payload decompression"""
+    if value not in util.decompressors:
+        raise error.BundleUnknownFeatureError(params=(param,),
+                                              values=(value,))
+    unbundler._decompressor = util.decompressors[value]
 
 class bundlepart(object):
     """A bundle2 part contains application level payload
@@ -841,6 +888,12 @@ class bundlepart(object):
                 outdebug(ui, 'payload chunk size: %i' % len(chunk))
                 yield _pack(_fpayloadsize, len(chunk))
                 yield chunk
+        except GeneratorExit:
+            # GeneratorExit means that nobody is listening for our
+            # results anyway, so just bail quickly rather than trying
+            # to produce an error part.
+            ui.debug('bundle2-generatorexit\n')
+            raise
         except BaseException as exc:
             # backup exception data for later
             ui.debug('bundle2-input-stream-interrupt: encoding exception %s'
@@ -1162,7 +1215,7 @@ def handlechangegroup(op, inpart):
     unpackerversion = inpart.params.get('version', '01')
     # We should raise an appropriate exception here
     unpacker = changegroup.packermap[unpackerversion][1]
-    cg = unpacker(inpart, 'UN')
+    cg = unpacker(inpart, None)
     # the source and url passed here are overwritten by the one contained in
     # the transaction.hookargs argument. So 'bundle2' is a placeholder
     nbchangesets = None
@@ -1233,7 +1286,7 @@ def handleremotechangegroup(op, inpart):
     # we need to make sure we trigger the creation of a transaction object used
     # for the whole processing scope.
     op.gettransaction()
-    import exchange
+    from . import exchange
     cg = exchange.readbundle(op.repo.ui, real_part, raw_url)
     if not isinstance(cg, changegroup.cg1unpacker):
         raise util.Abort(_('%s: not a bundle version 1.0') %
@@ -1317,7 +1370,7 @@ def handleerrorunsupportedcontent(op, inpart):
     if params is not None:
         kwargs['params'] = params.split('\0')
 
-    raise error.UnsupportedPartError(**kwargs)
+    raise error.BundleUnknownFeatureError(**kwargs)
 
 @parthandler('error:pushraced', ('message',))
 def handleerrorpushraced(op, inpart):

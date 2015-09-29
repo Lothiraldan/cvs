@@ -21,6 +21,8 @@ import re as remod
 import os, time, datetime, calendar, textwrap, signal, collections
 import imp, socket, urllib
 import gc
+import bz2
+import zlib
 
 if os.name == 'nt':
     import windows as platform
@@ -728,7 +730,7 @@ def _sethgexecutable(path):
     global _hgexecutable
     _hgexecutable = path
 
-def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
+def system(cmd, environ=None, cwd=None, onerr=None, errprefix=None, out=None):
     '''enhanced shell command execution.
     run with environment maybe modified, maybe in different dir.
 
@@ -737,6 +739,8 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
 
     if out is specified, it is assumed to be a file-like object that has a
     write() method. stdout and stderr will be redirected to out.'''
+    if environ is None:
+        environ = {}
     try:
         sys.stdout.flush()
     except Exception:
@@ -1371,22 +1375,22 @@ def shortdate(date=None):
     """turn (timestamp, tzoff) tuple into iso 8631 date."""
     return datestr(date, format='%Y-%m-%d')
 
+def parsetimezone(tz):
+    """parse a timezone string and return an offset integer"""
+    if tz[0] in "+-" and len(tz) == 5 and tz[1:].isdigit():
+        sign = (tz[0] == "+") and 1 or -1
+        hours = int(tz[1:3])
+        minutes = int(tz[3:5])
+        return -sign * (hours * 60 + minutes) * 60
+    if tz == "GMT" or tz == "UTC":
+        return 0
+    return None
+
 def strdate(string, format, defaults=[]):
     """parse a localized time string and return a (unixtime, offset) tuple.
     if the string cannot be parsed, ValueError is raised."""
-    def timezone(string):
-        tz = string.split()[-1]
-        if tz[0] in "+-" and len(tz) == 5 and tz[1:].isdigit():
-            sign = (tz[0] == "+") and 1 or -1
-            hours = int(tz[1:3])
-            minutes = int(tz[3:5])
-            return -sign * (hours * 60 + minutes) * 60
-        if tz == "GMT" or tz == "UTC":
-            return 0
-        return None
-
     # NOTE: unixtime = localunixtime + offset
-    offset, date = timezone(string), string
+    offset, date = parsetimezone(string.split()[-1]), string
     if offset is not None:
         date = " ".join(string.split()[:-1])
 
@@ -1412,7 +1416,7 @@ def strdate(string, format, defaults=[]):
         unixtime = localunixtime + offset
     return unixtime, offset
 
-def parsedate(date, formats=None, bias={}):
+def parsedate(date, formats=None, bias=None):
     """parse a localized date/time and return a (unixtime, offset) tuple.
 
     The date may be a "unixtime offset" string or in one of the specified
@@ -1432,6 +1436,8 @@ def parsedate(date, formats=None, bias={}):
     >>> tz == strtz
     True
     """
+    if bias is None:
+        bias = {}
     if not date:
         return 0, 0
     if isinstance(date, tuple) and len(date) == 2:
@@ -1667,7 +1673,7 @@ def MBTextWrapper(**kwargs):
             elif not cur_line:
                 cur_line.append(reversed_chunks.pop())
 
-        # this overriding code is imported from TextWrapper of python 2.6
+        # this overriding code is imported from TextWrapper of Python 2.6
         # to calculate columns of string by 'encoding.ucolwidth()'
         def _wrap_chunks(self, chunks):
             colwidth = encoding.ucolwidth
@@ -2260,7 +2266,7 @@ def sizetoint(s):
 
 class hooks(object):
     '''A collection of hook functions that can be used to extend a
-    function's behaviour. Hooks are called in lexicographic order,
+    function's behavior. Hooks are called in lexicographic order,
     based on the names of their sources.'''
 
     def __init__(self):
@@ -2337,6 +2343,47 @@ def finddirs(path):
     while pos != -1:
         yield path[:pos]
         pos = path.rfind('/', 0, pos)
+
+# compression utility
+
+class nocompress(object):
+    def compress(self, x):
+        return x
+    def flush(self):
+        return ""
+
+compressors = {
+    None: nocompress,
+    # lambda to prevent early import
+    'BZ': lambda: bz2.BZ2Compressor(),
+    'GZ': lambda: zlib.compressobj(),
+    }
+# also support the old form by courtesies
+compressors['UN'] = compressors[None]
+
+def _makedecompressor(decompcls):
+    def generator(f):
+        d = decompcls()
+        for chunk in filechunkiter(f):
+            yield d.decompress(chunk)
+    def func(fh):
+        return chunkbuffer(generator(fh))
+    return func
+
+def _bz2():
+    d = bz2.BZ2Decompressor()
+    # Bzip2 stream start with BZ, but we stripped it.
+    # we put it back for good measure.
+    d.decompress('BZ')
+    return d
+
+decompressors = {None: lambda fh: fh,
+                 '_truncatedBZ': _makedecompressor(_bz2),
+                 'BZ': _makedecompressor(lambda: bz2.BZ2Decompressor()),
+                 'GZ': _makedecompressor(lambda: zlib.decompressobj()),
+                 }
+# also support the old form by courtesies
+decompressors['UN'] = decompressors[None]
 
 # convenient shortcut
 dst = debugstacktrace

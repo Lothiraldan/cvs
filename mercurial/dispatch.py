@@ -5,13 +5,37 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import os, sys, atexit, signal, pdb, socket, errno, shlex, time, traceback, re
+from __future__ import absolute_import
+
+import atexit
 import difflib
-import util, commands, hg, fancyopts, extensions, hook, error
-import cmdutil, encoding
-import ui as uimod
-import demandimport
+import errno
+import os
+import pdb
+import re
+import shlex
+import signal
+import socket
+import sys
+import time
+import traceback
+
+
+from .i18n import _
+
+from . import (
+    cmdutil,
+    commands,
+    demandimport,
+    encoding,
+    error,
+    extensions,
+    fancyopts,
+    hg,
+    hook,
+    ui as uimod,
+    util,
+)
 
 class request(object):
     def __init__(self, args, ui=None, repo=None, fin=None, fout=None,
@@ -157,8 +181,8 @@ def _runcatch(req):
                     debugtrace[debugger] == debugtrace['pdb']):
                     ui.warn(_("%s debugger specified "
                               "but its module was not found\n") % debugger)
-
-                debugtrace[debugger]()
+                with demandimport.deactivated():
+                    debugtrace[debugger]()
             try:
                 return _dispatch(req)
             finally:
@@ -229,7 +253,7 @@ def _runcatch(req):
             # check if the command is in a disabled extension
             # (but don't check for extensions themselves)
             commands.help_(ui, inst.args[0], unknowncmd=True)
-        except error.UnknownCommand:
+        except (error.UnknownCommand, util.Abort):
             suggested = False
             if len(inst.args) == 2:
                 sim = _getsimilar(inst.args[1], inst.args[0])
@@ -268,8 +292,7 @@ def _runcatch(req):
             ui.warn(_("abort: error: %s\n") % reason)
         elif (util.safehasattr(inst, "args")
               and inst.args and inst.args[0] == errno.EPIPE):
-            if ui.debugflag:
-                ui.warn(_("broken pipe\n"))
+            pass
         elif getattr(inst, "strerror", None):
             if getattr(inst, "filename", None):
                 ui.warn(_("abort: %s: %s\n") % (inst.strerror, inst.filename))
@@ -286,10 +309,7 @@ def _runcatch(req):
         try:
             ui.warn(_("interrupted!\n"))
         except IOError as inst:
-            if inst.errno == errno.EPIPE:
-                if ui.debugflag:
-                    ui.warn(_("\nbroken pipe\n"))
-            else:
+            if inst.errno != errno.EPIPE:
                 raise
     except MemoryError:
         ui.warn(_("abort: out of memory\n"))
@@ -311,26 +331,27 @@ def _runcatch(req):
         compare = myver.split('+')[0]
         ct = tuplever(compare)
         worst = None, ct, ''
-        for name, mod in extensions.extensions():
-            testedwith = getattr(mod, 'testedwith', '')
-            report = getattr(mod, 'buglink', _('the extension author.'))
-            if not testedwith.strip():
-                # We found an untested extension. It's likely the culprit.
-                worst = name, 'unknown', report
-                break
+        if ui.config('ui', 'supportcontact', None) is None:
+            for name, mod in extensions.extensions():
+                testedwith = getattr(mod, 'testedwith', '')
+                report = getattr(mod, 'buglink', _('the extension author.'))
+                if not testedwith.strip():
+                    # We found an untested extension. It's likely the culprit.
+                    worst = name, 'unknown', report
+                    break
 
-            # Never blame on extensions bundled with Mercurial.
-            if testedwith == 'internal':
-                continue
+                # Never blame on extensions bundled with Mercurial.
+                if testedwith == 'internal':
+                    continue
 
-            tested = [tuplever(t) for t in testedwith.split()]
-            if ct in tested:
-                continue
+                tested = [tuplever(t) for t in testedwith.split()]
+                if ct in tested:
+                    continue
 
-            lower = [t for t in tested if t < ct]
-            nearest = max(lower or tested)
-            if worst[0] is None or nearest < worst[1]:
-                worst = name, nearest, report
+                lower = [t for t in tested if t < ct]
+                nearest = max(lower or tested)
+                if worst[0] is None or nearest < worst[1]:
+                    worst = name, nearest, report
         if worst[0] is not None:
             name, testedwith, report = worst
             if not isinstance(testedwith, str):
@@ -342,9 +363,11 @@ def _runcatch(req):
                          '** If that fixes the bug please report it to %s\n')
                        % (name, testedwith, name, report))
         else:
+            bugtracker = ui.config('ui', 'supportcontact', None)
+            if bugtracker is None:
+                bugtracker = _("http://mercurial.selenic.com/wiki/BugTracker")
             warning = (_("** unknown exception encountered, "
-                         "please report by visiting\n") +
-                       _("** http://mercurial.selenic.com/wiki/BugTracker\n"))
+                         "please report by visiting\n** ") + bugtracker + '\n')
         warning += ((_("** Python %s\n") % sys.version.replace('\n', '')) +
                     (_("** Mercurial Distributed SCM (version %s)\n") % myver) +
                     (_("** Extensions loaded: %s\n") %
@@ -866,6 +889,8 @@ def _dispatch(req):
             except error.RequirementError:
                 raise
             except error.RepoError:
+                if rpath and rpath[-1]: # invalid -R path
+                    raise
                 if cmd not in commands.optionalrepo.split():
                     if (cmd in commands.inferrepo.split() and
                         args and not path): # try to infer -R from command args
@@ -909,7 +934,7 @@ def lsprofile(ui, func, fp):
         format = 'text'
 
     try:
-        from mercurial import lsprof
+        from . import lsprof
     except ImportError:
         raise util.Abort(_(
             'lsprof not available - install from '
@@ -922,7 +947,7 @@ def lsprofile(ui, func, fp):
         p.disable()
 
         if format == 'kcachegrind':
-            import lsprofcalltree
+            from . import lsprofcalltree
             calltree = lsprofcalltree.KCacheGrind(p)
             calltree.output(fp)
         else:
@@ -977,13 +1002,17 @@ def statprofile(ui, func, fp):
         statprof.display(fp)
 
 def _runcommand(ui, options, cmd, cmdfunc):
+    """Enables the profiler if applicable.
+
+    ``profiling.enabled`` - boolean config that enables or disables profiling
+    """
     def checkargs():
         try:
             return cmdfunc()
         except error.SignatureError:
             raise error.CommandError(cmd, _("invalid arguments"))
 
-    if options['profile']:
+    if options['profile'] or ui.configbool('profiling', 'enabled'):
         profiler = os.getenv('HGPROF')
         if profiler is None:
             profiler = ui.config('profiling', 'type', default='ls')
@@ -993,7 +1022,10 @@ def _runcommand(ui, options, cmd, cmdfunc):
 
         output = ui.config('profiling', 'output')
 
-        if output:
+        if output == 'blackbox':
+            import StringIO
+            fp = StringIO.StringIO()
+        elif output:
             path = ui.expandpath(output)
             fp = open(path, 'wb')
         else:
@@ -1008,6 +1040,12 @@ def _runcommand(ui, options, cmd, cmdfunc):
                 return statprofile(ui, checkargs, fp)
         finally:
             if output:
+                if output == 'blackbox':
+                    val = "Profile:\n%s" % fp.getvalue()
+                    # ui.log treats the input as a format string,
+                    # so we need to escape any % signs.
+                    val = val.replace('%', '%%')
+                    ui.log('profile', val)
                 fp.close()
     else:
         return checkargs()

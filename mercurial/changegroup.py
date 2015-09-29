@@ -5,12 +5,30 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
+import os
+import struct
+import tempfile
 import weakref
-from i18n import _
-from node import nullrev, nullid, hex, short
-import mdiff, util, dagutil
-import struct, os, bz2, zlib, tempfile
-import discovery, error, phases, branchmap
+
+from .i18n import _
+from .node import (
+    hex,
+    nullid,
+    nullrev,
+    short,
+)
+
+from . import (
+    branchmap,
+    dagutil,
+    discovery,
+    error,
+    mdiff,
+    phases,
+    util,
+)
 
 _CHANGEGROUPV1_DELTA_HEADER = "20s20s20s20s"
 _CHANGEGROUPV2_DELTA_HEADER = "20s20s20s20s20s"
@@ -61,20 +79,14 @@ def combineresults(results):
         result = -1 + changedheads
     return result
 
-class nocompress(object):
-    def compress(self, x):
-        return x
-    def flush(self):
-        return ""
-
 bundletypes = {
-    "": ("", nocompress), # only when using unbundle on ssh and old http servers
+    "": ("", None),       # only when using unbundle on ssh and old http servers
                           # since the unification ssh accepts a header but there
                           # is no capability signaling it.
     "HG20": (), # special-cased below
-    "HG10UN": ("HG10UN", nocompress),
-    "HG10BZ": ("HG10", lambda: bz2.BZ2Compressor()),
-    "HG10GZ": ("HG10GZ", lambda: zlib.compressobj()),
+    "HG10UN": ("HG10UN", None),
+    "HG10BZ": ("HG10", 'BZ'),
+    "HG10GZ": ("HG10GZ", 'GZ'),
 }
 
 # hgweb uses this list to communicate its preferred type
@@ -103,19 +115,22 @@ def writebundle(ui, cg, filename, bundletype, vfs=None):
         cleanup = filename
 
         if bundletype == "HG20":
-            import bundle2
+            from . import bundle2
             bundle = bundle2.bundle20(ui)
             part = bundle.newpart('changegroup', data=cg.getchunks())
             part.addparam('version', cg.version)
-            z = nocompress()
+            z = util.compressors[None]()
             chunkiter = bundle.getchunks()
         else:
             if cg.version != '01':
                 raise util.Abort(_('old bundle types only supports v1 '
                                    'changegroups'))
-            header, compressor = bundletypes[bundletype]
+            header, comp = bundletypes[bundletype]
             fh.write(header)
-            z = compressor()
+            if comp not in util.compressors:
+                raise util.Abort(_('unknown stream compression type: %s')
+                                 % comp)
+            z = util.compressors[comp]()
             chunkiter = cg.getchunks()
 
         # parse the changegroup data, otherwise we will block
@@ -138,34 +153,23 @@ def writebundle(ui, cg, filename, bundletype, vfs=None):
             else:
                 os.unlink(cleanup)
 
-def decompressor(fh, alg):
-    if alg == 'UN':
-        return fh
-    elif alg == 'GZ':
-        def generator(f):
-            zd = zlib.decompressobj()
-            for chunk in util.filechunkiter(f):
-                yield zd.decompress(chunk)
-    elif alg == 'BZ':
-        def generator(f):
-            zd = bz2.BZ2Decompressor()
-            zd.decompress("BZ")
-            for chunk in util.filechunkiter(f, 4096):
-                yield zd.decompress(chunk)
-    else:
-        raise util.Abort("unknown bundle compression '%s'" % alg)
-    return util.chunkbuffer(generator(fh))
-
 class cg1unpacker(object):
     deltaheader = _CHANGEGROUPV1_DELTA_HEADER
     deltaheadersize = struct.calcsize(deltaheader)
     version = '01'
     def __init__(self, fh, alg):
-        self._stream = decompressor(fh, alg)
+        if alg == 'UN':
+            alg = None # get more modern without breaking too much
+        if not alg in util.decompressors:
+            raise util.Abort(_('unknown stream compression type: %s')
+                             % alg)
+        if alg == 'BZ':
+            alg = '_truncatedBZ'
+        self._stream = util.decompressors[alg](fh)
         self._type = alg
         self.callback = None
     def compressed(self):
-        return self._type != 'UN'
+        return self._type is not None
     def read(self, l):
         return self._stream.read(l)
     def seek(self, pos):
@@ -568,7 +572,7 @@ def getsubsetraw(repo, outgoing, bundler, source, fastpath=False):
 
 def getsubset(repo, outgoing, bundler, source, fastpath=False, version='01'):
     gengroup = getsubsetraw(repo, outgoing, bundler, source, fastpath)
-    return packermap[version][1](util.chunkbuffer(gengroup), 'UN')
+    return packermap[version][1](util.chunkbuffer(gengroup), None)
 
 def changegroupsubset(repo, roots, heads, source, version='01'):
     """Compute a changegroup consisting of all the nodes that are

@@ -5,30 +5,24 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import errno, os, signal, sys, threading
-import util
+from __future__ import absolute_import
+
+import errno
+import multiprocessing
+import os
+import signal
+import sys
+import threading
+
+from .i18n import _
+from . import util
 
 def countcpus():
     '''try to count the number of CPUs on the system'''
-
-    # posix
     try:
-        n = int(os.sysconf('SC_NPROCESSORS_ONLN'))
-        if n > 0:
-            return n
-    except (AttributeError, ValueError):
-        pass
-
-    # windows
-    try:
-        n = int(os.environ['NUMBER_OF_PROCESSORS'])
-        if n > 0:
-            return n
-    except (KeyError, ValueError):
-        pass
-
-    return 1
+        return multiprocessing.cpu_count()
+    except NotImplementedError:
+        return 1
 
 def _numworkers(ui):
     s = ui.config('worker', 'numcpus')
