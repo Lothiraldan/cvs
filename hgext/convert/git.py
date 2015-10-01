@@ -224,6 +224,8 @@ class convert_git(converter_source):
         lcount = len(difftree)
         i = 0
 
+        skipsubmodules = self.ui.configbool('convert', 'git.skipsubmodules',
+                                            False)
         def add(entry, f, isdest):
             seen.add(f)
             h = entry[3]
@@ -232,6 +234,9 @@ class convert_git(converter_source):
             renamesource = (not isdest and entry[4][0] == 'R')
 
             if f == '.gitmodules':
+                if skipsubmodules:
+                    return
+
                 subexists[0] = True
                 if entry[4] == 'D' or renamesource:
                     subdeleted[0] = True
@@ -239,7 +244,8 @@ class convert_git(converter_source):
                 else:
                     changes.append(('.hgsub', ''))
             elif entry[1] == '160000' or entry[0] == ':160000':
-                subexists[0] = True
+                if not skipsubmodules:
+                    subexists[0] = True
             else:
                 if renamesource:
                     h = hex(nullid)
@@ -377,28 +383,31 @@ class convert_git(converter_source):
     def getbookmarks(self):
         bookmarks = {}
 
-        # Interesting references in git are prefixed
-        prefix = 'refs/heads/'
-        prefixlen = len(prefix)
-
-        # factor two commands
+        # Handle local and remote branches
         remoteprefix = self.ui.config('convert', 'git.remoteprefix', 'remote')
-        gitcmd = { remoteprefix + '/': 'git ls-remote --heads origin',
-                                   '': 'git show-ref'}
+        reftypes = [
+            # (git prefix, hg prefix)
+            ('refs/remotes/origin/', remoteprefix + '/'),
+            ('refs/heads/', '')
+        ]
 
-        # Origin heads
-        for reftype in gitcmd:
-            try:
-                fh = self.gitopen(gitcmd[reftype], err=subprocess.PIPE)
-                for line in fh:
-                    line = line.strip()
-                    rev, name = line.split(None, 1)
-                    if not name.startswith(prefix):
+        exclude = set([
+            'refs/remotes/origin/HEAD',
+        ])
+
+        try:
+            fh = self.gitopen('git show-ref', err=subprocess.PIPE)
+            for line in fh:
+                line = line.strip()
+                rev, name = line.split(None, 1)
+                # Process each type of branch
+                for gitprefix, hgprefix in reftypes:
+                    if not name.startswith(gitprefix) or name in exclude:
                         continue
-                    name = '%s%s' % (reftype, name[prefixlen:])
+                    name = '%s%s' % (hgprefix, name[len(gitprefix):])
                     bookmarks[name] = rev
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         return bookmarks
 

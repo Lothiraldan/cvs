@@ -300,6 +300,7 @@ class localrepository(object):
         if create:
             self._writerequirements()
 
+        self._dirstatevalidatewarned = False
 
         self._branchcaches = {}
         self._revbranchcache = None
@@ -354,6 +355,10 @@ class localrepository(object):
         manifestcachesize = self.ui.configint('format', 'manifestcachesize')
         if manifestcachesize is not None:
             self.svfs.options['manifestcachesize'] = manifestcachesize
+        # experimental config: format.aggressivemergedeltas
+        aggressivemergedeltas = self.ui.configbool('format',
+            'aggressivemergedeltas', False)
+        self.svfs.options['aggressivemergedeltas'] = aggressivemergedeltas
 
     def _writerequirements(self):
         scmutil.writerequires(self.vfs, self.requirements)
@@ -472,19 +477,19 @@ class localrepository(object):
 
     @repofilecache('dirstate')
     def dirstate(self):
-        warned = [0]
-        def validate(node):
-            try:
-                self.changelog.rev(node)
-                return node
-            except error.LookupError:
-                if not warned[0]:
-                    warned[0] = True
-                    self.ui.warn(_("warning: ignoring unknown"
-                                   " working parent %s!\n") % short(node))
-                return nullid
+        return dirstate.dirstate(self.vfs, self.ui, self.root,
+                                 self._dirstatevalidate)
 
-        return dirstate.dirstate(self.vfs, self.ui, self.root, validate)
+    def _dirstatevalidate(self, node):
+        try:
+            self.changelog.rev(node)
+            return node
+        except error.LookupError:
+            if not self._dirstatevalidatewarned:
+                self._dirstatevalidatewarned = True
+                self.ui.warn(_("warning: ignoring unknown"
+                               " working parent %s!\n") % short(node))
+            return nullid
 
     def __getitem__(self, changeid):
         if changeid is None or changeid == wdirrev:
@@ -538,7 +543,7 @@ class localrepository(object):
         return hook.hook(self.ui, self, name, throw, **args)
 
     @unfilteredmethod
-    def _tag(self, names, node, message, local, user, date, extra={},
+    def _tag(self, names, node, message, local, user, date, extra=None,
              editor=False):
         if isinstance(names, str):
             names = (names,)
@@ -1019,6 +1024,9 @@ class localrepository(object):
             reporef().hook('txnabort', throw=False, txnname=desc,
                            **tr2.hookargs)
         tr.addabort('txnabort-hook', txnaborthook)
+        # avoid eager cache invalidation. in-memory data should be identical
+        # to stored data if transaction has no error.
+        tr.addpostclose('refresh-filecachestats', self._refreshfilecachestats)
         self._transref = weakref.ref(tr)
         return tr
 
@@ -1196,9 +1204,17 @@ class localrepository(object):
         self.invalidate()
         self.invalidatedirstate()
 
+    def _refreshfilecachestats(self, tr):
+        """Reload stats of cached files so that they are flagged as valid"""
+        for k, ce in self._filecache.items():
+            if k == 'dirstate' or k not in self.__dict__:
+                continue
+            ce.refresh()
+
     def _lock(self, vfs, lockname, wait, releasefn, acquirefn, desc):
         try:
-            l = lockmod.lock(vfs, lockname, 0, releasefn, desc=desc)
+            l = lockmod.lock(vfs, lockname, 0, releasefn=releasefn,
+                             acquirefn=acquirefn, desc=desc)
         except error.LockHeld as inst:
             if not wait:
                 raise
@@ -1207,10 +1223,9 @@ class localrepository(object):
             # default to 600 seconds timeout
             l = lockmod.lock(vfs, lockname,
                              int(self.ui.config("ui", "timeout", "600")),
-                             releasefn, desc=desc)
+                             releasefn=releasefn, acquirefn=acquirefn,
+                             desc=desc)
             self.ui.warn(_("got lock after %s seconds\n") % l.delay)
-        if acquirefn:
-            acquirefn()
         return l
 
     def _afterlock(self, callback):
@@ -1238,13 +1253,7 @@ class localrepository(object):
             l.lock()
             return l
 
-        def unlock():
-            for k, ce in self._filecache.items():
-                if k == 'dirstate' or k not in self.__dict__:
-                    continue
-                ce.refresh()
-
-        l = self._lock(self.svfs, "lock", wait, unlock,
+        l = self._lock(self.svfs, "lock", wait, None,
                        self.invalidate, _('repository %s') % self.origroot)
         self._lockref = weakref.ref(l)
         return l
@@ -1372,13 +1381,15 @@ class localrepository(object):
 
     @unfilteredmethod
     def commit(self, text="", user=None, date=None, match=None, force=False,
-               editor=False, extra={}):
+               editor=False, extra=None):
         """Add a new revision to current repository.
 
         Revision information is gathered from the working directory,
         match can be used to filter the committed files. If editor is
         supplied, it is called to get a commit message.
         """
+        if extra is None:
+            extra = {}
 
         def fail(f, msg):
             raise util.Abort('%s: %s' % (f, msg))

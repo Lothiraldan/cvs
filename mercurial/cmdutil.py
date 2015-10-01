@@ -10,7 +10,7 @@ from i18n import _
 import os, sys, errno, re, tempfile, cStringIO, shutil
 import util, scmutil, templater, patch, error, templatekw, revlog, copies
 import match as matchmod
-import context, repair, graphmod, revset, phases, obsolete, pathutil
+import repair, graphmod, revset, phases, obsolete, pathutil
 import changelog
 import bookmarks
 import encoding
@@ -848,6 +848,8 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
     :updatefunc: a function that update a repo to a given node
                  updatefunc(<repo>, <node>)
     """
+    # avoid cycle context -> subrepo -> cmdutil
+    import context
     tmpname, message, user, date, branch, nodeid, p1, p2 = \
         patch.extract(ui, hunk)
 
@@ -990,7 +992,7 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
         os.unlink(tmpname)
 
 def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
-           opts=None):
+           opts=None, match=None):
     '''export changesets as hg patches.'''
 
     total = len(revs)
@@ -1041,7 +1043,7 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
         write(ctx.description().rstrip())
         write("\n\n")
 
-        for chunk, label in patch.diffui(repo, prev, node, opts=opts):
+        for chunk, label in patch.diffui(repo, prev, node, match, opts=opts):
             write(chunk, label=label)
 
         if shouldclose:
@@ -1412,15 +1414,43 @@ class changeset_templater(changeset_printer):
 
         self.cache = {}
 
+        # find correct templates for current mode
+        tmplmodes = [
+            (True, None),
+            (self.ui.verbose, 'verbose'),
+            (self.ui.quiet, 'quiet'),
+            (self.ui.debugflag, 'debug'),
+        ]
+
+        self._parts = {'header': '', 'footer': '', 'changeset': 'changeset',
+                       'docheader': '', 'docfooter': ''}
+        for mode, postfix in tmplmodes:
+            for t in self._parts:
+                cur = t
+                if postfix:
+                    cur += "_" + postfix
+                if mode and cur in self.t:
+                    self._parts[t] = cur
+
+        if self._parts['docheader']:
+            self.ui.write(templater.stringify(self.t(self._parts['docheader'])))
+
+    def close(self):
+        if self._parts['docfooter']:
+            if not self.footer:
+                self.footer = ""
+            self.footer += templater.stringify(self.t(self._parts['docfooter']))
+        return super(changeset_templater, self).close()
+
     def _show(self, ctx, copies, matchfn, props):
         '''show a single changeset or file revision'''
 
         showlist = templatekw.showlist
 
-        # showparents() behaviour depends on ui trace level which
-        # causes unexpected behaviours at templating level and makes
+        # showparents() behavior depends on ui trace level which
+        # causes unexpected behaviors at templating level and makes
         # it harder to extract it in a standalone function. Its
-        # behaviour cannot be changed so leave it here for now.
+        # behavior cannot be changed so leave it here for now.
         def showparents(**args):
             ctx = args['ctx']
             parents = [[('rev', p.rev()),
@@ -1438,27 +1468,10 @@ class changeset_templater(changeset_printer):
         props['revcache'] = {'copies': copies}
         props['cache'] = self.cache
 
-        # find correct templates for current mode
-
-        tmplmodes = [
-            (True, None),
-            (self.ui.verbose, 'verbose'),
-            (self.ui.quiet, 'quiet'),
-            (self.ui.debugflag, 'debug'),
-        ]
-
-        types = {'header': '', 'footer':'', 'changeset': 'changeset'}
-        for mode, postfix  in tmplmodes:
-            for type in types:
-                cur = postfix and ('%s_%s' % (type, postfix)) or type
-                if mode and cur in self.t:
-                    types[type] = cur
-
         try:
-
             # write header
-            if types['header']:
-                h = templater.stringify(self.t(types['header'], **props))
+            if self._parts['header']:
+                h = templater.stringify(self.t(self._parts['header'], **props))
                 if self.buffered:
                     self.header[ctx.rev()] = h
                 else:
@@ -1467,15 +1480,14 @@ class changeset_templater(changeset_printer):
                         self.ui.write(h)
 
             # write changeset metadata, then patch if requested
-            key = types['changeset']
+            key = self._parts['changeset']
             self.ui.write(templater.stringify(self.t(key, **props)))
             self.showpatch(ctx.node(), matchfn)
 
-            if types['footer']:
+            if self._parts['footer']:
                 if not self.footer:
-                    self.footer = templater.stringify(self.t(types['footer'],
-                                                      **props))
-
+                    self.footer = templater.stringify(
+                        self.t(self._parts['footer'], **props))
         except KeyError as inst:
             msg = _("%s: no key named '%s'")
             raise util.Abort(msg % (self.t.mapfile, inst.args[0]))
@@ -1928,7 +1940,7 @@ def _makelogrevset(repo, pats, opts, revs):
         followfirst = 1
     else:
         followfirst = 0
-    # --follow with FILE behaviour depends on revs...
+    # --follow with FILE behavior depends on revs...
     it = iter(revs)
     startrev = it.next()
     followdescendants = startrev < next(it, startrev)
@@ -2049,7 +2061,7 @@ def _makelogrevset(repo, pats, opts, revs):
     return expr, filematcher
 
 def _logrevs(repo, opts):
-    # Default --rev value depends on --follow but --follow behaviour
+    # Default --rev value depends on --follow but --follow behavior
     # depends on revisions resolved from --rev...
     follow = opts.get('follow') or opts.get('follow_first')
     if opts.get('rev'):
@@ -2207,7 +2219,12 @@ def add(ui, repo, match, prefix, explicitonly, **opts):
     if abort or warn:
         cca = scmutil.casecollisionauditor(ui, abort, repo.dirstate)
 
-    for f in wctx.walk(matchmod.badmatch(match, badfn)):
+    badmatch = matchmod.badmatch(match, badfn)
+    dirstate = repo.dirstate
+    # We don't want to just call wctx.walk here, since it would return a lot of
+    # clean files, which we aren't interested in and takes time.
+    for f in sorted(dirstate.walk(badmatch, sorted(wctx.substate),
+                                  True, False, full=False)):
         exact = match.exact(f)
         if exact or not explicitonly and f not in wctx and repo.wvfs.lexists(f):
             if cca:
@@ -2464,6 +2481,9 @@ def commit(ui, repo, commitfunc, pats, opts):
     return commitfunc(ui, repo, message, matcher, opts)
 
 def amend(ui, repo, commitfunc, old, extra, pats, opts):
+    # avoid cycle context -> subrepo -> cmdutil
+    import context
+
     # amend will reuse the existing user if not specified, but the obsolete
     # marker creation requires that the current user's name is specified.
     if obsolete.isenabled(repo, obsolete.createmarkersopt):
@@ -2715,6 +2735,9 @@ def buildcommittemplate(repo, ctx, subs, extramsg, tmpl):
     t.show(ctx, extramsg=extramsg)
     return ui.popbuffer()
 
+def hgprefix(msg):
+    return "\n".join(["HG: %s" % a for a in msg.split("\n") if a])
+
 def buildcommittext(repo, ctx, subs, extramsg):
     edittext = []
     modified, added, removed = ctx.modified(), ctx.added(), ctx.removed()
@@ -2722,28 +2745,30 @@ def buildcommittext(repo, ctx, subs, extramsg):
         edittext.append(ctx.description())
     edittext.append("")
     edittext.append("") # Empty line between message and comments.
-    edittext.append(_("HG: Enter commit message."
-                      "  Lines beginning with 'HG:' are removed."))
-    edittext.append("HG: %s" % extramsg)
+    edittext.append(hgprefix(_("Enter commit message."
+                      "  Lines beginning with 'HG:' are removed.")))
+    edittext.append(hgprefix(extramsg))
     edittext.append("HG: --")
-    edittext.append(_("HG: user: %s") % ctx.user())
+    edittext.append(hgprefix(_("user: %s") % ctx.user()))
     if ctx.p2():
-        edittext.append(_("HG: branch merge"))
+        edittext.append(hgprefix(_("branch merge")))
     if ctx.branch():
-        edittext.append(_("HG: branch '%s'") % ctx.branch())
+        edittext.append(hgprefix(_("branch '%s'") % ctx.branch()))
     if bookmarks.isactivewdirparent(repo):
-        edittext.append(_("HG: bookmark '%s'") % repo._activebookmark)
-    edittext.extend([_("HG: subrepo %s") % s for s in subs])
-    edittext.extend([_("HG: added %s") % f for f in added])
-    edittext.extend([_("HG: changed %s") % f for f in modified])
-    edittext.extend([_("HG: removed %s") % f for f in removed])
+        edittext.append(hgprefix(_("bookmark '%s'") % repo._activebookmark))
+    edittext.extend([hgprefix(_("subrepo %s") % s) for s in subs])
+    edittext.extend([hgprefix(_("added %s") % f) for f in added])
+    edittext.extend([hgprefix(_("changed %s") % f) for f in modified])
+    edittext.extend([hgprefix(_("removed %s") % f) for f in removed])
     if not added and not modified and not removed:
-        edittext.append(_("HG: no files changed"))
+        edittext.append(hgprefix(_("no files changed")))
     edittext.append("")
 
     return "\n".join(edittext)
 
-def commitstatus(repo, node, branch, bheads=None, opts={}):
+def commitstatus(repo, node, branch, bheads=None, opts=None):
+    if opts is None:
+        opts = {}
     ctx = repo[node]
     parents = ctx.parents()
 

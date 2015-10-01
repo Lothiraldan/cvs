@@ -5,10 +5,22 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import util, encoding, sslutil
-import os, smtplib, socket, quopri, time, sys
+from __future__ import absolute_import
+
 import email
+import os
+import quopri
+import smtplib
+import socket
+import sys
+import time
+
+from .i18n import _
+from . import (
+    encoding,
+    sslutil,
+    util,
+)
 
 _oldheaderinit = email.Header.Header.__init__
 def _unifiedheaderinit(self, *args, **kw):
@@ -19,10 +31,10 @@ def _unifiedheaderinit(self, *args, **kw):
     constructor, and 2.7 removed this parameter.
 
     Default argument is continuation_ws=' ', which means that the
-    behaviour is different in <2.7 and 2.7
+    behavior is different in <2.7 and 2.7
 
-    We consider the 2.7 behaviour to be preferable, but need
-    to have an unified behaviour for versions 2.4 to 2.7
+    We consider the 2.7 behavior to be preferable, but need
+    to have an unified behavior for versions 2.4 to 2.7
     """
     # override continuation_ws
     kw['continuation_ws'] = ' '

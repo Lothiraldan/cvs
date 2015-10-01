@@ -24,8 +24,11 @@ These imports will not be delayed:
   b = __import__(a)
 '''
 
-import os, sys
-from contextlib import contextmanager
+from __future__ import absolute_import
+
+import contextlib
+import os
+import sys
 
 # __builtin__ in Python 2, builtins in Python 3.
 try:
@@ -33,26 +36,21 @@ try:
 except ImportError:
     import builtins
 
+contextmanager = contextlib.contextmanager
+
 _origimport = __import__
 
 nothing = object()
 
-try:
-    # Python 3 doesn't have relative imports nor level -1.
-    level = -1
-    if sys.version_info[0] >= 3:
-        level = 0
-    _origimport(builtins.__name__, {}, {}, None, level)
-except TypeError: # no level argument
-    def _import(name, globals, locals, fromlist, level):
-        "call _origimport with no level argument"
-        return _origimport(name, globals, locals, fromlist)
-else:
-    _import = _origimport
+# Python 3 doesn't have relative imports nor level -1.
+level = -1
+if sys.version_info[0] >= 3:
+    level = 0
+_import = _origimport
 
-def _hgextimport(importfunc, name, globals, *args):
+def _hgextimport(importfunc, name, globals, *args, **kwargs):
     try:
-        return importfunc(name, globals, *args)
+        return importfunc(name, globals, *args, **kwargs)
     except ImportError:
         if not globals:
             raise
@@ -63,7 +61,7 @@ def _hgextimport(importfunc, name, globals, *args):
         if nameroot != contextroot:
             raise
         # retry to import with "hgext_" prefix
-        return importfunc(hgextname, globals, *args)
+        return importfunc(hgextname, globals, *args, **kwargs)
 
 class _demandmod(object):
     """module demand-loader and proxy"""
@@ -135,15 +133,44 @@ def _demandimport(name, globals=None, locals=None, fromlist=None, level=level):
                 return locals[base]
         return _demandmod(name, globals, locals, level)
     else:
-        if level != -1:
-            # from . import b,c,d or from .a import b,c,d
-            return _origimport(name, globals, locals, fromlist, level)
+        # There is a fromlist.
         # from a import b,c,d
+        # from . import b,c,d
+        # from .a import b,c,d
+
+        # level == -1: relative and absolute attempted (Python 2 only).
+        # level >= 0: absolute only (Python 2 w/ absolute_import and Python 3).
+        # The modern Mercurial convention is to use absolute_import everywhere,
+        # so modern Mercurial code will have level >= 0.
+
+        if level >= 0:
+            # Mercurial's enforced import style does not use
+            # "from a import b,c,d" or "from .a import b,c,d" syntax. In
+            # addition, this appears to be giving errors with some modules
+            # for unknown reasons. Since we shouldn't be using this syntax
+            # much, work around the problems.
+            if name:
+                return _hgextimport(_origimport, name, globals, locals,
+                                    fromlist, level)
+
+            mod = _hgextimport(_origimport, name, globals, locals, level=level)
+            for x in fromlist:
+                # Missing symbols mean they weren't defined in the module
+                # itself which means they are sub-modules.
+                if getattr(mod, x, nothing) is nothing:
+                    setattr(mod, x,
+                            _demandmod(x, mod.__dict__, locals, level=level))
+
+            return mod
+
+        # But, we still need to support lazy loading of standard library and 3rd
+        # party modules. So handle level == -1.
         mod = _hgextimport(_origimport, name, globals, locals)
         # recurse down the module chain
         for comp in name.split('.')[1:]:
             if getattr(mod, comp, nothing) is nothing:
-                setattr(mod, comp, _demandmod(comp, mod.__dict__, mod.__dict__))
+                setattr(mod, comp,
+                        _demandmod(comp, mod.__dict__, mod.__dict__))
             mod = getattr(mod, comp)
         for x in fromlist:
             # set requested submodules for demand load
@@ -152,6 +179,7 @@ def _demandimport(name, globals=None, locals=None, fromlist=None, level=level):
         return mod
 
 ignore = [
+    '__future__',
     '_hashlib',
     '_xmlplus',
     'fcntl',

@@ -80,6 +80,7 @@ Show debug commands if there are no other candidates
   debugdate
   debugdirstate
   debugdiscovery
+  debugextensions
   debugfileset
   debugfsinfo
   debuggetbundle
@@ -239,6 +240,7 @@ Show all commands + options
   debugdate: extended
   debugdirstate: nodates, datesort
   debugdiscovery: old, nonheads, ssh, remotecmd, insecure
+  debugextensions: template
   debugfileset: rev
   debugfsinfo: 
   debuggetbundle: head, common, type
@@ -254,7 +256,7 @@ Show all commands + options
   debugpathcomplete: full, normal, added, removed
   debugpushkey: 
   debugpvec: 
-  debugrebuilddirstate: rev
+  debugrebuilddirstate: rev, minimal
   debugrebuildfncache: 
   debugrename: rev
   debugrevlog: changelog, manifest, dir, dump

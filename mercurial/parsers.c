@@ -253,8 +253,11 @@ static PyObject *make_file_foldmap(PyObject *self, PyObject *args)
 
 			if (normed == NULL)
 				goto quit;
-			if (PyDict_SetItem(file_foldmap, normed, k) == -1)
+			if (PyDict_SetItem(file_foldmap, normed, k) == -1) {
+				Py_DECREF(normed);
 				goto quit;
+			}
+			Py_DECREF(normed);
 		}
 	}
 	return file_foldmap;
@@ -475,14 +478,14 @@ static PyObject *parse_dirstate(PyObject *self, PyObject *args)
 			      &str, &readlen))
 		goto quit;
 
-	if (readlen < 0)
-		goto quit;
-
 	len = readlen;
 
 	/* read parents */
-	if (len < 40)
+	if (len < 40) {
+		PyErr_SetString(
+			PyExc_ValueError, "too little data for parents");
 		goto quit;
+	}
 
 	parents = Py_BuildValue("s#s#", str, 20, str + 20, 20);
 	if (!parents)
@@ -679,7 +682,7 @@ typedef struct {
 } nodetree;
 
 /*
- * This class has two behaviours.
+ * This class has two behaviors.
  *
  * When used in a list-like way (with integer keys), we decode an
  * entry in a RevlogNG index file on demand. Our last entry is a
@@ -702,8 +705,8 @@ typedef struct {
 	PyObject *headrevs;    /* cache, invalidated on changes */
 	PyObject *filteredrevs;/* filtered revs set */
 	nodetree *nt;          /* base-16 trie */
-	int ntlength;          /* # nodes in use */
-	int ntcapacity;        /* # nodes allocated */
+	unsigned ntlength;          /* # nodes in use */
+	unsigned ntcapacity;        /* # nodes allocated */
 	int ntdepth;           /* maximum depth of tree */
 	int ntsplits;          /* # splits performed */
 	int ntrev;             /* last rev scanned */
@@ -1043,13 +1046,12 @@ static PyObject *list_copy(PyObject *list)
 	return newlist;
 }
 
-/* arg should be Py_ssize_t but Python 2.4 do not support the n format */
-static int check_filter(PyObject *filter, unsigned long arg) {
+static int check_filter(PyObject *filter, Py_ssize_t arg) {
 	if (filter) {
 		PyObject *arglist, *result;
 		int isfiltered;
 
-		arglist = Py_BuildValue("(k)", arg);
+		arglist = Py_BuildValue("(n)", arg);
 		if (!arglist) {
 			return -1;
 		}
@@ -1103,6 +1105,162 @@ static inline void set_phase_from_parents(char *phases, int parent_1,
 		phases[i] = phases[parent_1];
 	if (parent_2 >= 0 && phases[parent_2] > phases[i])
 		phases[i] = phases[parent_2];
+}
+
+static PyObject *reachableroots2(indexObject *self, PyObject *args)
+{
+
+	/* Input */
+	long minroot;
+	PyObject *includepatharg = NULL;
+	int includepath = 0;
+	/* heads and roots are lists */
+	PyObject *heads = NULL;
+	PyObject *roots = NULL;
+	PyObject *reachable = NULL;
+
+	PyObject *val;
+	Py_ssize_t len = index_length(self) - 1;
+	long revnum;
+	Py_ssize_t k;
+	Py_ssize_t i;
+	Py_ssize_t l;
+	int r;
+	int parents[2];
+
+	/* Internal data structure:
+	 * tovisit: array of length len+1 (all revs + nullrev), filled upto lentovisit
+	 * revstates: array of length len+1 (all revs + nullrev) */
+	int *tovisit = NULL;
+	long lentovisit = 0;
+	enum { RS_SEEN = 1, RS_ROOT = 2, RS_REACHABLE = 4 };
+	char *revstates = NULL;
+
+	/* Get arguments */
+	if (!PyArg_ParseTuple(args, "lO!O!O!", &minroot, &PyList_Type, &heads,
+			      &PyList_Type, &roots,
+			      &PyBool_Type, &includepatharg))
+		goto bail;
+
+	if (includepatharg == Py_True)
+		includepath = 1;
+
+	/* Initialize return set */
+	reachable = PyList_New(0);
+	if (reachable == NULL)
+		goto bail;
+
+	/* Initialize internal datastructures */
+	tovisit = (int *)malloc((len + 1) * sizeof(int));
+	if (tovisit == NULL) {
+		PyErr_NoMemory();
+		goto bail;
+	}
+
+	revstates = (char *)calloc(len + 1, 1);
+	if (revstates == NULL) {
+		PyErr_NoMemory();
+		goto bail;
+	}
+
+	l = PyList_GET_SIZE(roots);
+	for (i = 0; i < l; i++) {
+		revnum = PyInt_AsLong(PyList_GET_ITEM(roots, i));
+		if (revnum == -1 && PyErr_Occurred())
+			goto bail;
+		/* If root is out of range, e.g. wdir(), it must be unreachable
+		 * from heads. So we can just ignore it. */
+		if (revnum + 1 < 0 || revnum + 1 >= len + 1)
+			continue;
+		revstates[revnum + 1] |= RS_ROOT;
+	}
+
+	/* Populate tovisit with all the heads */
+	l = PyList_GET_SIZE(heads);
+	for (i = 0; i < l; i++) {
+		revnum = PyInt_AsLong(PyList_GET_ITEM(heads, i));
+		if (revnum == -1 && PyErr_Occurred())
+			goto bail;
+		if (revnum + 1 < 0 || revnum + 1 >= len + 1) {
+			PyErr_SetString(PyExc_IndexError, "head out of range");
+			goto bail;
+		}
+		if (!(revstates[revnum + 1] & RS_SEEN)) {
+			tovisit[lentovisit++] = (int)revnum;
+			revstates[revnum + 1] |= RS_SEEN;
+		}
+	}
+
+	/* Visit the tovisit list and find the reachable roots */
+	k = 0;
+	while (k < lentovisit) {
+		/* Add the node to reachable if it is a root*/
+		revnum = tovisit[k++];
+		if (revstates[revnum + 1] & RS_ROOT) {
+			revstates[revnum + 1] |= RS_REACHABLE;
+			val = PyInt_FromLong(revnum);
+			if (val == NULL)
+				goto bail;
+			r = PyList_Append(reachable, val);
+			Py_DECREF(val);
+			if (r < 0)
+				goto bail;
+			if (includepath == 0)
+				continue;
+		}
+
+		/* Add its parents to the list of nodes to visit */
+		if (revnum == -1)
+			continue;
+		r = index_get_parents(self, revnum, parents, (int)len - 1);
+		if (r < 0)
+			goto bail;
+		for (i = 0; i < 2; i++) {
+			if (!(revstates[parents[i] + 1] & RS_SEEN)
+			    && parents[i] >= minroot) {
+				tovisit[lentovisit++] = parents[i];
+				revstates[parents[i] + 1] |= RS_SEEN;
+			}
+		}
+	}
+
+	/* Find all the nodes in between the roots we found and the heads
+	 * and add them to the reachable set */
+	if (includepath == 1) {
+		long minidx = minroot;
+		if (minidx < 0)
+			minidx = 0;
+		for (i = minidx; i < len; i++) {
+			if (!(revstates[i + 1] & RS_SEEN))
+				continue;
+			r = index_get_parents(self, i, parents, (int)len - 1);
+			/* Corrupted index file, error is set from
+			 * index_get_parents */
+			if (r < 0)
+				goto bail;
+			if (((revstates[parents[0] + 1] |
+			      revstates[parents[1] + 1]) & RS_REACHABLE)
+			    && !(revstates[i + 1] & RS_REACHABLE)) {
+				revstates[i + 1] |= RS_REACHABLE;
+				val = PyInt_FromLong(i);
+				if (val == NULL)
+					goto bail;
+				r = PyList_Append(reachable, val);
+				Py_DECREF(val);
+				if (r < 0)
+					goto bail;
+			}
+		}
+	}
+
+	free(revstates);
+	free(tovisit);
+	return reachable;
+bail:
+	Py_XDECREF(reachable);
+	free(revstates);
+	free(tovisit);
+	return NULL;
 }
 
 static PyObject *compute_phases_map_sets(indexObject *self, PyObject *args)
@@ -2011,16 +2169,18 @@ bail:
  */
 static PyObject *index_ancestors(indexObject *self, PyObject *args)
 {
+	PyObject *ret;
 	PyObject *gca = index_commonancestorsheads(self, args);
 	if (gca == NULL)
 		return NULL;
 
 	if (PyList_GET_SIZE(gca) <= 1) {
-		Py_INCREF(gca);
 		return gca;
 	}
 
-	return find_deepest(self, gca);
+	ret = find_deepest(self, gca);
+	Py_DECREF(gca);
+	return ret;
 }
 
 /*
@@ -2282,6 +2442,8 @@ static PyMethodDef index_methods[] = {
 	 "get an index entry"},
 	{"computephasesmapsets", (PyCFunction)compute_phases_map_sets,
 			METH_VARARGS, "compute phases"},
+	{"reachableroots2", (PyCFunction)reachableroots2, METH_VARARGS,
+		"reachableroots"},
 	{"headrevs", (PyCFunction)index_headrevs, METH_VARARGS,
 	 "get head revisions"}, /* Can do filtering since 3.2 */
 	{"headrevsfiltered", (PyCFunction)index_headrevs, METH_VARARGS,
@@ -2402,7 +2564,7 @@ static PyObject *readshas(
 			Py_DECREF(list);
 			return NULL;
 		}
-		PyTuple_SetItem(list, i, hash);
+		PyTuple_SET_ITEM(list, i, hash);
 		source += hashwidth;
 	}
 	return list;
@@ -2474,18 +2636,16 @@ static PyObject *fm1readmarker(const char *data, uint32_t *msize)
 		metasize = (unsigned char)(*data++);
 		right = PyString_FromStringAndSize(meta, metasize);
 		meta += metasize;
-		if (!left || !right) {
+		tmp = PyTuple_New(2);
+		if (!left || !right || !tmp) {
 			Py_XDECREF(left);
 			Py_XDECREF(right);
+			Py_XDECREF(tmp);
 			goto bail;
 		}
-		tmp = PyTuple_Pack(2, left, right);
-		Py_DECREF(left);
-		Py_DECREF(right);
-		if (!tmp) {
-			goto bail;
-		}
-		PyTuple_SetItem(metadata, i, tmp);
+		PyTuple_SET_ITEM(tmp, 0, left);
+		PyTuple_SET_ITEM(tmp, 1, right);
+		PyTuple_SET_ITEM(metadata, i, tmp);
 	}
 	ret = Py_BuildValue("(OOHO(di)O)", prec, succs, flags,
 			    metadata, mtime, (int)tz * 60, parents);
@@ -2502,12 +2662,10 @@ bail:
 static PyObject *fm1readmarkers(PyObject *self, PyObject *args) {
 	const char *data;
 	Py_ssize_t datalen;
-	/* only unsigned long because python 2.4, should be Py_ssize_t */
-	unsigned long offset, stop;
+	Py_ssize_t offset, stop;
 	PyObject *markers = NULL;
 
-	/* replace kk with nn when we drop Python 2.4 */
-	if (!PyArg_ParseTuple(args, "s#kk", &data, &datalen, &offset, &stop)) {
+	if (!PyArg_ParseTuple(args, "s#nn", &data, &datalen, &offset, &stop)) {
 		return NULL;
 	}
 	data += offset;

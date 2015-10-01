@@ -11,6 +11,8 @@ This allows us to catch exceptions at higher levels without forcing
 imports.
 """
 
+from __future__ import absolute_import
+
 # Do not import anything here, please
 
 class HintException(Exception):
@@ -32,7 +34,7 @@ class LookupError(RevlogError, KeyError):
         # Python 2.6+ complain about the 'message' property being deprecated
         self.lookupmessage = message
         if isinstance(name, str) and len(name) == 20:
-            from node import short
+            from .node import short
             name = short(name)
         RevlogError.__init__(self, '%s@%s: %s' % (index, name, message))
 
@@ -78,7 +80,7 @@ class UnknownIdentifier(ParseError):
     """Exception raised when a {rev,file}set references an unknown identifier"""
 
     def __init__(self, function, symbols):
-        from i18n import _
+        from .i18n import _
         ParseError.__init__(self, _("unknown identifier: %s") % function)
         self.function = function
         self.symbols = symbols
@@ -112,6 +114,10 @@ class LockHeld(LockError):
 class LockUnavailable(LockError):
     pass
 
+# LockError is for errors while acquiring the lock -- this is unrelated
+class LockInheritanceContractViolation(AssertionError):
+    pass
+
 class ResponseError(Exception):
     """Raised to print an error with part of output and exit."""
 
@@ -135,16 +141,27 @@ class PushRaced(RuntimeError):
 class BundleValueError(ValueError):
     """error raised when bundle2 cannot be processed"""
 
-class UnsupportedPartError(BundleValueError):
-    def __init__(self, parttype=None, params=()):
+class BundleUnknownFeatureError(BundleValueError):
+    def __init__(self, parttype=None, params=(), values=()):
         self.parttype = parttype
         self.params = params
+        self.values = values
         if self.parttype is None:
             msg = 'Stream Parameter'
         else:
             msg = parttype
-        if self.params:
-            msg = '%s - %s' % (msg, ', '.join(self.params))
+        entries = self.params
+        if self.params and self.values:
+            assert len(self.params) == len(self.values)
+            entries = []
+            for idx, par in enumerate(self.params):
+                val = self.values[idx]
+                if val is None:
+                    entries.append(val)
+                else:
+                    entries.append("%s=%r" % (par, val))
+        if entries:
+            msg = '%s - %s' % (msg, ', '.join(entries))
         ValueError.__init__(self, msg)
 
 class ReadOnlyPartError(RuntimeError):
@@ -173,7 +190,7 @@ class CensoredNodeError(RevlogError):
     """
 
     def __init__(self, filename, node, tombstone):
-        from node import short
+        from .node import short
         RevlogError.__init__(self, '%s:%s' % (filename, short(node)))
         self.tombstone = tombstone
 
