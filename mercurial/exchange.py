@@ -5,13 +5,13 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import time
 from i18n import _
 from node import hex, nullid
 import errno, urllib
-import util, scmutil, changegroup, base85, error, store
+import util, scmutil, changegroup, base85, error
 import discovery, phases, obsolete, bookmarks as bookmod, bundle2, pushkey
 import lock as lockmod
+import streamclone
 import tags
 
 def readbundle(ui, fh, fname, vfs=None):
@@ -147,7 +147,7 @@ class pushoperation(object):
         #
         # We can pick:
         # * missingheads part of common (::commonheads)
-        common = set(self.outgoing.common)
+        common = self.outgoing.common
         nm = self.repo.changelog.nodemap
         cheads = [node for node in self.revs if nm[node] in common]
         # and
@@ -475,6 +475,14 @@ def b2partsgenerator(stepname, idx=None):
         return func
     return dec
 
+def _pushb2ctxcheckheads(pushop, bundler):
+    """Generate race condition checking parts
+
+    Exists as an indepedent function to aid extensions
+    """
+    if not pushop.force:
+        bundler.newpart('check:heads', data=iter(pushop.remoteheads))
+
 @b2partsgenerator('changeset')
 def _pushb2ctx(pushop, bundler):
     """handle changegroup push through bundle2
@@ -490,8 +498,9 @@ def _pushb2ctx(pushop, bundler):
     pushop.repo.prepushoutgoinghooks(pushop.repo,
                                      pushop.remote,
                                      pushop.outgoing)
-    if not pushop.force:
-        bundler.newpart('check:heads', data=iter(pushop.remoteheads))
+
+    _pushb2ctxcheckheads(pushop, bundler)
+
     b2caps = bundle2.bundle2caps(pushop.remote)
     version = None
     cgversions = b2caps.get('changegroup')
@@ -571,7 +580,7 @@ def _pushb2obsmarkers(pushop, bundler):
 
 @b2partsgenerator('bookmarks')
 def _pushb2bookmarks(pushop, bundler):
-    """handle phase push through bundle2"""
+    """handle bookmark push through bundle2"""
     if 'bookmarks' in pushop.stepsdone:
         return
     b2caps = bundle2.bundle2caps(pushop.remote)
@@ -838,7 +847,7 @@ class pulloperation(object):
     """
 
     def __init__(self, repo, remote, heads=None, force=False, bookmarks=(),
-                 remotebookmarks=None):
+                 remotebookmarks=None, streamclonerequested=None):
         # repo we pull into
         self.repo = repo
         # repo we pull from
@@ -849,6 +858,8 @@ class pulloperation(object):
         self.explicitbookmarks = bookmarks
         # do we force pull?
         self.force = force
+        # whether a streaming clone was requested
+        self.streamclonerequested = streamclonerequested
         # transaction manager
         self.trmanager = None
         # set of common changeset between local and remote before pull
@@ -881,6 +892,14 @@ class pulloperation(object):
             # We pulled a specific subset
             # sync on this subset
             return self.heads
+
+    @util.propertycache
+    def canusebundle2(self):
+        return _canusebundle2(self)
+
+    @util.propertycache
+    def remotebundle2caps(self):
+        return bundle2.bundle2caps(self.remote)
 
     def gettransaction(self):
         # deprecated; talk to trmanager directly
@@ -916,11 +935,32 @@ class transactionmanager(object):
         if self._tr is not None:
             self._tr.release()
 
-def pull(repo, remote, heads=None, force=False, bookmarks=(), opargs=None):
+def pull(repo, remote, heads=None, force=False, bookmarks=(), opargs=None,
+         streamclonerequested=None):
+    """Fetch repository data from a remote.
+
+    This is the main function used to retrieve data from a remote repository.
+
+    ``repo`` is the local repository to clone into.
+    ``remote`` is a peer instance.
+    ``heads`` is an iterable of revisions we want to pull. ``None`` (the
+    default) means to pull everything from the remote.
+    ``bookmarks`` is an iterable of bookmarks requesting to be pulled. By
+    default, all remote bookmarks are pulled.
+    ``opargs`` are additional keyword arguments to pass to ``pulloperation``
+    initialization.
+    ``streamclonerequested`` is a boolean indicating whether a "streaming
+    clone" is requested. A "streaming clone" is essentially a raw file copy
+    of revlogs from the server. This only works when the local repository is
+    empty. The default value of ``None`` means to respect the server
+    configuration for preferring stream clones.
+
+    Returns the ``pulloperation`` created for this pull.
+    """
     if opargs is None:
         opargs = {}
     pullop = pulloperation(repo, remote, heads, force, bookmarks=bookmarks,
-                           **opargs)
+                           streamclonerequested=streamclonerequested, **opargs)
     if pullop.remote.local():
         missing = set(pullop.remote.requirements) - pullop.repo.supported
         if missing:
@@ -932,8 +972,9 @@ def pull(repo, remote, heads=None, force=False, bookmarks=(), opargs=None):
     lock = pullop.repo.lock()
     try:
         pullop.trmanager = transactionmanager(repo, 'pull', remote.url())
+        streamclone.maybeperformlegacystreamclone(pullop)
         _pulldiscovery(pullop)
-        if _canusebundle2(pullop):
+        if pullop.canusebundle2:
             _pullbundle2(pullop)
         _pullchangeset(pullop)
         _pullphase(pullop)
@@ -984,8 +1025,7 @@ def _pullbookmarkbundle1(pullop):
     discovery to reduce the chance and impact of race conditions."""
     if pullop.remotebookmarks is not None:
         return
-    if (_canusebundle2(pullop)
-            and 'listkeys' in bundle2.bundle2caps(pullop.remote)):
+    if pullop.canusebundle2 and 'listkeys' in pullop.remotebundle2caps:
         # all known bundle2 servers now support listkeys, but lets be nice with
         # new implementation.
         return
@@ -1034,28 +1074,32 @@ def _pullbundle2(pullop):
     """pull data using bundle2
 
     For now, the only supported data are changegroup."""
-    remotecaps = bundle2.bundle2caps(pullop.remote)
     kwargs = {'bundlecaps': caps20to10(pullop.repo)}
+
+    streaming, streamreqs = streamclone.canperformstreamclone(pullop)
+
     # pulling changegroup
     pullop.stepsdone.add('changegroup')
 
     kwargs['common'] = pullop.common
     kwargs['heads'] = pullop.heads or pullop.rheads
     kwargs['cg'] = pullop.fetch
-    if 'listkeys' in remotecaps:
+    if 'listkeys' in pullop.remotebundle2caps:
         kwargs['listkeys'] = ['phase']
         if pullop.remotebookmarks is None:
             # make sure to always includes bookmark data when migrating
             # `hg incoming --bundle` to using this function.
             kwargs['listkeys'].append('bookmarks')
-    if not pullop.fetch:
+    if streaming:
+        pullop.repo.ui.status(_('streaming all changes\n'))
+    elif not pullop.fetch:
         pullop.repo.ui.status(_("no changes found\n"))
         pullop.cgresult = 0
     else:
         if pullop.heads is None and list(pullop.common) == [nullid]:
             pullop.repo.ui.status(_("requesting all changes\n"))
     if obsolete.isenabled(pullop.repo, obsolete.exchangeopt):
-        remoteversions = bundle2.obsmarkersversion(remotecaps)
+        remoteversions = bundle2.obsmarkersversion(pullop.remotebundle2caps)
         if obsolete.commonversion(remoteversions) is not None:
             kwargs['obsmarkers'] = True
             pullop.stepsdone.add('obsmarkers')
@@ -1419,7 +1463,7 @@ def unbundle(repo, cg, heads, source, url):
                 op = bundle2.bundleoperation(repo, lambda: tr,
                                              captureoutput=captureoutput)
                 try:
-                    r = bundle2.processbundle(repo, cg, op=op)
+                    op = bundle2.processbundle(repo, cg, op=op)
                 finally:
                     r = op.reply
                     if captureoutput and r is not None:
@@ -1444,131 +1488,3 @@ def unbundle(repo, cg, heads, source, url):
         if recordout is not None:
             recordout(repo.ui.popbuffer())
     return r
-
-# This is it's own function so extensions can override it.
-def _walkstreamfiles(repo):
-    return repo.store.walk()
-
-def generatestreamclone(repo):
-    """Emit content for a streaming clone.
-
-    This is a generator of raw chunks that constitute a streaming clone.
-
-    The stream begins with a line of 2 space-delimited integers containing the
-    number of entries and total bytes size.
-
-    Next, are N entries for each file being transferred. Each file entry starts
-    as a line with the file name and integer size delimited by a null byte.
-    The raw file data follows. Following the raw file data is the next file
-    entry, or EOF.
-
-    When used on the wire protocol, an additional line indicating protocol
-    success will be prepended to the stream. This function is not responsible
-    for adding it.
-
-    This function will obtain a repository lock to ensure a consistent view of
-    the store is captured. It therefore may raise LockError.
-    """
-    entries = []
-    total_bytes = 0
-    # Get consistent snapshot of repo, lock during scan.
-    lock = repo.lock()
-    try:
-        repo.ui.debug('scanning\n')
-        for name, ename, size in _walkstreamfiles(repo):
-            if size:
-                entries.append((name, size))
-                total_bytes += size
-    finally:
-            lock.release()
-
-    repo.ui.debug('%d files, %d bytes to transfer\n' %
-                  (len(entries), total_bytes))
-    yield '%d %d\n' % (len(entries), total_bytes)
-
-    svfs = repo.svfs
-    oldaudit = svfs.mustaudit
-    debugflag = repo.ui.debugflag
-    svfs.mustaudit = False
-
-    try:
-        for name, size in entries:
-            if debugflag:
-                repo.ui.debug('sending %s (%d bytes)\n' % (name, size))
-            # partially encode name over the wire for backwards compat
-            yield '%s\0%d\n' % (store.encodedir(name), size)
-            if size <= 65536:
-                fp = svfs(name)
-                try:
-                    data = fp.read(size)
-                finally:
-                    fp.close()
-                yield data
-            else:
-                for chunk in util.filechunkiter(svfs(name), limit=size):
-                    yield chunk
-    finally:
-        svfs.mustaudit = oldaudit
-
-def consumestreamclone(repo, fp):
-    """Apply the contents from a streaming clone file.
-
-    This takes the output from "streamout" and applies it to the specified
-    repository.
-
-    Like "streamout," the status line added by the wire protocol is not handled
-    by this function.
-    """
-    lock = repo.lock()
-    try:
-        repo.ui.status(_('streaming all changes\n'))
-        l = fp.readline()
-        try:
-            total_files, total_bytes = map(int, l.split(' ', 1))
-        except (ValueError, TypeError):
-            raise error.ResponseError(
-                _('unexpected response from remote server:'), l)
-        repo.ui.status(_('%d files to transfer, %s of data\n') %
-                       (total_files, util.bytecount(total_bytes)))
-        handled_bytes = 0
-        repo.ui.progress(_('clone'), 0, total=total_bytes)
-        start = time.time()
-
-        tr = repo.transaction(_('clone'))
-        try:
-            for i in xrange(total_files):
-                # XXX doesn't support '\n' or '\r' in filenames
-                l = fp.readline()
-                try:
-                    name, size = l.split('\0', 1)
-                    size = int(size)
-                except (ValueError, TypeError):
-                    raise error.ResponseError(
-                        _('unexpected response from remote server:'), l)
-                if repo.ui.debugflag:
-                    repo.ui.debug('adding %s (%s)\n' %
-                                  (name, util.bytecount(size)))
-                # for backwards compat, name was partially encoded
-                ofp = repo.svfs(store.decodedir(name), 'w')
-                for chunk in util.filechunkiter(fp, limit=size):
-                    handled_bytes += len(chunk)
-                    repo.ui.progress(_('clone'), handled_bytes,
-                                     total=total_bytes)
-                    ofp.write(chunk)
-                ofp.close()
-            tr.close()
-        finally:
-            tr.release()
-
-        # Writing straight to files circumvented the inmemory caches
-        repo.invalidate()
-
-        elapsed = time.time() - start
-        if elapsed <= 0:
-            elapsed = 0.001
-        repo.ui.progress(_('clone'), None)
-        repo.ui.status(_('transferred %s in %.1f seconds (%s/sec)\n') %
-                       (util.bytecount(total_bytes), elapsed,
-                        util.bytecount(total_bytes / elapsed)))
-    finally:
-        lock.release()

@@ -11,12 +11,33 @@ This provides a read-only repository interface to bundles as if they
 were part of the actual repository.
 """
 
-from node import nullid
-from i18n import _
-import os, tempfile, shutil
-import changegroup, util, mdiff, discovery, cmdutil, scmutil, exchange
-import localrepo, changelog, manifest, filelog, revlog, error, phases, bundle2
-import pathutil
+from __future__ import absolute_import
+
+import os
+import shutil
+import tempfile
+
+from .i18n import _
+from .node import nullid
+
+from . import (
+    bundle2,
+    changegroup,
+    changelog,
+    cmdutil,
+    discovery,
+    error,
+    exchange,
+    filelog,
+    localrepo,
+    manifest,
+    mdiff,
+    pathutil,
+    phases,
+    revlog,
+    scmutil,
+    util,
+)
 
 class bundlerevlog(revlog.revlog):
     def __init__(self, opener, indexfile, bundle, linkmapper):
@@ -174,7 +195,15 @@ class bundlemanifest(bundlerevlog, manifest.manifest):
                               linkmapper)
 
     def baserevision(self, nodeorrev):
-        return manifest.manifest.revision(self, nodeorrev)
+        node = nodeorrev
+        if isinstance(node, int):
+            node = self.node(node)
+
+        if node in self._mancache:
+            result = self._mancache[node][0].text()
+        else:
+            result = manifest.manifest.revision(self, nodeorrev)
+        return result
 
 class bundlefilelog(bundlerevlog, filelog.filelog):
     def __init__(self, opener, path, bundle, linkmapper):

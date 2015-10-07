@@ -28,7 +28,7 @@ Common tasks (use :hg:`help command` for more details)::
 
 By default, mq will automatically use git patches when required to
 avoid losing file mode changes, copy records, binary files or empty
-files creations or deletions. This behaviour can be configured with::
+files creations or deletions. This behavior can be configured with::
 
   [mq]
   git = auto/keep/yes/no
@@ -483,7 +483,7 @@ class queue(object):
         self.guardsdirty = False
         self.activeguards = None
 
-    def diffopts(self, opts={}, patchfn=None):
+    def diffopts(self, opts=None, patchfn=None):
         diffopts = patchmod.diffopts(self.ui, opts)
         if self.gitmode == 'auto':
             diffopts.upgrade = True

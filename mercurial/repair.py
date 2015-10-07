@@ -6,25 +6,24 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from mercurial import changegroup, exchange, util, bundle2
-from mercurial.node import short
-from mercurial.i18n import _
+from __future__ import absolute_import
+
 import errno
+
+from .i18n import _
+from .node import short
+from . import (
+    bundle2,
+    changegroup,
+    exchange,
+    util,
+)
 
 def _bundle(repo, bases, heads, node, suffix, compress=True):
     """create a bundle with the specified revisions as a backup"""
-    usebundle2 = (repo.ui.configbool('experimental', 'bundle2-exp', True) and
-                  repo.ui.config('experimental', 'strip-bundle2-version'))
-    if usebundle2:
-        cgversion = repo.ui.config('experimental', 'strip-bundle2-version')
-        if cgversion not in changegroup.packermap:
-            repo.ui.warn(_('unknown strip-bundle2-version value %r; '
-                            'should be one of %r\n') %
-                         (cgversion, sorted(changegroup.packermap.keys()),))
-            cgversion = '01'
-            usebundle2 = False
-    else:
-        cgversion = '01'
+    cgversion = '01'
+    if 'generaldelta' in repo.requirements:
+        cgversion = '02'
 
     cg = changegroup.changegroupsubset(repo, bases, heads, 'strip',
                                        version=cgversion)
@@ -39,13 +38,17 @@ def _bundle(repo, bases, heads, node, suffix, compress=True):
     totalhash = util.sha1(''.join(allhashes)).hexdigest()
     name = "%s/%s-%s-%s.hg" % (backupdir, short(node), totalhash[:8], suffix)
 
-    if usebundle2:
+    comp = None
+    if cgversion != '01':
         bundletype = "HG20"
+        if compress:
+            comp = 'BZ'
     elif compress:
         bundletype = "HG10BZ"
     else:
         bundletype = "HG10UN"
-    return changegroup.writebundle(repo.ui, cg, name, bundletype, vfs)
+    return changegroup.writebundle(repo.ui, cg, name, bundletype, vfs,
+                                   compression=comp)
 
 def _collectfiles(repo, striprev):
     """find out the filelogs affected by the strip"""

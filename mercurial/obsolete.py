@@ -67,7 +67,7 @@ The header is followed by the markers. Marker format depend of the version. See
 comment associated with each format for details.
 
 """
-import struct
+import errno, struct
 import util, base85, node, parsers
 import phases
 from i18n import _
@@ -520,14 +520,9 @@ class obsstore(object):
     def __init__(self, svfs, defaultformat=_fm1version, readonly=False):
         # caches for various obsolescence related cache
         self.caches = {}
-        self._all = []
         self.svfs = svfs
-        data = svfs.tryread('obsstore')
         self._version = defaultformat
         self._readonly = readonly
-        if data:
-            self._version, markers = _readmarkers(data)
-            self._addmarkers(markers)
 
     def __iter__(self):
         return iter(self._all)
@@ -536,6 +531,15 @@ class obsstore(object):
         return len(self._all)
 
     def __nonzero__(self):
+        if not self._cached('_all'):
+            try:
+                return self.svfs.stat('obsstore').st_size > 1
+            except OSError as inst:
+                if inst.errno != errno.ENOENT:
+                    raise
+                # just build an empty _all list if no obsstore exists, which
+                # avoids further stat() syscalls
+                pass
         return bool(self._all)
 
     def create(self, transaction, prec, succs=(), flag=0, parents=None,
@@ -613,6 +617,16 @@ class obsstore(object):
         Returns the number of new markers added."""
         version, markers = _readmarkers(data)
         return self.add(transaction, markers)
+
+    @propertycache
+    def _all(self):
+        data = self.svfs.tryread('obsstore')
+        if not data:
+            return []
+        self._version, markers = _readmarkers(data)
+        markers = list(markers)
+        _checkinvalidmarkers(markers)
+        return markers
 
     @propertycache
     def successors(self):
@@ -841,15 +855,15 @@ def foreground(repo, nodes):
 
 
 def successorssets(repo, initialnode, cache=None):
-    """Return all set of successors of initial nodes
+    """Return set of all latest successors of initial nodes
 
-    The successors set of a changeset A are a group of revisions that succeed
+    The successors set of a changeset A are the group of revisions that succeed
     A. It succeeds A as a consistent whole, each revision being only a partial
     replacement. The successors set contains non-obsolete changesets only.
 
     This function returns the full list of successor sets which is why it
     returns a list of tuples and not just a single tuple. Each tuple is a valid
-    successors set. Not that (A,) may be a valid successors set for changeset A
+    successors set. Note that (A,) may be a valid successors set for changeset A
     (see below).
 
     In most cases, a changeset A will have a single element (e.g. the changeset
@@ -865,7 +879,7 @@ def successorssets(repo, initialnode, cache=None):
 
     If a changeset A is not obsolete, then it will conceptually have no
     successors set. To distinguish this from a pruned changeset, the successor
-    set will only contain itself, i.e. [(A,)].
+    set will contain itself only, i.e. [(A,)].
 
     Finally, successors unknown locally are considered to be pruned (obsoleted
     without any successors).
@@ -873,10 +887,9 @@ def successorssets(repo, initialnode, cache=None):
     The optional `cache` parameter is a dictionary that may contain precomputed
     successors sets. It is meant to reuse the computation of a previous call to
     `successorssets` when multiple calls are made at the same time. The cache
-    dictionary is updated in place. The caller is responsible for its live
-    spawn. Code that makes multiple calls to `successorssets` *must* use this
-    cache mechanism or suffer terrible performances.
-
+    dictionary is updated in place. The caller is responsible for its life
+    span. Code that makes multiple calls to `successorssets` *must* use this
+    cache mechanism or suffer terrible performance.
     """
 
     succmarkers = repo.obsstore.successors
@@ -1045,16 +1058,6 @@ def successorssets(repo, initialnode, cache=None):
                 final.reverse() # put small successors set first
                 cache[current] = final
     return cache[initialnode]
-
-def _knownrevs(repo, nodes):
-    """yield revision numbers of known nodes passed in parameters
-
-    Unknown revisions are silently ignored."""
-    torev = repo.changelog.nodemap.get
-    for n in nodes:
-        rev = torev(n)
-        if rev is not None:
-            yield rev
 
 # mapping of 'set-name' -> <function to compute this set>
 cachefuncs = {}

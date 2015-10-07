@@ -80,6 +80,7 @@ Show debug commands if there are no other candidates
   debugdate
   debugdirstate
   debugdiscovery
+  debugextensions
   debugfileset
   debugfsinfo
   debuggetbundle
@@ -90,6 +91,7 @@ Show debug commands if there are no other candidates
   debugknown
   debuglabelcomplete
   debuglocks
+  debugmergestate
   debugnamecomplete
   debugobsolete
   debugpathcomplete
@@ -239,6 +241,7 @@ Show all commands + options
   debugdate: extended
   debugdirstate: nodates, datesort
   debugdiscovery: old, nonheads, ssh, remotecmd, insecure
+  debugextensions: template
   debugfileset: rev
   debugfsinfo: 
   debuggetbundle: head, common, type
@@ -249,12 +252,13 @@ Show all commands + options
   debugknown: 
   debuglabelcomplete: 
   debuglocks: force-lock, force-wlock
+  debugmergestate: 
   debugnamecomplete: 
   debugobsolete: flags, record-parents, rev, date, user
   debugpathcomplete: full, normal, added, removed
   debugpushkey: 
   debugpvec: 
-  debugrebuilddirstate: rev
+  debugrebuilddirstate: rev, minimal
   debugrebuildfncache: 
   debugrename: rev
   debugrevlog: changelog, manifest, dir, dump

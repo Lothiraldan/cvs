@@ -5,11 +5,25 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import short
-from i18n import _
-import util, simplemerge, match, error, templater, templatekw
-import os, tempfile, re, filecmp
-import tagmerge
+from __future__ import absolute_import
+
+import filecmp
+import os
+import re
+import tempfile
+
+from .i18n import _
+from .node import short
+
+from . import (
+    error,
+    match,
+    simplemerge,
+    tagmerge,
+    templatekw,
+    templater,
+    util,
+)
 
 def _toolstr(ui, tool, part, default=""):
     return ui.config("merge-tools", tool + "." + part, default)
@@ -213,15 +227,12 @@ def _premerge(repo, toolconf, files, labels=None):
             util.copyfile(back, a) # restore from backup and try again
     return 1 # continue merging
 
-@internaltool('merge', True,
-              _("merging %s incomplete! "
-                "(edit conflicts, then use 'hg resolve --mark')\n"))
-def _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
+def _merge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels, mode):
     """
     Uses the internal non-interactive simple merge algorithm for merging
     files. It will fail if there are any conflicts and leave markers in
     the partially merged file. Markers will have two sections, one for each side
-    of merge."""
+    of merge, unless mode equals 'union' which suppresses the markers."""
     tool, toolpath, binary, symlink = toolconf
     if symlink:
         repo.ui.warn(_('warning: internal :merge cannot merge symlinks '
@@ -233,9 +244,32 @@ def _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
 
         ui = repo.ui
 
-        r = simplemerge.simplemerge(ui, a, b, c, label=labels)
+        r = simplemerge.simplemerge(ui, a, b, c, label=labels, mode=mode)
         return True, r
     return False, 0
+
+@internaltool('union', True,
+              _("merging %s incomplete! "
+                "(edit conflicts, then use 'hg resolve --mark')\n"))
+def _iunion(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
+    """
+    Uses the internal non-interactive simple merge algorithm for merging
+    files. It will use both left and right sides for conflict regions.
+    No markers are inserted."""
+    return _merge(repo, mynode, orig, fcd, fco, fca, toolconf,
+                  files, labels, 'union')
+
+@internaltool('merge', True,
+              _("merging %s incomplete! "
+                "(edit conflicts, then use 'hg resolve --mark')\n"))
+def _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
+    """
+    Uses the internal non-interactive simple merge algorithm for merging
+    files. It will fail if there are any conflicts and leave markers in
+    the partially merged file. Markers will have two sections, one for each side
+    of merge."""
+    return _merge(repo, mynode, orig, fcd, fco, fca, toolconf,
+                  files, labels, 'merge')
 
 @internaltool('merge3', True,
               _("merging %s incomplete! "
@@ -251,6 +285,38 @@ def _imerge3(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
     if len(labels) < 3:
         labels.append('base')
     return _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels)
+
+def _imergeauto(repo, mynode, orig, fcd, fco, fca, toolconf, files,
+                labels=None, localorother=None):
+    """
+    Generic driver for _imergelocal and _imergeother
+    """
+    assert localorother is not None
+    tool, toolpath, binary, symlink = toolconf
+    if symlink:
+        repo.ui.warn(_('warning: :merge-%s cannot merge symlinks '
+                       'for %s\n') % (localorother, fcd.path()))
+        return False, 1
+    a, b, c, back = files
+    r = simplemerge.simplemerge(repo.ui, a, b, c, label=labels,
+                                localorother=localorother)
+    return True, r
+
+@internaltool('merge-local', True)
+def _imergelocal(*args, **kwargs):
+    """
+    Like :merge, but resolve all conflicts non-interactively in favor
+    of the local changes."""
+    success, status = _imergeauto(localorother='local', *args, **kwargs)
+    return success, status
+
+@internaltool('merge-other', True)
+def _imergeother(*args, **kwargs):
+    """
+    Like :merge, but resolve all conflicts non-interactively in favor
+    of the other changes."""
+    success, status = _imergeauto(localorother='other', *args, **kwargs)
+    return success, status
 
 @internaltool('tagmerge', True,
               _("automatic tag merging of %s failed! "
