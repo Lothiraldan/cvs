@@ -1,0 +1,34 @@
+#!/bin/bash -eu
+
+. $(dirname $0)/dockerlib.sh
+. $(dirname $0)/packagelib.sh
+
+BUILDDIR=$(dirname $0)
+export ROOTDIR=$(cd $BUILDDIR/..; pwd)
+
+checkdocker
+
+DEBPLATFORM="$1"
+PLATFORM="debian-$1"
+shift # extra params are passed to build process
+
+OUTPUTDIR=${OUTPUTDIR:=$ROOTDIR/packages/$PLATFORM}
+
+initcontainer $PLATFORM
+
+# debuild only appears to be able to save built debs etc to .., so we
+# have to share the .. of the current directory with the docker
+# container and hope it's writable. Whee.
+dn=$(basename $PWD)
+
+if [ $(uname) = "Darwin" ] ; then
+    $DOCKER run -u $DBUILDUSER --rm -v $PWD/..:/mnt $CONTAINER \
+            sh -c "cd /mnt/$dn && make clean && make local"
+fi
+$DOCKER run -u $DBUILDUSER --rm -v $PWD/..:/mnt $CONTAINER \
+  sh -c "cd /mnt/$dn && DEB_BUILD_OPTIONS='${DEB_BUILD_OPTIONS:=}' contrib/builddeb --build --release $DEBPLATFORM"
+contrib/builddeb --cleanup --release $DEBPLATFORM
+if [ $(uname) = "Darwin" ] ; then
+    $DOCKER run -u $DBUILDUSER --rm -v $PWD/..:/mnt $CONTAINER \
+            sh -c "cd /mnt/$dn && make clean"
+fi
