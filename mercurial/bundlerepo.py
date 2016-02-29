@@ -325,7 +325,8 @@ class bundlerepository(localrepo.localrepository):
         self.bundle.seek(self.manstart)
         # consume the header if it exists
         self.bundle.manifestheader()
-        m = bundlemanifest(self.svfs, self.bundle, self.changelog.rev)
+        linkmapper = self.unfiltered().changelog.rev
+        m = bundlemanifest(self.svfs, self.bundle, linkmapper)
         # XXX: hack to work with changegroup3, but we still don't handle
         # tree manifests correctly
         if self.bundle.version == "03":
@@ -362,7 +363,8 @@ class bundlerepository(localrepo.localrepository):
 
         if f in self.bundlefilespos:
             self.bundle.seek(self.bundlefilespos[f])
-            return bundlefilelog(self.svfs, f, self.bundle, self.changelog.rev)
+            linkmapper = self.unfiltered().changelog.rev
+            return bundlefilelog(self.svfs, f, self.bundle, linkmapper)
         else:
             return filelog.filelog(self.svfs, f)
 
