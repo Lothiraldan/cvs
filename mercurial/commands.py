@@ -2615,23 +2615,23 @@ def debugdeltachain(ui, repo, file_=None, **opts):
 
     Output can be templatized. Available template keywords are:
 
-       rev          revision number
-       chainid      delta chain identifier (numbered by unique base)
-       chainlen     delta chain length to this revision
-       prevrev      previous revision in delta chain
-       deltatype    role of delta / how it was computed
-       compsize     compressed size of revision
-       uncompsize   uncompressed size of revision
-       chainsize    total size of compressed revisions in chain
-       chainratio   total chain size divided by uncompressed revision size
+    :``rev``:       revision number
+    :``chainid``:   delta chain identifier (numbered by unique base)
+    :``chainlen``:  delta chain length to this revision
+    :``prevrev``:   previous revision in delta chain
+    :``deltatype``: role of delta / how it was computed
+    :``compsize``:  compressed size of revision
+    :``uncompsize``: uncompressed size of revision
+    :``chainsize``: total size of compressed revisions in chain
+    :``chainratio``: total chain size divided by uncompressed revision size
                     (new delta chains typically start at ratio 2.00)
-       lindist      linear distance from base revision in delta chain to end
+    :``lindist``:   linear distance from base revision in delta chain to end
                     of this revision
-       extradist    total size of revisions not part of this delta chain from
+    :``extradist``: total size of revisions not part of this delta chain from
                     base of delta chain to end of this revision; a measurement
                     of how much extra data we need to read/seek across to read
                     the delta chain for this revision
-       extraratio   extradist divided by chainsize; another representation of
+    :``extraratio``: extradist divided by chainsize; another representation of
                     how much unrelated data is needed to load this delta chain
     """
     r = cmdutil.openrevlog(repo, 'debugdeltachain', file_, opts)
@@ -4838,7 +4838,7 @@ def import_(ui, repo, patch1=None, *patches, **opts):
     resulting changeset has a different ID than the one recorded in
     the patch. This will guard against various ways that portable
     patch formats and mail systems might fail to transfer Mercurial
-    data or metadata. See ':hg: bundle' for lossless transmission.
+    data or metadata. See :hg:`bundle` for lossless transmission.
 
     Use --partial to ensure a changeset will be created from the patch
     even if some hunks fail to apply. Hunks that fail to apply will be
