@@ -249,7 +249,7 @@ Check absolute/relative import of extension specific modules
   $TESTTMP/a (glob)
 #endif
 
-#if absimport
+#if demandimport absimport
 
 Examine whether module loading is delayed until actual refering, even
 though module is imported with "absolute_import" feature.
@@ -431,6 +431,36 @@ Examine module importing.
   REL: this is absextroot.xsub1.xsub2.used
   REL: this is absextroot.xsub1.xsub2.called.func()
   REL: this relimporter imports 'this is absextroot.relimportee'
+
+Examine whether sub-module is imported relatively as expected.
+
+See also issue5208 for detail about example case on Python 3.x.
+
+  $ f -q $TESTTMP/extlibroot/lsub1/lsub2/notexist.py
+  $TESTTMP/extlibroot/lsub1/lsub2/notexist.py: file not found
+
+  $ cat > $TESTTMP/notexist.py <<EOF
+  > text = 'notexist.py at root is loaded unintentionally\n'
+  > EOF
+
+  $ cat > $TESTTMP/checkrelativity.py <<EOF
+  > from mercurial import cmdutil
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > 
+  > # demand import avoids failure of importing notexist here
+  > import extlibroot.lsub1.lsub2.notexist
+  > 
+  > @command('checkrelativity', [], norepo=True)
+  > def checkrelativity(ui, *args, **opts):
+  >     try:
+  >         ui.write(extlibroot.lsub1.lsub2.notexist.text)
+  >         return 1 # unintentional success
+  >     except ImportError:
+  >         pass # intentional failure
+  > EOF
+
+  $ (PYTHONPATH=${PYTHONPATH}${PATHSEP}${TESTTMP}; hg --config extensions.checkrelativity=$TESTTMP/checkrelativity.py checkrelativity)
 
 #endif
 
@@ -1194,7 +1224,7 @@ Test version number support in 'hg version':
     throw  external  1.2.3
   $ echo 'getversion = lambda: "1.twentythree"' >> throw.py
   $ rm -f throw.pyc throw.pyo
-  $ hg version -v --config extensions.throw=throw.py
+  $ hg version -v --config extensions.throw=throw.py --config extensions.strip=
   Mercurial Distributed SCM (version *) (glob)
   (see https://mercurial-scm.org for more information)
   
@@ -1205,6 +1235,43 @@ Test version number support in 'hg version':
   Enabled extensions:
   
     throw  external  1.twentythree
+    strip  internal  
+
+  $ hg version -q --config extensions.throw=throw.py
+  Mercurial Distributed SCM (version *) (glob)
+
+Test JSON output of version:
+
+  $ hg version -Tjson
+  [
+   {
+    "extensions": [],
+    "ver": "*" (glob)
+   }
+  ]
+
+  $ hg version --config extensions.throw=throw.py -Tjson
+  [
+   {
+    "extensions": [{"bundled": false, "name": "throw", "ver": "1.twentythree"}],
+    "ver": "3.2.2"
+   }
+  ]
+
+  $ hg version --config extensions.strip= -Tjson
+  [
+   {
+    "extensions": [{"bundled": true, "name": "strip", "ver": null}],
+    "ver": "*" (glob)
+   }
+  ]
+
+Test template output of version:
+
+  $ hg version --config extensions.throw=throw.py --config extensions.strip= \
+  > -T'{extensions % "{name}  {pad(ver, 16)}  ({if(bundled, "internal", "external")})\n"}'
+  throw  1.twentythree     (external)
+  strip                    (internal)
 
 Refuse to load extensions with minimum version requirements
 

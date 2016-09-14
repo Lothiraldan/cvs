@@ -66,11 +66,11 @@ revskipped = (revignored, revprecursor, revpruned)
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
-# Note for extension authors: ONLY specify testedwith = 'internal' for
+# Note for extension authors: ONLY specify testedwith = 'ships-with-hg-core' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
 # be specifying the version(s) of Mercurial they are tested with, or
 # leave the attribute unspecified.
-testedwith = 'internal'
+testedwith = 'ships-with-hg-core'
 
 def _nothingtorebase():
     return 1
@@ -336,7 +336,8 @@ class rebaseruntime(object):
             bookmarks.deactivate(repo)
 
         sortedrevs = sorted(self.state)
-        total = len(self.state)
+        cands = [k for k, v in self.state.iteritems() if v == revtodo]
+        total = len(cands)
         pos = 0
         for rev in sortedrevs:
             ctx = repo[rev]
@@ -345,8 +346,8 @@ class rebaseruntime(object):
             names = repo.nodetags(ctx.node()) + repo.nodebookmarks(ctx.node())
             if names:
                 desc += ' (%s)' % ' '.join(names)
-            pos += 1
             if self.state[rev] == revtodo:
+                pos += 1
                 ui.status(_('rebasing %s\n') % desc)
                 ui.progress(_("rebasing"), pos, ("%d:%s" % (rev, ctx)),
                             _('changesets'), total)
@@ -1197,7 +1198,7 @@ def buildstate(repo, dest, rebaseset, collapse, obsoletenotrebased):
                 repo.ui.debug('source is a child of destination\n')
                 return None
 
-        repo.ui.debug('rebase onto %d starting from %s\n' % (dest, root))
+        repo.ui.debug('rebase onto %s starting from %s\n' % (dest, root))
         state.update(dict.fromkeys(rebaseset, revtodo))
         # Rebase tries to turn <dest> into a parent of <root> while
         # preserving the number of parents of rebased changesets:

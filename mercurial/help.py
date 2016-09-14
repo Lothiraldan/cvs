@@ -184,14 +184,16 @@ def loaddoc(topic, subdir=None):
     return loader
 
 internalstable = sorted([
-    (['bundles'], _('container for exchange of repository data'),
+    (['bundles'], _('Bundles'),
      loaddoc('bundles', subdir='internals')),
-    (['changegroups'], _('representation of revlog data'),
+    (['changegroups'], _('Changegroups'),
      loaddoc('changegroups', subdir='internals')),
-    (['requirements'], _('repository requirements'),
+    (['requirements'], _('Repository Requirements'),
      loaddoc('requirements', subdir='internals')),
-    (['revlogs'], _('revision storage mechanism'),
+    (['revlogs'], _('Revision Logs'),
      loaddoc('revlogs', subdir='internals')),
+    (['wireprotocol'], _('Wire Protocol'),
+     loaddoc('wireprotocol', subdir='internals')),
 ])
 
 def internalshelp(ui):

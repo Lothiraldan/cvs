@@ -651,7 +651,7 @@ class lrucachedict(object):
 
     def get(self, k, default=None):
         try:
-            return self._cache[k]
+            return self._cache[k].value
         except KeyError:
             return default
 
@@ -881,6 +881,8 @@ def nogc(func):
 
     This garbage collector issue have been fixed in 2.7.
     """
+    if sys.version >= (2, 7):
+        return func
     def wrapper(*args, **kwargs):
         gcenabled = gc.isenabled()
         gc.disable()
@@ -1012,10 +1014,7 @@ def system(cmd, environ=None, cwd=None, onerr=None, errprefix=None, out=None):
             proc = subprocess.Popen(cmd, shell=True, close_fds=closefds,
                                     env=env, cwd=cwd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT)
-            while True:
-                line = proc.stdout.readline()
-                if not line:
-                    break
+            for line in iter(proc.stdout.readline, ''):
                 out.write(line)
             proc.wait()
             rc = proc.returncode
@@ -1214,7 +1213,7 @@ def fstat(fp):
 
 # File system features
 
-def checkcase(path):
+def fscasesensitive(path):
     """
     Return true if the given path is on a case-sensitive filesystem
 
@@ -1342,6 +1341,10 @@ def checknlink(testfile):
     try:
         posixfile(f1, 'w').close()
     except IOError:
+        try:
+            os.unlink(f1)
+        except OSError:
+            pass
         return False
 
     f2 = testfile + ".hgtmp2"

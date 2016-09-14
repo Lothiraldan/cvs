@@ -64,8 +64,12 @@ def _hgextimport(importfunc, name, globals, *args, **kwargs):
         return importfunc(hgextname, globals, *args, **kwargs)
 
 class _demandmod(object):
-    """module demand-loader and proxy"""
-    def __init__(self, name, globals, locals, level=level):
+    """module demand-loader and proxy
+
+    Specify 1 as 'level' argument at construction, to import module
+    relatively.
+    """
+    def __init__(self, name, globals, locals, level):
         if '.' in name:
             head, rest = name.split('.', 1)
             after = [rest]
@@ -117,7 +121,8 @@ class _demandmod(object):
                 if '.' in p:
                     h, t = p.split('.', 1)
                 if getattr(mod, h, nothing) is nothing:
-                    setattr(mod, h, _demandmod(p, mod.__dict__, mod.__dict__))
+                    setattr(mod, h, _demandmod(p, mod.__dict__, mod.__dict__,
+                                               level=1))
                 elif t:
                     subload(getattr(mod, h), t)
 
@@ -210,8 +215,8 @@ def _demandimport(name, globals=None, locals=None, fromlist=None, level=level):
             mod = rootmod
             for comp in modname.split('.')[1:]:
                 if getattr(mod, comp, nothing) is nothing:
-                    setattr(mod, comp,
-                            _demandmod(comp, mod.__dict__, mod.__dict__))
+                    setattr(mod, comp, _demandmod(comp, mod.__dict__,
+                                                  mod.__dict__, level=1))
                 mod = getattr(mod, comp)
             return mod
 

@@ -256,17 +256,15 @@ class abstractvfs(object):
                 raise
         return []
 
-    def open(self, path, mode="r", text=False, atomictemp=False,
-             notindexed=False, backgroundclose=False):
+    @util.propertycache
+    def open(self):
         '''Open ``path`` file, which is relative to vfs root.
 
         Newly created directories are marked as "not to be indexed by
         the content indexing service", if ``notindexed`` is specified
         for "write" mode access.
         '''
-        self.open = self.__call__
-        return self.__call__(path, mode, text, atomictemp, notindexed,
-                             backgroundclose=backgroundclose)
+        return self.__call__
 
     def read(self, path):
         with self(path, 'rb') as fp:
@@ -638,6 +636,14 @@ class auditvfs(object):
     def mustaudit(self, onoff):
         self.vfs.mustaudit = onoff
 
+    @property
+    def options(self):
+        return self.vfs.options
+
+    @options.setter
+    def options(self, value):
+        self.vfs.options = value
+
 class filtervfs(abstractvfs, auditvfs):
     '''Wrapper vfs for filtering filenames with a function.'''
 
@@ -775,7 +781,6 @@ def revsingle(repo, revspec, default='.'):
 
 def _pairspec(revspec):
     tree = revset.parse(revspec)
-    tree = revset.optimize(tree)  # fix up "x^:y" -> "(x^):y"
     return tree and tree[0] in ('range', 'rangepre', 'rangepost', 'rangeall')
 
 def revpair(repo, revs):
@@ -942,20 +947,12 @@ def addremove(repo, matcher, prefix, opts=None, dry_run=None, similarity=None):
     ret = 0
     join = lambda f: os.path.join(prefix, f)
 
-    def matchessubrepo(matcher, subpath):
-        if matcher.exact(subpath):
-            return True
-        for f in matcher.files():
-            if f.startswith(subpath):
-                return True
-        return False
-
     wctx = repo[None]
     for subpath in sorted(wctx.substate):
-        if opts.get('subrepos') or matchessubrepo(m, subpath):
+        submatch = matchmod.subdirmatcher(subpath, m)
+        if opts.get('subrepos') or m.exact(subpath) or any(submatch.files()):
             sub = wctx.sub(subpath)
             try:
-                submatch = matchmod.subdirmatcher(subpath, m)
                 if sub.addremove(submatch, prefix, opts, dry_run, similarity):
                     ret = 1
             except error.LookupError:

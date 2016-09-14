@@ -1286,8 +1286,29 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
     removed += msremoved
 
     extraactions = ms.actions()
-    for k, acts in extraactions.iteritems():
-        actions[k].extend(acts)
+    if extraactions:
+        mfiles = set(a[0] for a in actions['m'])
+        for k, acts in extraactions.iteritems():
+            actions[k].extend(acts)
+            # Remove these files from actions['m'] as well. This is important
+            # because in recordupdates, files in actions['m'] are processed
+            # after files in other actions, and the merge driver might add
+            # files to those actions via extraactions above. This can lead to a
+            # file being recorded twice, with poor results. This is especially
+            # problematic for actions['r'] (currently only possible with the
+            # merge driver in the initial merge process; interrupted merges
+            # don't go through this flow).
+            #
+            # The real fix here is to have indexes by both file and action so
+            # that when the action for a file is changed it is automatically
+            # reflected in the other action lists. But that involves a more
+            # complex data structure, so this will do for now.
+            #
+            # We don't need to do the same operation for 'dc' and 'cd' because
+            # those lists aren't consulted again.
+            mfiles.difference_update(a[0] for a in acts)
+
+        actions['m'] = [a for a in actions['m'] if a[0] in mfiles]
 
     progress(_updating, None, total=numupdates, unit=_files)
 
@@ -1535,11 +1556,13 @@ def update(repo, node, branchmerge, force, ancestor=None,
         if '.hgsubstate' in actionbyfile:
             f = '.hgsubstate'
             m, args, msg = actionbyfile[f]
+            prompts = filemerge.partextras(labels)
+            prompts['f'] = f
             if m == 'cd':
                 if repo.ui.promptchoice(
-                    _("local changed %s which remote deleted\n"
+                    _("local%(l)s changed %(f)s which other%(o)s deleted\n"
                       "use (c)hanged version or (d)elete?"
-                      "$$ &Changed $$ &Delete") % f, 0):
+                      "$$ &Changed $$ &Delete") % prompts, 0):
                     actionbyfile[f] = ('r', None, "prompt delete")
                 elif f in p1:
                     actionbyfile[f] = ('am', None, "prompt keep")
@@ -1549,9 +1572,9 @@ def update(repo, node, branchmerge, force, ancestor=None,
                 f1, f2, fa, move, anc = args
                 flags = p2[f2].flags()
                 if repo.ui.promptchoice(
-                    _("remote changed %s which local deleted\n"
+                    _("other%(o)s changed %(f)s which local%(l)s deleted\n"
                       "use (c)hanged version or leave (d)eleted?"
-                      "$$ &Changed $$ &Deleted") % f, 0) == 0:
+                      "$$ &Changed $$ &Deleted") % prompts, 0) == 0:
                     actionbyfile[f] = ('g', (flags, False), "prompt recreating")
                 else:
                     del actionbyfile[f]
@@ -1563,7 +1586,7 @@ def update(repo, node, branchmerge, force, ancestor=None,
                 actions[m] = []
             actions[m].append((f, args, msg))
 
-        if not util.checkcase(repo.path):
+        if not util.fscasesensitive(repo.path):
             # check collision between files only in p2 for clean update
             if (not branchmerge and
                 (force or not wc.dirty(missing=True, branch=False))):

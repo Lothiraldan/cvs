@@ -7,9 +7,6 @@
   > publish=False
   > [experimental]
   > evolution=createmarkers,exchange
-  > # drop me once bundle2 is the default,
-  > # added to get test change early.
-  > bundle2-exp = True
   > EOF
 
 initialize
@@ -825,7 +822,7 @@ Local push
 Using ssh
 ---------
 
-  $ hg push -B @ ssh --config experimental.bundle2-exp=True
+  $ hg push -B @ ssh # bundle2+
   pushing to ssh://user@dummy/issue4455-dest
   searching for changes
   no changes found
@@ -835,7 +832,7 @@ Using ssh
   $ hg -R ../issue4455-dest/ bookmarks
   no bookmarks set
 
-  $ hg push -B @ ssh --config experimental.bundle2-exp=False
+  $ hg push -B @ ssh --config devel.legacy.exchange=bundle1
   pushing to ssh://user@dummy/issue4455-dest
   searching for changes
   no changes found
@@ -848,7 +845,7 @@ Using ssh
 Using http
 ----------
 
-  $ hg push -B @ http --config experimental.bundle2-exp=True
+  $ hg push -B @ http # bundle2+
   pushing to http://localhost:$HGPORT/
   searching for changes
   no changes found
@@ -858,7 +855,7 @@ Using http
   $ hg -R ../issue4455-dest/ bookmarks
   no bookmarks set
 
-  $ hg push -B @ http --config experimental.bundle2-exp=False
+  $ hg push -B @ http --config devel.legacy.exchange=bundle1
   pushing to http://localhost:$HGPORT/
   searching for changes
   no changes found

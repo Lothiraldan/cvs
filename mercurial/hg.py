@@ -259,10 +259,11 @@ def postshare(sourcerepo, destrepo, bookmarks=True):
         fp.write("default = %s\n" % default)
         fp.close()
 
-    if bookmarks:
-        fp = destrepo.vfs('shared', 'w')
-        fp.write(sharedbookmarks + '\n')
-        fp.close()
+    with destrepo.wlock():
+        if bookmarks:
+            fp = destrepo.vfs('shared', 'w')
+            fp.write(sharedbookmarks + '\n')
+            fp.close()
 
 def _postshareupdate(repo, update, checkout=None):
     """Maybe perform a working directory update after a shared repo is created.
@@ -737,20 +738,22 @@ def updatetotally(ui, repo, checkout, brev, clean=False, check=False):
             if movemarkfrom == repo['.'].node():
                 pass # no-op update
             elif bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
-                ui.status(_("updating bookmark %s\n") % repo._activebookmark)
+                b = ui.label(repo._activebookmark, 'bookmarks.active')
+                ui.status(_("updating bookmark %s\n") % b)
             else:
                 # this can happen with a non-linear update
-                ui.status(_("(leaving bookmark %s)\n") %
-                          repo._activebookmark)
+                b = ui.label(repo._activebookmark, 'bookmarks')
+                ui.status(_("(leaving bookmark %s)\n") % b)
                 bookmarks.deactivate(repo)
         elif brev in repo._bookmarks:
             if brev != repo._activebookmark:
-                ui.status(_("(activating bookmark %s)\n") % brev)
+                b = ui.label(brev, 'bookmarks.active')
+                ui.status(_("(activating bookmark %s)\n") % b)
             bookmarks.activate(repo, brev)
         elif brev:
             if repo._activebookmark:
-                ui.status(_("(leaving bookmark %s)\n") %
-                          repo._activebookmark)
+                b = ui.label(repo._activebookmark, 'bookmarks')
+                ui.status(_("(leaving bookmark %s)\n") % b)
             bookmarks.deactivate(repo)
 
         if warndest:

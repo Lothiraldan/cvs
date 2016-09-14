@@ -219,7 +219,7 @@ Check that the right ancestors is used while rebasing a merge (issue4041)
      summary:     added default.txt
   
   $ hg rebase -s9 -d2 --debug # use debug to really check merge base used
-  rebase onto 2 starting from e31216eec445
+  rebase onto 4bc80088dc6b starting from e31216eec445
   ignoring null merge rebase of 3
   ignoring null merge rebase of 4
   ignoring null merge rebase of 6
@@ -304,7 +304,6 @@ Check that the right ancestors is used while rebasing a merge (issue4041)
   invalid branchheads cache (served): tip differs
   history modification detected - truncating revision branch cache to revision 9
   rebase completed
-  updating the branch cache
   truncating cache/rbc-revs-v1 to 72
 
 Test minimization of merge conflicts

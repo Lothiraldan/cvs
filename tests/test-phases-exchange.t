@@ -1,12 +1,5 @@
 #require killdaemons
 
-  $ cat << EOF >> $HGRCPATH
-  > [experimental]
-  > # drop me once bundle2 is the default,
-  > # added to get test change early.
-  > bundle2-exp = True
-  > EOF
-
   $ hgph() { hg log -G --template "{rev} {phase} {desc} - {node|short}\n" $*; }
 
   $ mkcommit() {
@@ -1048,7 +1041,7 @@ same over the wire
   $ cat ../beta.pid >> $DAEMON_PIDS
   $ cd ../gamma
 
-  $ hg pull http://localhost:$HGPORT/ --config experimental.bundle2-exp=True
+  $ hg pull http://localhost:$HGPORT/ # bundle2+
   pulling from http://localhost:$HGPORT/
   searching for changes
   no changes found
@@ -1057,7 +1050,7 @@ same over the wire
 
 enforce bundle1
 
-  $ hg pull http://localhost:$HGPORT/ --config experimental.bundle2-exp=False
+  $ hg pull http://localhost:$HGPORT/ --config devel.legacy.exchange=bundle1
   pulling from http://localhost:$HGPORT/
   searching for changes
   no changes found

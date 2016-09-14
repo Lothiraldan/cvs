@@ -882,6 +882,8 @@ class treemanifest(object):
 
     def writesubtrees(self, m1, m2, writesubtree):
         self._load() # for consistency; should never have any effect here
+        m1._load()
+        m2._load()
         emptytree = treemanifest()
         for d, subm in self._dirs.iteritems():
             subp1 = m1._dirs.get(d, emptytree)._node
@@ -890,7 +892,148 @@ class treemanifest(object):
                 subp1, subp2 = subp2, subp1
             writesubtree(subm, subp1, subp2)
 
-class manifest(revlog.revlog):
+class manifestrevlog(revlog.revlog):
+    '''A revlog that stores manifest texts. This is responsible for caching the
+    full-text manifest contents.
+    '''
+    def __init__(self, opener, indexfile):
+        super(manifestrevlog, self).__init__(opener, indexfile)
+
+        # During normal operations, we expect to deal with not more than four
+        # revs at a time (such as during commit --amend). When rebasing large
+        # stacks of commits, the number can go up, hence the config knob below.
+        cachesize = 4
+        opts = getattr(opener, 'options', None)
+        if opts is not None:
+            cachesize = opts.get('manifestcachesize', cachesize)
+        self._fulltextcache = util.lrucachedict(cachesize)
+
+    @property
+    def fulltextcache(self):
+        return self._fulltextcache
+
+    def clearcaches(self):
+        super(manifestrevlog, self).clearcaches()
+        self._fulltextcache.clear()
+
+class manifestlog(object):
+    """A collection class representing the collection of manifest snapshots
+    referenced by commits in the repository.
+
+    In this situation, 'manifest' refers to the abstract concept of a snapshot
+    of the list of files in the given commit. Consumers of the output of this
+    class do not care about the implementation details of the actual manifests
+    they receive (i.e. tree or flat or lazily loaded, etc)."""
+    def __init__(self, opener, repo):
+        self._repo = repo
+
+        # We'll separate this into it's own cache once oldmanifest is no longer
+        # used
+        self._mancache = repo.manifest._mancache
+
+    @property
+    def _revlog(self):
+        return self._repo.manifest
+
+    @property
+    def _oldmanifest(self):
+        # _revlog is the same as _oldmanifest right now, but we eventually want
+        # to delete _oldmanifest while still allowing manifestlog to access the
+        # revlog specific apis.
+        return self._repo.manifest
+
+    def __getitem__(self, node):
+        """Retrieves the manifest instance for the given node. Throws a KeyError
+        if not found.
+        """
+        if node in self._mancache:
+            cachemf = self._mancache[node]
+            # The old manifest may put non-ctx manifests in the cache, so skip
+            # those since they don't implement the full api.
+            if (isinstance(cachemf, manifestctx) or
+                isinstance(cachemf, treemanifestctx)):
+                return cachemf
+
+        if self._oldmanifest._treeinmem:
+            m = treemanifestctx(self._revlog, '', node)
+        else:
+            m = manifestctx(self._revlog, node)
+        if node != revlog.nullid:
+            self._mancache[node] = m
+        return m
+
+class manifestctx(object):
+    """A class representing a single revision of a manifest, including its
+    contents, its parent revs, and its linkrev.
+    """
+    def __init__(self, revlog, node):
+        self._revlog = revlog
+        self._data = None
+
+        self._node = node
+
+        # TODO: We eventually want p1, p2, and linkrev exposed on this class,
+        # but let's add it later when something needs it and we can load it
+        # lazily.
+        #self.p1, self.p2 = revlog.parents(node)
+        #rev = revlog.rev(node)
+        #self.linkrev = revlog.linkrev(rev)
+
+    def node(self):
+        return self._node
+
+    def read(self):
+        if not self._data:
+            if self._node == revlog.nullid:
+                self._data = manifestdict()
+            else:
+                text = self._revlog.revision(self._node)
+                arraytext = array.array('c', text)
+                self._revlog._fulltextcache[self._node] = arraytext
+                self._data = manifestdict(text)
+        return self._data
+
+class treemanifestctx(object):
+    def __init__(self, revlog, dir, node):
+        revlog = revlog.dirlog(dir)
+        self._revlog = revlog
+        self._dir = dir
+        self._data = None
+
+        self._node = node
+
+        # TODO: Load p1/p2/linkrev lazily. They need to be lazily loaded so that
+        # we can instantiate treemanifestctx objects for directories we don't
+        # have on disk.
+        #self.p1, self.p2 = revlog.parents(node)
+        #rev = revlog.rev(node)
+        #self.linkrev = revlog.linkrev(rev)
+
+    def read(self):
+        if not self._data:
+            if self._node == revlog.nullid:
+                self._data = treemanifest()
+            elif self._revlog._treeondisk:
+                m = treemanifest(dir=self._dir)
+                def gettext():
+                    return self._revlog.revision(self._node)
+                def readsubtree(dir, subm):
+                    return treemanifestctx(self._revlog, dir, subm).read()
+                m.read(gettext, readsubtree)
+                m.setnode(self._node)
+                self._data = m
+            else:
+                text = self._revlog.revision(self._node)
+                arraytext = array.array('c', text)
+                self._revlog.fulltextcache[self._node] = arraytext
+                self._data = treemanifest(dir=self._dir, text=text)
+
+        return self._data
+
+    def node(self):
+        return self._node
+
+class manifest(manifestrevlog):
     def __init__(self, opener, dir='', dirlogcache=None):
         '''The 'dir' and 'dirlogcache' arguments are for internal use by
         manifest.manifest only. External users should create a root manifest
@@ -913,11 +1056,11 @@ class manifest(revlog.revlog):
         self._usemanifestv2 = usemanifestv2
         indexfile = "00manifest.i"
         if dir:
-            assert self._treeondisk
+            assert self._treeondisk, 'opts is %r' % opts
             if not dir.endswith('/'):
                 dir = dir + '/'
             indexfile = "meta/" + dir + "00manifest.i"
-        revlog.revlog.__init__(self, opener, indexfile)
+        super(manifest, self).__init__(opener, indexfile)
         self._dir = dir
         # The dirlogcache is kept on the root manifest log
         if dir:
@@ -1000,7 +1143,11 @@ class manifest(revlog.revlog):
         if node == revlog.nullid:
             return self._newmanifest() # don't upset local cache
         if node in self._mancache:
-            return self._mancache[node][0]
+            cached = self._mancache[node]
+            if (isinstance(cached, manifestctx) or
+                isinstance(cached, treemanifestctx)):
+                cached = cached.read()
+            return cached
         if self._treeondisk:
             def gettext():
                 return self.revision(node)
@@ -1014,7 +1161,8 @@ class manifest(revlog.revlog):
             text = self.revision(node)
             m = self._newmanifest(text)
             arraytext = array.array('c', text)
-        self._mancache[node] = (m, arraytext)
+        self._mancache[node] = m
+        self.fulltextcache[node] = arraytext
         return m
 
     def readshallow(self, node):
@@ -1034,7 +1182,7 @@ class manifest(revlog.revlog):
             return None, None
 
     def add(self, m, transaction, link, p1, p2, added, removed):
-        if (p1 in self._mancache and not self._treeinmem
+        if (p1 in self.fulltextcache and not self._treeinmem
             and not self._usemanifestv2):
             # If our first parent is in the manifest cache, we can
             # compute a delta here using properties we know about the
@@ -1046,7 +1194,7 @@ class manifest(revlog.revlog):
             work = heapq.merge([(x, False) for x in added],
                                [(x, True) for x in removed])
 
-            arraytext, deltatext = m.fastdelta(self._mancache[p1][1], work)
+            arraytext, deltatext = m.fastdelta(self.fulltextcache[p1], work)
             cachedelta = self.rev(p1), deltatext
             text = util.buffer(arraytext)
             n = self.addrevision(text, transaction, link, p1, p2, cachedelta)
@@ -1065,7 +1213,8 @@ class manifest(revlog.revlog):
                 n = self.addrevision(text, transaction, link, p1, p2)
                 arraytext = array.array('c', text)
 
-        self._mancache[n] = (m, arraytext)
+        self._mancache[n] = m
+        self.fulltextcache[n] = arraytext
 
         return n
 
