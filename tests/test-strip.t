@@ -367,11 +367,51 @@ after strip of merge parent
      date:        Thu Jan 01 00:00:00 1970 +0000
      summary:     a
   
+Failed hook while applying "saveheads" bundle.
+
+  $ hg strip 2 --config hooks.pretxnchangegroup.bad=false
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  saved backup bundle to $TESTTMP/test/.hg/strip-backup/*-backup.hg (glob)
+  transaction abort!
+  rollback completed
+  strip failed, backup bundle stored in '$TESTTMP/test/.hg/strip-backup/*-backup.hg' (glob)
+  strip failed, unrecovered changes stored in '$TESTTMP/test/.hg/strip-backup/*-temp.hg' (glob)
+  (fix the problem, then recover the changesets with "hg unbundle '$TESTTMP/test/.hg/strip-backup/*-temp.hg'") (glob)
+  abort: pretxnchangegroup.bad hook exited with status 1
+  [255]
+  $ restore
+  $ hg log -G
+  o  changeset:   4:443431ffac4f
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     e
+  |
+  o  changeset:   3:65bd5f99a4a3
+  |  parent:      1:ef3a871183d7
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     d
+  |
+  | o  changeset:   2:264128213d29
+  |/   user:        test
+  |    date:        Thu Jan 01 00:00:00 1970 +0000
+  |    summary:     c
+  |
+  @  changeset:   1:ef3a871183d7
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     b
+  |
+  o  changeset:   0:9ab35a2d17cb
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     a
+  
 
 2 different branches: 2 strips
 
   $ hg strip 2 4
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/test/.hg/strip-backup/*-backup.hg (glob)
   $ hg log -G
   o  changeset:   2:65bd5f99a4a3
@@ -664,20 +704,20 @@ Make sure no one adds back a -b option:
   
   strip changesets and all their descendants from the repository
   
-  (use "hg help -e strip" to show help for the strip extension)
+  (use 'hg help -e strip' to show help for the strip extension)
   
   options ([+] can be repeated):
   
    -r --rev REV [+]        strip specified revision (optional, can specify
                            revisions without this option)
-   -f --force              force removal of changesets, discard uncommitted
+   -f --[no-]force         force removal of changesets, discard uncommitted
                            changes (no backup)
-      --no-backup          no backups
-   -k --keep               do not modify working directory during strip
+      --[no-]backup        no backups
+   -k --[no-]keep          do not modify working directory during strip
    -B --bookmark VALUE [+] remove revs only reachable from given bookmark
-      --mq                 operate on patch repository
+      --[no-]mq            operate on patch repository
   
-  (use "hg strip -h" to show more help)
+  (use 'hg strip -h' to show more help)
   [255]
 
   $ cd ..
@@ -891,7 +931,7 @@ Error during post-close callback of the strip transaction
   > EOF
   $ hg strip tip --config extensions.crash=$TESTTMP/crashstrip.py
   saved backup bundle to $TESTTMP/issue4736/.hg/strip-backup/5c51d8d6557d-70daef06-backup.hg (glob)
-  strip failed, full bundle stored in '$TESTTMP/issue4736/.hg/strip-backup/5c51d8d6557d-70daef06-backup.hg' (glob)
+  strip failed, backup bundle stored in '$TESTTMP/issue4736/.hg/strip-backup/5c51d8d6557d-70daef06-backup.hg' (glob)
   abort: boom
   [255]
 

@@ -19,10 +19,6 @@ It contains all the testing of the basic concepts of large file in a single bloc
   > usercache=${USERCACHE}
   > [hooks]
   > precommit=sh -c "echo \\"Invoking status precommit hook\\"; hg status"
-  > [experimental]
-  > # drop me once bundle2 is the default,
-  > # added to get test change early.
-  > bundle2-exp = True
   > EOF
 
 Create the repo with a couple of revisions of both large and normal
@@ -116,7 +112,7 @@ Test messages and exit codes for remove warning cases
   normalnew already tracked!
   $ hg remove normalnew largenew
   not removing largenew: file is untracked
-  not removing normalnew: file has been marked for add (use forget to undo)
+  not removing normalnew: file has been marked for add (use 'hg forget' to undo add)
   [1]
   $ rm normalnew largenew
   $ hg up -Cq

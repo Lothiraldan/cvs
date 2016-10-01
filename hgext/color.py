@@ -170,11 +170,11 @@ from mercurial import (
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
-# Note for extension authors: ONLY specify testedwith = 'internal' for
+# Note for extension authors: ONLY specify testedwith = 'ships-with-hg-core' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
 # be specifying the version(s) of Mercurial they are tested with, or
 # leave the attribute unspecified.
-testedwith = 'internal'
+testedwith = 'ships-with-hg-core'
 
 # start and stop parameters for effects
 _effects = {'none': 0, 'black': 30, 'red': 31, 'green': 32, 'yellow': 33,
@@ -558,8 +558,8 @@ else:
                     ('srWindow', _SMALL_RECT),
                     ('dwMaximumWindowSize', _COORD)]
 
-    _STD_OUTPUT_HANDLE = 0xfffffff5L # (DWORD)-11
-    _STD_ERROR_HANDLE = 0xfffffff4L  # (DWORD)-12
+    _STD_OUTPUT_HANDLE = 0xfffffff5 # (DWORD)-11
+    _STD_ERROR_HANDLE = 0xfffffff4  # (DWORD)-12
 
     _FOREGROUND_BLUE = 0x0001
     _FOREGROUND_GREEN = 0x0002

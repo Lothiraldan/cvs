@@ -882,6 +882,8 @@ class treemanifest(object):
 
     def writesubtrees(self, m1, m2, writesubtree):
         self._load() # for consistency; should never have any effect here
+        m1._load()
+        m2._load()
         emptytree = treemanifest()
         for d, subm in self._dirs.iteritems():
             subp1 = m1._dirs.get(d, emptytree)._node
@@ -890,12 +892,11 @@ class treemanifest(object):
                 subp1, subp2 = subp2, subp1
             writesubtree(subm, subp1, subp2)
 
-class manifest(revlog.revlog):
+class manifestrevlog(revlog.revlog):
+    '''A revlog that stores manifest texts. This is responsible for caching the
+    full-text manifest contents.
+    '''
     def __init__(self, opener, dir='', dirlogcache=None):
-        '''The 'dir' and 'dirlogcache' arguments are for internal use by
-        manifest.manifest only. External users should create a root manifest
-        log with manifest.manifest(opener) and call dirlog() on it.
-        '''
         # During normal operations, we expect to deal with not more than four
         # revs at a time (such as during commit --amend). When rebasing large
         # stacks of commits, the number can go up, hence the config knob below.
@@ -907,17 +908,18 @@ class manifest(revlog.revlog):
             cachesize = opts.get('manifestcachesize', cachesize)
             usetreemanifest = opts.get('treemanifest', usetreemanifest)
             usemanifestv2 = opts.get('manifestv2', usemanifestv2)
-        self._mancache = util.lrucachedict(cachesize)
-        self._treeinmem = usetreemanifest
+
         self._treeondisk = usetreemanifest
         self._usemanifestv2 = usemanifestv2
+
+        self._fulltextcache = util.lrucachedict(cachesize)
+
         indexfile = "00manifest.i"
         if dir:
-            assert self._treeondisk
+            assert self._treeondisk, 'opts is %r' % opts
             if not dir.endswith('/'):
                 dir = dir + '/'
             indexfile = "meta/" + dir + "00manifest.i"
-        revlog.revlog.__init__(self, opener, indexfile)
         self._dir = dir
         # The dirlogcache is kept on the root manifest log
         if dir:
@@ -925,12 +927,280 @@ class manifest(revlog.revlog):
         else:
             self._dirlogcache = {'': self}
 
+        super(manifestrevlog, self).__init__(opener, indexfile,
+                                             checkambig=bool(dir))
+
+    @property
+    def fulltextcache(self):
+        return self._fulltextcache
+
+    def clearcaches(self):
+        super(manifestrevlog, self).clearcaches()
+        self._fulltextcache.clear()
+        self._dirlogcache = {'': self}
+
+    def dirlog(self, dir):
+        if dir:
+            assert self._treeondisk
+        if dir not in self._dirlogcache:
+            self._dirlogcache[dir] = manifestrevlog(self.opener, dir,
+                                                    self._dirlogcache)
+        return self._dirlogcache[dir]
+
+    def add(self, m, transaction, link, p1, p2, added, removed):
+        if (p1 in self.fulltextcache and util.safehasattr(m, 'fastdelta')
+            and not self._usemanifestv2):
+            # If our first parent is in the manifest cache, we can
+            # compute a delta here using properties we know about the
+            # manifest up-front, which may save time later for the
+            # revlog layer.
+
+            _checkforbidden(added)
+            # combine the changed lists into one sorted iterator
+            work = heapq.merge([(x, False) for x in added],
+                               [(x, True) for x in removed])
+
+            arraytext, deltatext = m.fastdelta(self.fulltextcache[p1], work)
+            cachedelta = self.rev(p1), deltatext
+            text = util.buffer(arraytext)
+            n = self.addrevision(text, transaction, link, p1, p2, cachedelta)
+        else:
+            # The first parent manifest isn't already loaded, so we'll
+            # just encode a fulltext of the manifest and pass that
+            # through to the revlog layer, and let it handle the delta
+            # process.
+            if self._treeondisk:
+                m1 = self.read(p1)
+                m2 = self.read(p2)
+                n = self._addtree(m, transaction, link, m1, m2)
+                arraytext = None
+            else:
+                text = m.text(self._usemanifestv2)
+                n = self.addrevision(text, transaction, link, p1, p2)
+                arraytext = array.array('c', text)
+
+        self.fulltextcache[n] = arraytext
+
+        return n
+
+    def _addtree(self, m, transaction, link, m1, m2):
+        # If the manifest is unchanged compared to one parent,
+        # don't write a new revision
+        if m.unmodifiedsince(m1) or m.unmodifiedsince(m2):
+            return m.node()
+        def writesubtree(subm, subp1, subp2):
+            sublog = self.dirlog(subm.dir())
+            sublog.add(subm, transaction, link, subp1, subp2, None, None)
+        m.writesubtrees(m1, m2, writesubtree)
+        text = m.dirtext(self._usemanifestv2)
+        # Double-check whether contents are unchanged to one parent
+        if text == m1.dirtext(self._usemanifestv2):
+            n = m1.node()
+        elif text == m2.dirtext(self._usemanifestv2):
+            n = m2.node()
+        else:
+            n = self.addrevision(text, transaction, link, m1.node(), m2.node())
+        # Save nodeid so parent manifest can calculate its nodeid
+        m.setnode(n)
+        return n
+
+class manifestlog(object):
+    """A collection class representing the collection of manifest snapshots
+    referenced by commits in the repository.
+
+    In this situation, 'manifest' refers to the abstract concept of a snapshot
+    of the list of files in the given commit. Consumers of the output of this
+    class do not care about the implementation details of the actual manifests
+    they receive (i.e. tree or flat or lazily loaded, etc)."""
+    def __init__(self, opener, repo):
+        self._repo = repo
+
+        usetreemanifest = False
+
+        opts = getattr(opener, 'options', None)
+        if opts is not None:
+            usetreemanifest = opts.get('treemanifest', usetreemanifest)
+        self._treeinmem = usetreemanifest
+
+        # We'll separate this into it's own cache once oldmanifest is no longer
+        # used
+        self._mancache = repo.manifest._mancache
+
+    @property
+    def _revlog(self):
+        return self._repo.manifest
+
+    def __getitem__(self, node):
+        """Retrieves the manifest instance for the given node. Throws a KeyError
+        if not found.
+        """
+        if node in self._mancache:
+            cachemf = self._mancache[node]
+            # The old manifest may put non-ctx manifests in the cache, so skip
+            # those since they don't implement the full api.
+            if (isinstance(cachemf, manifestctx) or
+                isinstance(cachemf, treemanifestctx)):
+                return cachemf
+
+        if self._treeinmem:
+            m = treemanifestctx(self._revlog, '', node)
+        else:
+            m = manifestctx(self._revlog, node)
+        if node != revlog.nullid:
+            self._mancache[node] = m
+        return m
+
+    def add(self, m, transaction, link, p1, p2, added, removed):
+        return self._revlog.add(m, transaction, link, p1, p2, added, removed)
+
+class manifestctx(object):
+    """A class representing a single revision of a manifest, including its
+    contents, its parent revs, and its linkrev.
+    """
+    def __init__(self, revlog, node):
+        self._revlog = revlog
+        self._data = None
+
+        self._node = node
+
+        # TODO: We eventually want p1, p2, and linkrev exposed on this class,
+        # but let's add it later when something needs it and we can load it
+        # lazily.
+        #self.p1, self.p2 = revlog.parents(node)
+        #rev = revlog.rev(node)
+        #self.linkrev = revlog.linkrev(rev)
+
+    def node(self):
+        return self._node
+
+    def read(self):
+        if not self._data:
+            if self._node == revlog.nullid:
+                self._data = manifestdict()
+            else:
+                text = self._revlog.revision(self._node)
+                arraytext = array.array('c', text)
+                self._revlog._fulltextcache[self._node] = arraytext
+                self._data = manifestdict(text)
+        return self._data
+
+    def readfast(self):
+        rl = self._revlog
+        r = rl.rev(self._node)
+        deltaparent = rl.deltaparent(r)
+        if deltaparent != revlog.nullrev and deltaparent in rl.parentrevs(r):
+            return self.readdelta()
+        return self.read()
+
+    def readdelta(self):
+        revlog = self._revlog
+        if revlog._usemanifestv2:
+            # Need to perform a slow delta
+            r0 = revlog.deltaparent(revlog.rev(self._node))
+            m0 = manifestctx(revlog, revlog.node(r0)).read()
+            m1 = self.read()
+            md = manifestdict()
+            for f, ((n0, fl0), (n1, fl1)) in m0.diff(m1).iteritems():
+                if n1:
+                    md[f] = n1
+                    if fl1:
+                        md.setflag(f, fl1)
+            return md
+
+        r = revlog.rev(self._node)
+        d = mdiff.patchtext(revlog.revdiff(revlog.deltaparent(r), r))
+        return manifestdict(d)
+
+class treemanifestctx(object):
+    def __init__(self, revlog, dir, node):
+        revlog = revlog.dirlog(dir)
+        self._revlog = revlog
+        self._dir = dir
+        self._data = None
+
+        self._node = node
+
+        # TODO: Load p1/p2/linkrev lazily. They need to be lazily loaded so that
+        # we can instantiate treemanifestctx objects for directories we don't
+        # have on disk.
+        #self.p1, self.p2 = revlog.parents(node)
+        #rev = revlog.rev(node)
+        #self.linkrev = revlog.linkrev(rev)
+
+    def read(self):
+        if not self._data:
+            if self._node == revlog.nullid:
+                self._data = treemanifest()
+            elif self._revlog._treeondisk:
+                m = treemanifest(dir=self._dir)
+                def gettext():
+                    return self._revlog.revision(self._node)
+                def readsubtree(dir, subm):
+                    return treemanifestctx(self._revlog, dir, subm).read()
+                m.read(gettext, readsubtree)
+                m.setnode(self._node)
+                self._data = m
+            else:
+                text = self._revlog.revision(self._node)
+                arraytext = array.array('c', text)
+                self._revlog.fulltextcache[self._node] = arraytext
+                self._data = treemanifest(dir=self._dir, text=text)
+
+        return self._data
+
+    def node(self):
+        return self._node
+
+    def readdelta(self):
+        # Need to perform a slow delta
+        revlog = self._revlog
+        r0 = revlog.deltaparent(revlog.rev(self._node))
+        m0 = treemanifestctx(revlog, revlog.node(r0), dir=self._dir).read()
+        m1 = self.read()
+        md = treemanifest(dir=self._dir)
+        for f, ((n0, fl0), (n1, fl1)) in m0.diff(m1).iteritems():
+            if n1:
+                md[f] = n1
+                if fl1:
+                    md.setflag(f, fl1)
+        return md
+
+    def readfast(self):
+        rl = self._revlog
+        r = rl.rev(self._node)
+        deltaparent = rl.deltaparent(r)
+        if deltaparent != revlog.nullrev and deltaparent in rl.parentrevs(r):
+            return self.readdelta()
+        return self.read()
+
+class manifest(manifestrevlog):
+    def __init__(self, opener, dir='', dirlogcache=None):
+        '''The 'dir' and 'dirlogcache' arguments are for internal use by
+        manifest.manifest only. External users should create a root manifest
+        log with manifest.manifest(opener) and call dirlog() on it.
+        '''
+        # During normal operations, we expect to deal with not more than four
+        # revs at a time (such as during commit --amend). When rebasing large
+        # stacks of commits, the number can go up, hence the config knob below.
+        cachesize = 4
+        usetreemanifest = False
+        opts = getattr(opener, 'options', None)
+        if opts is not None:
+            cachesize = opts.get('manifestcachesize', cachesize)
+            usetreemanifest = opts.get('treemanifest', usetreemanifest)
+        self._mancache = util.lrucachedict(cachesize)
+        self._treeinmem = usetreemanifest
+        super(manifest, self).__init__(opener, dir=dir, dirlogcache=dirlogcache)
+
     def _newmanifest(self, data=''):
         if self._treeinmem:
             return treemanifest(self._dir, data)
         return manifestdict(data)
 
     def dirlog(self, dir):
+        """This overrides the base revlog implementation to allow construction
+        'manifest' types instead of manifestrevlog types. This is only needed
+        until we migrate off the 'manifest' type."""
         if dir:
             assert self._treeondisk
         if dir not in self._dirlogcache:
@@ -973,20 +1243,6 @@ class manifest(revlog.revlog):
         d = mdiff.patchtext(self.revdiff(self.deltaparent(r), r))
         return manifestdict(d)
 
-    def readfast(self, node):
-        '''use the faster of readdelta or read
-
-        This will return a manifest which is either only the files
-        added/modified relative to p1, or all files in the
-        manifest. Which one is returned depends on the codepath used
-        to retrieve the data.
-        '''
-        r = self.rev(node)
-        deltaparent = self.deltaparent(r)
-        if deltaparent != revlog.nullrev and deltaparent in self.parentrevs(r):
-            return self.readdelta(node)
-        return self.read(node)
-
     def readshallowfast(self, node):
         '''like readfast(), but calls readshallowdelta() instead of readdelta()
         '''
@@ -1000,7 +1256,11 @@ class manifest(revlog.revlog):
         if node == revlog.nullid:
             return self._newmanifest() # don't upset local cache
         if node in self._mancache:
-            return self._mancache[node][0]
+            cached = self._mancache[node]
+            if (isinstance(cached, manifestctx) or
+                isinstance(cached, treemanifestctx)):
+                cached = cached.read()
+            return cached
         if self._treeondisk:
             def gettext():
                 return self.revision(node)
@@ -1014,7 +1274,8 @@ class manifest(revlog.revlog):
             text = self.revision(node)
             m = self._newmanifest(text)
             arraytext = array.array('c', text)
-        self._mancache[node] = (m, arraytext)
+        self._mancache[node] = m
+        self.fulltextcache[node] = arraytext
         return m
 
     def readshallow(self, node):
@@ -1033,64 +1294,6 @@ class manifest(revlog.revlog):
         except KeyError:
             return None, None
 
-    def add(self, m, transaction, link, p1, p2, added, removed):
-        if (p1 in self._mancache and not self._treeinmem
-            and not self._usemanifestv2):
-            # If our first parent is in the manifest cache, we can
-            # compute a delta here using properties we know about the
-            # manifest up-front, which may save time later for the
-            # revlog layer.
-
-            _checkforbidden(added)
-            # combine the changed lists into one sorted iterator
-            work = heapq.merge([(x, False) for x in added],
-                               [(x, True) for x in removed])
-
-            arraytext, deltatext = m.fastdelta(self._mancache[p1][1], work)
-            cachedelta = self.rev(p1), deltatext
-            text = util.buffer(arraytext)
-            n = self.addrevision(text, transaction, link, p1, p2, cachedelta)
-        else:
-            # The first parent manifest isn't already loaded, so we'll
-            # just encode a fulltext of the manifest and pass that
-            # through to the revlog layer, and let it handle the delta
-            # process.
-            if self._treeondisk:
-                m1 = self.read(p1)
-                m2 = self.read(p2)
-                n = self._addtree(m, transaction, link, m1, m2)
-                arraytext = None
-            else:
-                text = m.text(self._usemanifestv2)
-                n = self.addrevision(text, transaction, link, p1, p2)
-                arraytext = array.array('c', text)
-
-        self._mancache[n] = (m, arraytext)
-
-        return n
-
-    def _addtree(self, m, transaction, link, m1, m2):
-        # If the manifest is unchanged compared to one parent,
-        # don't write a new revision
-        if m.unmodifiedsince(m1) or m.unmodifiedsince(m2):
-            return m.node()
-        def writesubtree(subm, subp1, subp2):
-            sublog = self.dirlog(subm.dir())
-            sublog.add(subm, transaction, link, subp1, subp2, None, None)
-        m.writesubtrees(m1, m2, writesubtree)
-        text = m.dirtext(self._usemanifestv2)
-        # Double-check whether contents are unchanged to one parent
-        if text == m1.dirtext(self._usemanifestv2):
-            n = m1.node()
-        elif text == m2.dirtext(self._usemanifestv2):
-            n = m2.node()
-        else:
-            n = self.addrevision(text, transaction, link, m1.node(), m2.node())
-        # Save nodeid so parent manifest can calculate its nodeid
-        m.setnode(n)
-        return n
-
     def clearcaches(self):
         super(manifest, self).clearcaches()
         self._mancache.clear()
-        self._dirlogcache = {'': self}

@@ -23,7 +23,7 @@ Short help:
    summary       summarize working directory state
    update        update working directory (or switch revisions)
   
-  (use "hg help" for the full list of commands or "hg -v" for details)
+  (use 'hg help' for the full list of commands or 'hg -v' for details)
 
   $ hg -q
    add           add the specified files on the next commit
@@ -123,7 +123,7 @@ Short help:
    templating    Template Usage
    urls          URL Paths
   
-  (use "hg help -v" to show built-in aliases and global options)
+  (use 'hg help -v' to show built-in aliases and global options)
 
   $ hg -q help
    add           add the specified files on the next commit
@@ -318,21 +318,21 @@ Test short command list with verbose option
       --cwd DIR           change working directory
    -y --noninteractive    do not prompt, automatically pick the first choice for
                           all prompts
-   -q --quiet             suppress output
-   -v --verbose           enable additional output
+   -q --[no-]quiet        suppress output
+   -v --[no-]verbose      enable additional output
       --config CONFIG [+] set/override config option (use 'section.name=value')
-      --debug             enable debugging output
-      --debugger          start debugger
+      --[no-]debug        enable debugging output
+      --[no-]debugger     start debugger
       --encoding ENCODE   set the charset encoding (default: ascii)
       --encodingmode MODE set the charset encoding mode (default: strict)
-      --traceback         always print a traceback on exception
-      --time              time how long the command takes
-      --profile           print command execution profile
+      --[no-]traceback    always print a traceback on exception
+      --[no-]time         time how long the command takes
+      --[no-]profile      print command execution profile
       --version           output version information and exit
    -h --help              display help and exit
-      --hidden            consider hidden changesets
+      --[no-]hidden       consider hidden changesets
   
-  (use "hg help" for the full list of commands)
+  (use 'hg help' for the full list of commands)
 
   $ hg add -h
   hg add [OPTION]... [FILE]...
@@ -353,8 +353,8 @@ Test short command list with verbose option
   
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
-   -S --subrepos            recurse into subrepositories
-   -n --dry-run             do not perform actions, just print output
+   -S --[no-]subrepos       recurse into subrepositories
+   -n --[no-]dry-run        do not perform actions, just print output
   
   (some details hidden, use --verbose to show complete help)
 
@@ -404,8 +404,8 @@ Verbose help for add
   
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
-   -S --subrepos            recurse into subrepositories
-   -n --dry-run             do not perform actions, just print output
+   -S --[no-]subrepos       recurse into subrepositories
+   -n --[no-]dry-run        do not perform actions, just print output
   
   global options ([+] can be repeated):
   
@@ -414,19 +414,19 @@ Verbose help for add
       --cwd DIR           change working directory
    -y --noninteractive    do not prompt, automatically pick the first choice for
                           all prompts
-   -q --quiet             suppress output
-   -v --verbose           enable additional output
+   -q --[no-]quiet        suppress output
+   -v --[no-]verbose      enable additional output
       --config CONFIG [+] set/override config option (use 'section.name=value')
-      --debug             enable debugging output
-      --debugger          start debugger
+      --[no-]debug        enable debugging output
+      --[no-]debugger     start debugger
       --encoding ENCODE   set the charset encoding (default: ascii)
       --encodingmode MODE set the charset encoding mode (default: strict)
-      --traceback         always print a traceback on exception
-      --time              time how long the command takes
-      --profile           print command execution profile
+      --[no-]traceback    always print a traceback on exception
+      --[no-]time         time how long the command takes
+      --[no-]profile      print command execution profile
       --version           output version information and exit
    -h --help              display help and exit
-      --hidden            consider hidden changesets
+      --[no-]hidden       consider hidden changesets
 
 Test the textwidth config option
 
@@ -464,10 +464,10 @@ Test help option with version option
   
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
-   -S --subrepos            recurse into subrepositories
-   -n --dry-run             do not perform actions, just print output
+   -S --[no-]subrepos       recurse into subrepositories
+   -n --[no-]dry-run        do not perform actions, just print output
   
-  (use "hg add -h" to show more help)
+  (use 'hg add -h' to show more help)
   [255]
 
 Test ambiguous command help
@@ -478,7 +478,7 @@ Test ambiguous command help
    add           add the specified files on the next commit
    addremove     add all new files, delete all missing files
   
-  (use "hg help -v ad" to show built-in aliases and global options)
+  (use 'hg help -v ad' to show built-in aliases and global options)
 
 Test command without options
 
@@ -534,23 +534,23 @@ Test command without options
   
   options ([+] can be repeated):
   
-   -r --rev REV [+]         revision
-   -c --change REV          change made by revision
-   -a --text                treat all files as text
-   -g --git                 use git extended diff format
-      --nodates             omit dates from diff headers
-      --noprefix            omit a/ and b/ prefixes from filenames
-   -p --show-function       show which function each change is in
-      --reverse             produce a diff that undoes the changes
-   -w --ignore-all-space    ignore white space when comparing lines
-   -b --ignore-space-change ignore changes in the amount of white space
-   -B --ignore-blank-lines  ignore changes whose lines are all blank
-   -U --unified NUM         number of lines of context to show
-      --stat                output diffstat-style summary of changes
-      --root DIR            produce diffs relative to subdirectory
-   -I --include PATTERN [+] include names matching the given patterns
-   -X --exclude PATTERN [+] exclude names matching the given patterns
-   -S --subrepos            recurse into subrepositories
+   -r --rev REV [+]              revision
+   -c --change REV               change made by revision
+   -a --[no-]text                treat all files as text
+   -g --[no-]git                 use git extended diff format
+      --[no-]nodates             omit dates from diff headers
+      --[no-]noprefix            omit a/ and b/ prefixes from filenames
+   -p --[no-]show-function       show which function each change is in
+      --[no-]reverse             produce a diff that undoes the changes
+   -w --[no-]ignore-all-space    ignore white space when comparing lines
+   -b --[no-]ignore-space-change ignore changes in the amount of white space
+   -B --[no-]ignore-blank-lines  ignore changes whose lines are all blank
+   -U --unified NUM              number of lines of context to show
+      --[no-]stat                output diffstat-style summary of changes
+      --root DIR                 produce diffs relative to subdirectory
+   -I --include PATTERN [+]      include names matching the given patterns
+   -X --exclude PATTERN [+]      exclude names matching the given patterns
+   -S --[no-]subrepos            recurse into subrepositories
   
   (some details hidden, use --verbose to show complete help)
 
@@ -596,22 +596,22 @@ Test command without options
   
   options ([+] can be repeated):
   
-   -A --all                 show status of all files
-   -m --modified            show only modified files
-   -a --added               show only added files
-   -r --removed             show only removed files
-   -d --deleted             show only deleted (but tracked) files
-   -c --clean               show only files without changes
-   -u --unknown             show only unknown (not tracked) files
-   -i --ignored             show only ignored files
-   -n --no-status           hide status prefix
-   -C --copies              show source of copied files
-   -0 --print0              end filenames with NUL, for use with xargs
+   -A --[no-]all            show status of all files
+   -m --[no-]modified       show only modified files
+   -a --[no-]added          show only added files
+   -r --[no-]removed        show only removed files
+   -d --[no-]deleted        show only deleted (but tracked) files
+   -c --[no-]clean          show only files without changes
+   -u --[no-]unknown        show only unknown (not tracked) files
+   -i --[no-]ignored        show only ignored files
+   -n --[no-]status         hide status prefix
+   -C --[no-]copies         show source of copied files
+   -0 --[no-]print0         end filenames with NUL, for use with xargs
       --rev REV [+]         show difference from revision
       --change REV          list the changed files of a revision
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
-   -S --subrepos            recurse into subrepositories
+   -S --[no-]subrepos       recurse into subrepositories
   
   (some details hidden, use --verbose to show complete help)
 
@@ -622,7 +622,7 @@ Test command without options
 
   $ hg help foo
   abort: no such help topic: foo
-  (try "hg help --keyword foo")
+  (try 'hg help --keyword foo')
   [255]
 
   $ hg skjdfks
@@ -649,7 +649,7 @@ Test command without options
    summary       summarize working directory state
    update        update working directory (or switch revisions)
   
-  (use "hg help" for the full list of commands or "hg -v" for details)
+  (use 'hg help' for the full list of commands or 'hg -v' for details)
   [255]
 
 
@@ -717,7 +717,7 @@ Test for aliases
   
   options:
   
-    --remote check for push and pull
+    --[no-]remote check for push and pull
   
   (some details hidden, use --verbose to show complete help)
 
@@ -743,7 +743,7 @@ Test command with no help text
   
       --longdesc VALUE xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (default: 3)
-   -n --               normal desc
+   -n --[no-]          normal desc
       --newline VALUE  line1 line2
   
   (some details hidden, use --verbose to show complete help)
@@ -842,7 +842,7 @@ Test that default list of commands omits extension commands
    templating    Template Usage
    urls          URL Paths
   
-  (use "hg help -v" to show built-in aliases and global options)
+  (use 'hg help -v' to show built-in aliases and global options)
 
 
 Test list of internal help commands
@@ -921,7 +921,7 @@ Test list of internal help commands
    debugwireargs
                  (no help text available)
   
-  (use "hg help -v debug" to show built-in aliases and global options)
+  (use 'hg help -v debug' to show built-in aliases and global options)
 
 internals topic renders index of available sub-topics
 
@@ -929,16 +929,17 @@ internals topic renders index of available sub-topics
   Technical implementation topics
   """""""""""""""""""""""""""""""
   
-       bundles       container for exchange of repository data
-       changegroups  representation of revlog data
-       requirements  repository requirements
-       revlogs       revision storage mechanism
+       bundles       Bundles
+       changegroups  Changegroups
+       requirements  Repository Requirements
+       revlogs       Revision Logs
+       wireprotocol  Wire Protocol
 
 sub-topics can be accessed
 
   $ hg help internals.changegroups
-      Changegroups
-      ============
+  Changegroups
+  """"""""""""
   
       Changegroups are representations of repository revlog data, specifically
       the changelog, manifest, and filelogs.
@@ -974,7 +975,7 @@ sub-topics can be accessed
       this an *empty chunk*.
   
       Delta Groups
-      ------------
+      ============
   
       A *delta group* expresses the content of a revlog as a series of deltas,
       or patches against previous revisions.
@@ -1050,21 +1051,21 @@ sub-topics can be accessed
       which can result in smaller deltas and more efficient encoding of data.
   
       Changeset Segment
-      -----------------
+      =================
   
       The *changeset segment* consists of a single *delta group* holding
       changelog data. It is followed by an *empty chunk* to denote the boundary
       to the *manifests segment*.
   
       Manifest Segment
-      ----------------
+      ================
   
       The *manifest segment* consists of a single *delta group* holding manifest
       data. It is followed by an *empty chunk* to denote the boundary to the
       *filelogs segment*.
   
       Filelogs Segment
-      ----------------
+      ================
   
       The *filelogs* segment consists of multiple sub-segments, each
       corresponding to an individual file whose data is being described:
@@ -1103,7 +1104,7 @@ Test list of commands with command with no help text
   
    nohelp        (no help text available)
   
-  (use "hg help -v helpext" to show built-in aliases and global options)
+  (use 'hg help -v helpext' to show built-in aliases and global options)
 
 
 test deprecated and experimental options are hidden in command help
@@ -1127,9 +1128,9 @@ test deprecated and experimental options are hidden in command help
 
 test deprecated and experimental options is shown with -v
   $ hg help -v debugoptDEP | grep dopt
-    --dopt option is (DEPRECATED)
+    --[no-]dopt option is (DEPRECATED)
   $ hg help -v debugoptEXP | grep eopt
-    --eopt option is (EXPERIMENTAL)
+    --[no-]eopt option is (EXPERIMENTAL)
 
 #if gettext
 test deprecated option is hidden with translation with untranslated description
@@ -1249,12 +1250,12 @@ Last item in help config.*:
 
   $ hg help config.`hg help config|grep '^    "'| \
   >       tail -1|sed 's![ "]*!!g'`| \
-  >   grep "hg help -c config" > /dev/null
+  >   grep 'hg help -c config' > /dev/null
   [1]
 
 note to use help -c for general hg help config:
 
-  $ hg help config |grep "hg help -c config" > /dev/null
+  $ hg help config |grep 'hg help -c config' > /dev/null
 
 Test templating help
 
@@ -1329,7 +1330,7 @@ Test -e / -c / -k combinations
   Extension Commands:
   $ hg help -c schemes
   abort: no such help topic: schemes
-  (try "hg help --keyword schemes")
+  (try 'hg help --keyword schemes')
   [255]
   $ hg help -e schemes |head -1
   schemes extension - extend schemes with shortcuts to repository swarms
@@ -1344,7 +1345,7 @@ Test -e / -c / -k combinations
   $ hg help -e -c commit > /dev/null
   $ hg help -e commit > /dev/null
   abort: no such help topic: commit
-  (try "hg help --keyword commit")
+  (try 'hg help --keyword commit')
   [255]
 
 Test keyword search help
@@ -1386,14 +1387,14 @@ Test unfound topic
 
   $ hg help nonexistingtopicthatwillneverexisteverever
   abort: no such help topic: nonexistingtopicthatwillneverexisteverever
-  (try "hg help --keyword nonexistingtopicthatwillneverexisteverever")
+  (try 'hg help --keyword nonexistingtopicthatwillneverexisteverever')
   [255]
 
 Test unfound keyword
 
   $ hg help --keyword nonexistingwordthatwillneverexisteverever
   abort: no matches
-  (try "hg help" for a list of topics)
+  (try 'hg help' for a list of topics)
   [255]
 
 Test omit indicating for help
@@ -1550,6 +1551,9 @@ Test section lookup
   $ hg help template.files
       files         List of strings. All files modified, added, or removed by
                     this changeset.
+      files(pattern)
+                    All files of the current changeset matching the pattern. See
+                    'hg help patterns'.
 
 Test section lookup by translated message
 
@@ -1588,7 +1592,7 @@ such str.lower().
   > subsequent section
   > ------------------
   > 
-  > This should be hidden at "hg help ambiguous" with section name.
+  > This should be hidden at 'hg help ambiguous' with section name.
   > '''
   > """ % (escape(upper), escape(lower)))
   > EOF
@@ -1622,6 +1626,17 @@ such str.lower().
   > [extensions]
   > ambiguous = !
   > EOF
+
+Show help content of disabled extensions
+
+  $ cat >> $HGRCPATH <<EOF
+  > [extensions]
+  > ambiguous = !./ambiguous.py
+  > EOF
+  $ hg help -e ambiguous
+  ambiguous extension - (no help text available)
+  
+  (use 'hg help extensions' for information on enabling extensions)
 
 Test dynamic list of merge tools only shows up once
   $ hg help merge-tools
@@ -1813,7 +1828,7 @@ Dish up an empty repo; serve it cold.
   number or hash, or <a href="/help/revsets">revset expression</a>.</div>
   </form>
   <table class="bigtable">
-  <tr><td colspan="2"><h2><a name="main" href="#topics">Topics</a></h2></td></tr>
+  <tr><td colspan="2"><h2><a name="topics" href="#topics">Topics</a></h2></td></tr>
   
   <tr><td>
   <a href="/help/config">
@@ -2459,10 +2474,10 @@ Dish up an empty repo; serve it cold.
   <td>--exclude PATTERN [+]</td>
   <td>exclude names matching the given patterns</td></tr>
   <tr><td>-S</td>
-  <td>--subrepos</td>
+  <td>--[no-]subrepos</td>
   <td>recurse into subrepositories</td></tr>
   <tr><td>-n</td>
-  <td>--dry-run</td>
+  <td>--[no-]dry-run</td>
   <td>do not perform actions, just print output</td></tr>
   </table>
   <p>
@@ -2479,19 +2494,19 @@ Dish up an empty repo; serve it cold.
   <td>--noninteractive</td>
   <td>do not prompt, automatically pick the first choice for all prompts</td></tr>
   <tr><td>-q</td>
-  <td>--quiet</td>
+  <td>--[no-]quiet</td>
   <td>suppress output</td></tr>
   <tr><td>-v</td>
-  <td>--verbose</td>
+  <td>--[no-]verbose</td>
   <td>enable additional output</td></tr>
   <tr><td></td>
   <td>--config CONFIG [+]</td>
   <td>set/override config option (use 'section.name=value')</td></tr>
   <tr><td></td>
-  <td>--debug</td>
+  <td>--[no-]debug</td>
   <td>enable debugging output</td></tr>
   <tr><td></td>
-  <td>--debugger</td>
+  <td>--[no-]debugger</td>
   <td>start debugger</td></tr>
   <tr><td></td>
   <td>--encoding ENCODE</td>
@@ -2500,13 +2515,13 @@ Dish up an empty repo; serve it cold.
   <td>--encodingmode MODE</td>
   <td>set the charset encoding mode (default: strict)</td></tr>
   <tr><td></td>
-  <td>--traceback</td>
+  <td>--[no-]traceback</td>
   <td>always print a traceback on exception</td></tr>
   <tr><td></td>
-  <td>--time</td>
+  <td>--[no-]time</td>
   <td>time how long the command takes</td></tr>
   <tr><td></td>
-  <td>--profile</td>
+  <td>--[no-]profile</td>
   <td>print command execution profile</td></tr>
   <tr><td></td>
   <td>--version</td>
@@ -2515,7 +2530,7 @@ Dish up an empty repo; serve it cold.
   <td>--help</td>
   <td>display help and exit</td></tr>
   <tr><td></td>
-  <td>--hidden</td>
+  <td>--[no-]hidden</td>
   <td>consider hidden changesets</td></tr>
   </table>
   
@@ -2646,13 +2661,13 @@ Dish up an empty repo; serve it cold.
   </p>
   <table>
   <tr><td>-A</td>
-  <td>--after</td>
+  <td>--[no-]after</td>
   <td>record delete for missing files</td></tr>
   <tr><td>-f</td>
-  <td>--force</td>
+  <td>--[no-]force</td>
   <td>forget added files, delete modified files</td></tr>
   <tr><td>-S</td>
-  <td>--subrepos</td>
+  <td>--[no-]subrepos</td>
   <td>recurse into subrepositories</td></tr>
   <tr><td>-I</td>
   <td>--include PATTERN [+]</td>
@@ -2675,19 +2690,19 @@ Dish up an empty repo; serve it cold.
   <td>--noninteractive</td>
   <td>do not prompt, automatically pick the first choice for all prompts</td></tr>
   <tr><td>-q</td>
-  <td>--quiet</td>
+  <td>--[no-]quiet</td>
   <td>suppress output</td></tr>
   <tr><td>-v</td>
-  <td>--verbose</td>
+  <td>--[no-]verbose</td>
   <td>enable additional output</td></tr>
   <tr><td></td>
   <td>--config CONFIG [+]</td>
   <td>set/override config option (use 'section.name=value')</td></tr>
   <tr><td></td>
-  <td>--debug</td>
+  <td>--[no-]debug</td>
   <td>enable debugging output</td></tr>
   <tr><td></td>
-  <td>--debugger</td>
+  <td>--[no-]debugger</td>
   <td>start debugger</td></tr>
   <tr><td></td>
   <td>--encoding ENCODE</td>
@@ -2696,13 +2711,13 @@ Dish up an empty repo; serve it cold.
   <td>--encodingmode MODE</td>
   <td>set the charset encoding mode (default: strict)</td></tr>
   <tr><td></td>
-  <td>--traceback</td>
+  <td>--[no-]traceback</td>
   <td>always print a traceback on exception</td></tr>
   <tr><td></td>
-  <td>--time</td>
+  <td>--[no-]time</td>
   <td>time how long the command takes</td></tr>
   <tr><td></td>
-  <td>--profile</td>
+  <td>--[no-]profile</td>
   <td>print command execution profile</td></tr>
   <tr><td></td>
   <td>--version</td>
@@ -2711,7 +2726,7 @@ Dish up an empty repo; serve it cold.
   <td>--help</td>
   <td>display help and exit</td></tr>
   <tr><td></td>
-  <td>--hidden</td>
+  <td>--[no-]hidden</td>
   <td>consider hidden changesets</td></tr>
   </table>
   
@@ -2865,35 +2880,42 @@ Sub-topic indexes rendered properly
   number or hash, or <a href="/help/revsets">revset expression</a>.</div>
   </form>
   <table class="bigtable">
-  <tr><td colspan="2"><h2><a name="main" href="#topics">Topics</a></h2></td></tr>
+  <tr><td colspan="2"><h2><a name="topics" href="#topics">Topics</a></h2></td></tr>
   
   <tr><td>
   <a href="/help/internals.bundles">
   bundles
   </a>
   </td><td>
-  container for exchange of repository data
+  Bundles
   </td></tr>
   <tr><td>
   <a href="/help/internals.changegroups">
   changegroups
   </a>
   </td><td>
-  representation of revlog data
+  Changegroups
   </td></tr>
   <tr><td>
   <a href="/help/internals.requirements">
   requirements
   </a>
   </td><td>
-  repository requirements
+  Repository Requirements
   </td></tr>
   <tr><td>
   <a href="/help/internals.revlogs">
   revlogs
   </a>
   </td><td>
-  revision storage mechanism
+  Revision Logs
+  </td></tr>
+  <tr><td>
+  <a href="/help/internals.wireprotocol">
+  wireprotocol
+  </a>
+  </td><td>
+  Wire Protocol
   </td></tr>
   
   
@@ -2957,8 +2979,7 @@ Sub-topic topics rendered properly
   number or hash, or <a href="/help/revsets">revset expression</a>.</div>
   </form>
   <div id="doc">
-  <h1>representation of revlog data</h1>
-  <h2>Changegroups</h2>
+  <h1>Changegroups</h1>
   <p>
   Changegroups are representations of repository revlog data, specifically
   the changelog, manifest, and filelogs.
@@ -3000,7 +3021,7 @@ Sub-topic topics rendered properly
   There is a special case chunk that has 0 length (&quot;0x00000000&quot;). We
   call this an *empty chunk*.
   </p>
-  <h3>Delta Groups</h3>
+  <h2>Delta Groups</h2>
   <p>
   A *delta group* expresses the content of a revlog as a series of deltas,
   or patches against previous revisions.
@@ -3091,19 +3112,19 @@ Sub-topic topics rendered properly
   changegroup. This allows the delta to be expressed against any parent,
   which can result in smaller deltas and more efficient encoding of data.
   </p>
-  <h3>Changeset Segment</h3>
+  <h2>Changeset Segment</h2>
   <p>
   The *changeset segment* consists of a single *delta group* holding
   changelog data. It is followed by an *empty chunk* to denote the
   boundary to the *manifests segment*.
   </p>
-  <h3>Manifest Segment</h3>
+  <h2>Manifest Segment</h2>
   <p>
   The *manifest segment* consists of a single *delta group* holding
   manifest data. It is followed by an *empty chunk* to denote the boundary
   to the *filelogs segment*.
   </p>
-  <h3>Filelogs Segment</h3>
+  <h2>Filelogs Segment</h2>
   <p>
   The *filelogs* segment consists of multiple sub-segments, each
   corresponding to an individual file whose data is being described:

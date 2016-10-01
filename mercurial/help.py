@@ -20,6 +20,7 @@ from . import (
     encoding,
     error,
     extensions,
+    fancyopts,
     filemerge,
     fileset,
     minirst,
@@ -65,6 +66,7 @@ def extshelp(ui):
 def optrst(header, options, verbose):
     data = []
     multioccur = False
+    alllong = set(o[1] for o in options)
     for option in options:
         if len(option) == 5:
             shortopt, longopt, default, desc, optlabel = option
@@ -87,6 +89,16 @@ def optrst(header, options, verbose):
             multioccur = True
         elif (default is not None) and not isinstance(default, bool):
             lo += " %s" % optlabel
+        elif longopt not in fancyopts.nevernegate:
+            if longopt.startswith('no-'):
+                # This odd if statement guards against showing
+                # --no-commit and --commit on backout (as a practical
+                # example) as --[no-]commit in help.
+                if (longopt[3:]) not in alllong:
+                    lo = '--[no-]' + lo[5:]
+            else:
+                if ('no-' + longopt) not in alllong:
+                    lo = '--[no-]' + lo[2:]
 
         data.append((so, lo, desc))
 
@@ -184,14 +196,16 @@ def loaddoc(topic, subdir=None):
     return loader
 
 internalstable = sorted([
-    (['bundles'], _('container for exchange of repository data'),
+    (['bundles'], _('Bundles'),
      loaddoc('bundles', subdir='internals')),
-    (['changegroups'], _('representation of revlog data'),
+    (['changegroups'], _('Changegroups'),
      loaddoc('changegroups', subdir='internals')),
-    (['requirements'], _('repository requirements'),
+    (['requirements'], _('Repository Requirements'),
      loaddoc('requirements', subdir='internals')),
-    (['revlogs'], _('revision storage mechanism'),
+    (['revlogs'], _('Revision Logs'),
      loaddoc('revlogs', subdir='internals')),
+    (['wireprotocol'], _('Wire Protocol'),
+     loaddoc('wireprotocol', subdir='internals')),
 ])
 
 def internalshelp(ui):
@@ -356,8 +370,8 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
             mod = extensions.find(name)
             doc = gettext(mod.__doc__) or ''
             if '\n' in doc.strip():
-                msg = _('(use "hg help -e %s" to show help for '
-                        'the %s extension)') % (name, name)
+                msg = _("(use 'hg help -e %s' to show help for "
+                        "the %s extension)") % (name, name)
                 rst.append('\n%s\n' % msg)
         except KeyError:
             pass
@@ -372,7 +386,7 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
 
         if not ui.verbose:
             if not full:
-                rst.append(_('\n(use "hg %s -h" to show more help)\n')
+                rst.append(_("\n(use 'hg %s -h' to show more help)\n")
                            % name)
             elif not ui.quiet:
                 rst.append(_('\n(some details hidden, use --verbose '
@@ -448,21 +462,21 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
             rst.append('\n%s\n' % optrst(_("global options"),
                                          commands.globalopts, ui.verbose))
             if name == 'shortlist':
-                rst.append(_('\n(use "hg help" for the full list '
-                             'of commands)\n'))
+                rst.append(_("\n(use 'hg help' for the full list "
+                             "of commands)\n"))
         else:
             if name == 'shortlist':
-                rst.append(_('\n(use "hg help" for the full list of commands '
-                             'or "hg -v" for details)\n'))
+                rst.append(_("\n(use 'hg help' for the full list of commands "
+                             "or 'hg -v' for details)\n"))
             elif name and not full:
-                rst.append(_('\n(use "hg help %s" to show the full help '
-                             'text)\n') % name)
+                rst.append(_("\n(use 'hg help %s' to show the full help "
+                             "text)\n") % name)
             elif name and cmds and name in cmds.keys():
-                rst.append(_('\n(use "hg help -v -e %s" to show built-in '
-                             'aliases and global options)\n') % name)
+                rst.append(_("\n(use 'hg help -v -e %s' to show built-in "
+                             "aliases and global options)\n") % name)
             else:
-                rst.append(_('\n(use "hg help -v%s" to show built-in aliases '
-                             'and global options)\n')
+                rst.append(_("\n(use 'hg help -v%s' to show built-in aliases "
+                             "and global options)\n")
                            % (name and " " + name or ""))
         return rst
 
@@ -496,8 +510,8 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
 
         try:
             cmdutil.findcmd(name, commands.table)
-            rst.append(_('\nuse "hg help -c %s" to see help for '
-                       'the %s command\n') % (name, name))
+            rst.append(_("\nuse 'hg help -c %s' to see help for "
+                       "the %s command\n") % (name, name))
         except error.UnknownCommand:
             pass
         return rst
@@ -534,8 +548,8 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
             modcmds = set([c.partition('|')[0] for c in ct])
             rst.extend(helplist(modcmds.__contains__))
         else:
-            rst.append(_('(use "hg help extensions" for information on enabling'
-                       ' extensions)\n'))
+            rst.append(_("(use 'hg help extensions' for information on enabling"
+                       " extensions)\n"))
         return rst
 
     def helpextcmd(name, subtopic=None):
@@ -547,8 +561,8 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
                               "extension:") % cmd, {ext: doc}, indent=4,
                        showdeprecated=True)
         rst.append('\n')
-        rst.append(_('(use "hg help extensions" for information on enabling '
-                   'extensions)\n'))
+        rst.append(_("(use 'hg help extensions' for information on enabling "
+                   "extensions)\n"))
         return rst
 
 
@@ -573,7 +587,7 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
                 rst.append('\n')
         if not rst:
             msg = _('no matches')
-            hint = _('try "hg help" for a list of topics')
+            hint = _("try 'hg help' for a list of topics")
             raise error.Abort(msg, hint=hint)
     elif name and name != 'shortlist':
         queries = []
@@ -596,7 +610,7 @@ def help_(ui, name, unknowncmd=False, full=True, subtopic=None, **opts):
                 raise error.UnknownCommand(name)
             else:
                 msg = _('no such help topic: %s') % name
-                hint = _('try "hg help --keyword %s"') % name
+                hint = _("try 'hg help --keyword %s'") % name
                 raise error.Abort(msg, hint=hint)
     else:
         # program name

@@ -516,7 +516,7 @@ push -f
   pushing subrepo s to $TESTTMP/t/s
   searching for changes
   abort: push creates new remote head 12a213df6fa9! (in subrepo s)
-  (merge or see "hg help push" for details about pushing new heads)
+  (merge or see 'hg help push' for details about pushing new heads)
   [255]
   $ hg push -f
   pushing to $TESTTMP/t (glob)
@@ -952,7 +952,7 @@ Issue1977: multirepo push should fail if subrepo push fails
   $ hg -R repo2 ci -m3
   $ hg -q -R repo2 push
   abort: push creates new remote head cc505f09a8b2! (in subrepo s)
-  (merge or see "hg help push" for details about pushing new heads)
+  (merge or see 'hg help push' for details about pushing new heads)
   [255]
   $ hg -R repo update
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -1529,7 +1529,7 @@ Courtesy phases synchronisation to publishing server does not block the push
   > [paths]
   > default=../issue3781-dest/
   > EOF
-  $ hg push --config experimental.bundle2-exp=False
+  $ hg push --config devel.legacy.exchange=bundle1
   pushing to $TESTTMP/issue3781-dest (glob)
   pushing subrepo s to $TESTTMP/issue3781-dest/s
   searching for changes
@@ -1539,7 +1539,7 @@ Courtesy phases synchronisation to publishing server does not block the push
   [1]
 # clean the push cache
   $ rm s/.hg/cache/storehash/*
-  $ hg push --config experimental.bundle2-exp=True
+  $ hg push # bundle2+
   pushing to $TESTTMP/issue3781-dest (glob)
   pushing subrepo s to $TESTTMP/issue3781-dest/s
   searching for changes

@@ -232,7 +232,7 @@ class digestchecker(object):
 try:
     buffer = buffer
 except NameError:
-    if sys.version_info[0] < 3:
+    if not pycompat.ispy3:
         def buffer(sliceable, offset=0):
             return sliceable[offset:]
     else:
@@ -651,7 +651,7 @@ class lrucachedict(object):
 
     def get(self, k, default=None):
         try:
-            return self._cache[k]
+            return self._cache[k].value
         except KeyError:
             return default
 
@@ -881,6 +881,8 @@ def nogc(func):
 
     This garbage collector issue have been fixed in 2.7.
     """
+    if sys.version >= (2, 7):
+        return func
     def wrapper(*args, **kwargs):
         gcenabled = gc.isenabled()
         gc.disable()
@@ -1012,10 +1014,7 @@ def system(cmd, environ=None, cwd=None, onerr=None, errprefix=None, out=None):
             proc = subprocess.Popen(cmd, shell=True, close_fds=closefds,
                                     env=env, cwd=cwd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT)
-            while True:
-                line = proc.stdout.readline()
-                if not line:
-                    break
+            for line in iter(proc.stdout.readline, ''):
                 out.write(line)
             proc.wait()
             rc = proc.returncode
@@ -1214,7 +1213,7 @@ def fstat(fp):
 
 # File system features
 
-def checkcase(path):
+def fscasesensitive(path):
     """
     Return true if the given path is on a case-sensitive filesystem
 
@@ -1342,6 +1341,10 @@ def checknlink(testfile):
     try:
         posixfile(f1, 'w').close()
     except IOError:
+        try:
+            os.unlink(f1)
+        except OSError:
+            pass
         return False
 
     f2 = testfile + ".hgtmp2"
@@ -1950,7 +1953,7 @@ def matchdate(date):
         except ValueError:
             raise Abort(_("invalid day spec: %s") % date[1:])
         if days < 0:
-            raise Abort(_('%s must be nonnegative (see "hg help dates")')
+            raise Abort(_("%s must be nonnegative (see 'hg help dates')")
                 % date[1:])
         when = makedate()[0] - days * 3600 * 24
         return lambda x: x >= when
@@ -2374,6 +2377,22 @@ class url(object):
     <url scheme: 'http', host: 'host', path: 'a', query: 'b', fragment: 'c'>
     >>> url('http://host/a?b#c', parsequery=False, parsefragment=False)
     <url scheme: 'http', host: 'host', path: 'a?b#c'>
+
+    Empty path:
+
+    >>> url('')
+    <url path: ''>
+    >>> url('#a')
+    <url path: '', fragment: 'a'>
+    >>> url('http://host/')
+    <url scheme: 'http', host: 'host', path: ''>
+    >>> url('http://host/#a')
+    <url scheme: 'http', host: 'host', path: '', fragment: 'a'>
+
+    Only scheme:
+
+    >>> url('http:')
+    <url scheme: 'http'>
     """
 
     _safechars = "!~*'()+"
@@ -2390,8 +2409,6 @@ class url(object):
 
         if parsefragment and '#' in path:
             path, self.fragment = path.split('#', 1)
-            if not path:
-                path = None
 
         # special case for Windows drive letters and UNC paths
         if hasdriveletter(path) or path.startswith(r'\\'):

@@ -22,6 +22,7 @@ from . import (
 )
 
 _extensions = {}
+_disabledextensions = {}
 _aftercallbacks = {}
 _order = []
 _builtin = set(['hbisect', 'bookmarks', 'parentrevspec', 'progress', 'interhg',
@@ -80,6 +81,8 @@ def _importh(name):
     return mod
 
 def _reportimporterror(ui, err, failed, next):
+    # note: this ui.debug happens before --debug is processed,
+    #       Use --config ui.debug=1 to see them.
     ui.debug('could not import %s (%s): trying %s\n'
              % (failed, err, next))
     if ui.debugflag:
@@ -104,7 +107,7 @@ def load(ui, name, path):
         try:
             mod = _importh("hgext.%s" % name)
         except ImportError as err:
-            _reportimporterror(ui, err, "hgext.%s" % name, name)
+            _reportimporterror(ui, err, "hgext.%s" % name, "hgext3rd.%s" % name)
             try:
                 mod = _importh("hgext3rd.%s" % name)
             except ImportError as err:
@@ -148,6 +151,7 @@ def loadall(ui):
     for (name, path) in result:
         if path:
             if path[0] == '!':
+                _disabledextensions[name] = path[1:]
                 continue
         try:
             load(ui, name, path)
@@ -210,11 +214,13 @@ def bind(func, *args):
         return func(*(args + a), **kw)
     return closure
 
-def _updatewrapper(wrap, origfn):
-    '''Copy attributes to wrapper function'''
+def _updatewrapper(wrap, origfn, unboundwrapper):
+    '''Copy and add some useful attributes to wrapper'''
     wrap.__module__ = getattr(origfn, '__module__')
     wrap.__doc__ = getattr(origfn, '__doc__')
     wrap.__dict__.update(getattr(origfn, '__dict__', {}))
+    wrap._origfunc = origfn
+    wrap._unboundwrapper = unboundwrapper
 
 def wrapcommand(table, command, wrapper, synopsis=None, docstring=None):
     '''Wrap the command named `command' in table
@@ -254,7 +260,7 @@ def wrapcommand(table, command, wrapper, synopsis=None, docstring=None):
 
     origfn = entry[0]
     wrap = bind(util.checksignature(wrapper), util.checksignature(origfn))
-    _updatewrapper(wrap, origfn)
+    _updatewrapper(wrap, origfn, wrapper)
     if docstring is not None:
         wrap.__doc__ += docstring
 
@@ -303,9 +309,45 @@ def wrapfunction(container, funcname, wrapper):
     origfn = getattr(container, funcname)
     assert callable(origfn)
     wrap = bind(wrapper, origfn)
-    _updatewrapper(wrap, origfn)
+    _updatewrapper(wrap, origfn, wrapper)
     setattr(container, funcname, wrap)
     return origfn
+
+def unwrapfunction(container, funcname, wrapper=None):
+    '''undo wrapfunction
+
+    If wrappers is None, undo the last wrap. Otherwise removes the wrapper
+    from the chain of wrappers.
+
+    Return the removed wrapper.
+    Raise IndexError if wrapper is None and nothing to unwrap; ValueError if
+    wrapper is not None but is not found in the wrapper chain.
+    '''
+    chain = getwrapperchain(container, funcname)
+    origfn = chain.pop()
+    if wrapper is None:
+        wrapper = chain[0]
+    chain.remove(wrapper)
+    setattr(container, funcname, origfn)
+    for w in reversed(chain):
+        wrapfunction(container, funcname, w)
+    return wrapper
+
+def getwrapperchain(container, funcname):
+    '''get a chain of wrappers of a function
+
+    Return a list of functions: [newest wrapper, ..., oldest wrapper, origfunc]
+
+    The wrapper functions are the ones passed to wrapfunction, whose first
+    argument is origfunc.
+    '''
+    result = []
+    fn = getattr(container, funcname)
+    while fn:
+        assert callable(fn)
+        result.append(getattr(fn, '_unboundwrapper', fn))
+        fn = getattr(fn, '_origfunc', None)
+    return result
 
 def _disabledpaths(strip_init=False):
     '''find paths of disabled extensions. returns a dict of {name: path}
@@ -332,6 +374,7 @@ def _disabledpaths(strip_init=False):
         if name in exts or name in _order or name == '__init__':
             continue
         exts[name] = path
+    exts.update(_disabledextensions)
     return exts
 
 def _moduledoc(file):
@@ -494,4 +537,4 @@ def moduleversion(module):
 
 def ismoduleinternal(module):
     exttestedwith = getattr(module, 'testedwith', None)
-    return exttestedwith == "internal"
+    return exttestedwith == "ships-with-hg-core"

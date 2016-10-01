@@ -1,12 +1,5 @@
 #require killdaemons
 
-  $ cat << EOF >> $HGRCPATH
-  > [experimental]
-  > # drop me once bundle2 is the default,
-  > # added to get test change early.
-  > bundle2-exp = True
-  > EOF
-
   $ hgph() { hg log -G --template "{rev} {phase} {desc} - {node|short}\n" $*; }
 
   $ mkcommit() {
@@ -927,7 +920,7 @@ appear on the remote side.
   pushing to ../mu
   searching for changes
   abort: push creates new remote head 435b5d83910c!
-  (merge or see "hg help push" for details about pushing new heads)
+  (merge or see 'hg help push' for details about pushing new heads)
   [255]
   $ hg push -fr 435b5d83910c ../mu # because the push will create new visible head
   pushing to ../mu
@@ -1048,7 +1041,7 @@ same over the wire
   $ cat ../beta.pid >> $DAEMON_PIDS
   $ cd ../gamma
 
-  $ hg pull http://localhost:$HGPORT/ --config experimental.bundle2-exp=True
+  $ hg pull http://localhost:$HGPORT/ # bundle2+
   pulling from http://localhost:$HGPORT/
   searching for changes
   no changes found
@@ -1057,7 +1050,7 @@ same over the wire
 
 enforce bundle1
 
-  $ hg pull http://localhost:$HGPORT/ --config experimental.bundle2-exp=False
+  $ hg pull http://localhost:$HGPORT/ --config devel.legacy.exchange=bundle1
   pulling from http://localhost:$HGPORT/
   searching for changes
   no changes found
