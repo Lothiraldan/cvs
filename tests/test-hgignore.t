@@ -1,6 +1,10 @@
   $ hg init ignorerepo
   $ cd ignorerepo
 
+debugignore with no hgignore should be deterministic:
+  $ hg debugignore
+  <nevermatcher>
+
 Issue562: .hgignore requires newline at end:
 
   $ touch foo
@@ -15,7 +19,7 @@ Issue562: .hgignore requires newline at end:
   > f.close()
   > EOF
 
-  $ python makeignore.py
+  $ $PYTHON makeignore.py
 
 Should display baz only:
 
@@ -164,7 +168,7 @@ Test relative ignore path (issue4473):
   A b.o
 
   $ hg debugignore
-  (?:(?:|.*/)[^/]*(?:/|$))
+  <includematcher includes='(?:(?:|.*/)[^/]*(?:/|$))'>
 
   $ hg debugignore b.o
   b.o is ignored
@@ -174,12 +178,17 @@ Test relative ignore path (issue4473):
 
 Check patterns that match only the directory
 
+"(fsmonitor !)" below assumes that fsmonitor is enabled with
+"walk_on_invalidate = false" (default), which doesn't involve
+re-walking whole repository at detection of .hgignore change.
+
   $ echo "^dir\$" > .hgignore
   $ hg status
   A dir/b.o
   ? .hgignore
   ? a.c
   ? a.o
+  ? dir/c.o (fsmonitor !)
   ? syntax
 
 Check recursive glob pattern matches no directories (dir/**/c.o matches dir/c.o)

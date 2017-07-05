@@ -148,19 +148,7 @@ def _hashignore(ignore):
 
     """
     sha1 = hashlib.sha1()
-    if util.safehasattr(ignore, 'includepat'):
-        sha1.update(ignore.includepat)
-    sha1.update('\0\0')
-    if util.safehasattr(ignore, 'excludepat'):
-        sha1.update(ignore.excludepat)
-    sha1.update('\0\0')
-    if util.safehasattr(ignore, 'patternspat'):
-        sha1.update(ignore.patternspat)
-    sha1.update('\0\0')
-    if util.safehasattr(ignore, '_files'):
-        for f in ignore._files:
-            sha1.update(f)
-    sha1.update('\0')
+    sha1.update(repr(ignore))
     return sha1.hexdigest()
 
 _watchmanencoding = pywatchman.encoding.get_local_encoding()
@@ -253,10 +241,10 @@ def overridewalk(orig, self, match, subrepos, unknown, ignored, full=True):
     fresh_instance = False
 
     exact = skipstep3 = False
-    if matchfn == match.exact:  # match.exact
+    if match.isexact():  # match.exact
         exact = True
         dirignore = util.always  # skip step 2
-    elif match.files() and not match.anypats():  # match.match, no patterns
+    elif match.prefix():  # match.match, no patterns
         skipstep3 = True
 
     if not exact and self._checkcase:
@@ -497,16 +485,13 @@ def overridestatus(
     else:
         stateunknown = listunknown
 
+    if updatestate:
+        ps = poststatus(startclock)
+        self.addpostdsstatus(ps)
+
     r = orig(node1, node2, match, listignored, listclean, stateunknown,
              listsubrepos)
     modified, added, removed, deleted, unknown, ignored, clean = r
-
-    if updatestate:
-        notefiles = modified + added + removed + deleted + unknown
-        self._fsmonitorstate.set(
-            self._fsmonitorstate.getlastclock() or startclock,
-            _hashignore(self.dirstate._ignore),
-            notefiles)
 
     if not listunknown:
         unknown = []
@@ -539,6 +524,17 @@ def overridestatus(
 
     return scmutil.status(
         modified, added, removed, deleted, unknown, ignored, clean)
+
+class poststatus(object):
+    def __init__(self, startclock):
+        self._startclock = startclock
+
+    def __call__(self, wctx, status):
+        clock = wctx.repo()._fsmonitorstate.getlastclock() or self._startclock
+        hashignore = _hashignore(wctx.repo().dirstate._ignore)
+        notefiles = (status.modified + status.added + status.removed +
+                     status.deleted + status.unknown)
+        wctx.repo()._fsmonitorstate.set(clock, hashignore, notefiles)
 
 def makedirstate(cls):
     class fsmonitordirstate(cls):
@@ -573,7 +569,8 @@ def wrapdirstate(orig, self):
     return ds
 
 def extsetup(ui):
-    wrapfilecache(localrepo.localrepository, 'dirstate', wrapdirstate)
+    extensions.wrapfilecache(
+        localrepo.localrepository, 'dirstate', wrapdirstate)
     if pycompat.sysplatform == 'darwin':
         # An assist for avoiding the dangling-symlink fsevents bug
         extensions.wrapfunction(os, 'symlink', wrapsymlink)
@@ -600,18 +597,31 @@ class state_update(object):
         self.node = node
         self.distance = distance
         self.partial = partial
+        self._lock = None
+        self.need_leave = False
 
     def __enter__(self):
-        self._state('state-enter')
+        # We explicitly need to take a lock here, before we proceed to update
+        # watchman about the update operation, so that we don't race with
+        # some other actor.  merge.update is going to take the wlock almost
+        # immediately anyway, so this is effectively extending the lock
+        # around a couple of short sanity checks.
+        self._lock = self.repo.wlock()
+        self.need_leave = self._state('state-enter')
         return self
 
     def __exit__(self, type_, value, tb):
-        status = 'ok' if type_ is None else 'failed'
-        self._state('state-leave', status=status)
+        try:
+            if self.need_leave:
+                status = 'ok' if type_ is None else 'failed'
+                self._state('state-leave', status=status)
+        finally:
+            if self._lock:
+                self._lock.release()
 
     def _state(self, cmd, status='ok'):
         if not util.safehasattr(self.repo, '_watchmanclient'):
-            return
+            return False
         try:
             commithash = self.repo[self.node].hex()
             self.repo._watchmanclient.command(cmd, {
@@ -626,10 +636,12 @@ class state_update(object):
                     # whether the working copy parent is changing
                     'partial': self.partial,
             }})
+            return True
         except Exception as e:
             # Swallow any errors; fire and forget
             self.repo.ui.log(
                 'watchman', 'Exception %s while running %s\n', e, cmd)
+            return False
 
 # Bracket working copy updates with calls to the watchman state-enter
 # and state-leave commands.  This allows clients to perform more intelligent
@@ -654,7 +666,7 @@ def wrapupdate(orig, repo, node, branchmerge, force, ancestor=None,
     with state_update(repo, node, distance, partial):
         return orig(
             repo, node, branchmerge, force, ancestor, mergeancestor,
-            labels, matcher, *kwargs)
+            labels, matcher, **kwargs)
 
 def reposetup(ui, repo):
     # We don't work with largefiles or inotify
@@ -692,11 +704,13 @@ def reposetup(ui, repo):
 
         # at this point since fsmonitorstate wasn't present, repo.dirstate is
         # not a fsmonitordirstate
-        repo.dirstate.__class__ = makedirstate(repo.dirstate.__class__)
-        # nuke the dirstate so that _fsmonitorinit and subsequent configuration
-        # changes take effect on it
-        del repo._filecache['dirstate']
-        delattr(repo.unfiltered(), 'dirstate')
+        dirstate = repo.dirstate
+        dirstate.__class__ = makedirstate(dirstate.__class__)
+        dirstate._fsmonitorinit(fsmonitorstate, client)
+        # invalidate property cache, but keep filecache which contains the
+        # wrapped dirstate object
+        del repo.unfiltered().__dict__['dirstate']
+        assert dirstate is repo._filecache['dirstate'].obj
 
         class fsmonitorrepo(repo.__class__):
             def status(self, *args, **kwargs):
@@ -704,21 +718,3 @@ def reposetup(ui, repo):
                 return overridestatus(orig, self, *args, **kwargs)
 
         repo.__class__ = fsmonitorrepo
-
-def wrapfilecache(cls, propname, wrapper):
-    """Wraps a filecache property. These can't be wrapped using the normal
-    wrapfunction. This should eventually go into upstream Mercurial.
-    """
-    assert callable(wrapper)
-    for currcls in cls.__mro__:
-        if propname in currcls.__dict__:
-            origfn = currcls.__dict__[propname].func
-            assert callable(origfn)
-            def wrap(*args, **kwargs):
-                return wrapper(origfn, *args, **kwargs)
-            currcls.__dict__[propname].func = wrap
-            break
-
-    if currcls is object:
-        raise AttributeError(
-            _("type '%s' has no property '%s'") % (cls, propname))

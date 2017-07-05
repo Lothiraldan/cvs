@@ -23,7 +23,6 @@ from mercurial.i18n import _
 from mercurial import (
     bookmarks,
     cmdutil,
-    commands,
     dispatch,
     error,
     extensions,
@@ -31,13 +30,14 @@ from mercurial import (
     localrepo,
     lock,
     node,
+    registrar,
     util,
 )
 
 from . import share
 
 cmdtable = {}
-command = cmdutil.command(cmdtable)
+command = registrar.command(cmdtable)
 
 # Note for extension authors: ONLY specify testedwith = 'ships-with-hg-core' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
@@ -158,7 +158,7 @@ def unsharejournal(orig, ui, repo, repopath):
             util.safehasattr(repo, 'journal')):
         sharedrepo = share._getsrcrepo(repo)
         sharedfeatures = _readsharedfeatures(repo)
-        if sharedrepo and sharedfeatures > set(['journal']):
+        if sharedrepo and sharedfeatures > {'journal'}:
             # there is a shared repository and there are shared journal entries
             # to copy. move shared date over from source to destination but
             # move the local file first
@@ -420,7 +420,7 @@ _ignoreopts = ('no-merges', 'graph')
     'journal', [
         ('', 'all', None, 'show history for all names'),
         ('c', 'commits', None, 'show commit metadata'),
-    ] + [opt for opt in commands.logopts if opt[1] not in _ignoreopts],
+    ] + [opt for opt in cmdutil.logopts if opt[1] not in _ignoreopts],
     '[OPTION]... [BOOKMARKNAME]')
 def journal(ui, repo, *args, **opts):
     """show the previous position of bookmarks and the working copy

@@ -11,7 +11,6 @@ from __future__ import absolute_import
 
 from mercurial.i18n import _
 from mercurial import (
-    cmdutil,
     registrar,
 )
 
@@ -22,7 +21,7 @@ from . import (
 )
 
 cmdtable = {}
-command = cmdutil.command(cmdtable)
+command = registrar.command(cmdtable)
 # Note for extension authors: ONLY specify testedwith = 'ships-with-hg-core' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
 # be specifying the version(s) of Mercurial they are tested with, or
@@ -182,8 +181,8 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
 
     where "original_branch_name" is the name of the branch in the
     source repository, and "new_branch_name" is the name of the branch
-    is the destination repository. No whitespace is allowed in the
-    branch names. This can be used to (for instance) move code in one
+    is the destination repository. No whitespace is allowed in the new
+    branch name. This can be used to (for instance) move code in one
     repository from "default" to a named branch.
 
     Mercurial Source

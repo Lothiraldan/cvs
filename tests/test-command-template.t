@@ -209,14 +209,29 @@ Make sure user/global hgrc does not affect tests
 
 Add some simple styles to settings
 
-  $ echo '[templates]' >> .hg/hgrc
-  $ printf 'simple = "{rev}\\n"\n' >> .hg/hgrc
-  $ printf 'simple2 = {rev}\\n\n' >> .hg/hgrc
+  $ cat <<'EOF' >> .hg/hgrc
+  > [templates]
+  > simple = "{rev}\n"
+  > simple2 = {rev}\n
+  > rev = "should not precede {rev} keyword\n"
+  > EOF
 
   $ hg log -l1 -Tsimple
   8
   $ hg log -l1 -Tsimple2
   8
+  $ hg log -l1 -Trev
+  should not precede 8 keyword
+  $ hg log -l1 -T '{simple}'
+  8
+
+Map file shouldn't see user templates:
+
+  $ cat <<EOF > tmpl
+  > changeset = 'nothing expanded:{simple}\n'
+  > EOF
+  $ hg log -l1 --style ./tmpl
+  nothing expanded:
 
 Test templates and style maps in files:
 
@@ -241,6 +256,38 @@ Test template map inheritance
   date:        Wed Jan 01 10:01:00 2020 +0000
   summary:     third
   
+
+Test docheader, docfooter and separator in template map
+
+  $ cat <<'EOF' > map-myjson
+  > docheader = '\{\n'
+  > docfooter = '\n}\n'
+  > separator = ',\n'
+  > changeset = ' {dict(rev, node|short)|json}'
+  > EOF
+  $ hg log -l2 -T./map-myjson
+  {
+   {"node": "95c24699272e", "rev": 8},
+   {"node": "29114dbae42b", "rev": 7}
+  }
+
+Test docheader, docfooter and separator in [templates] section
+
+  $ cat <<'EOF' >> .hg/hgrc
+  > [templates]
+  > myjson = ' {dict(rev, node|short)|json}'
+  > myjson:docheader = '\{\n'
+  > myjson:docfooter = '\n}\n'
+  > myjson:separator = ',\n'
+  > :docheader = 'should not be selected as a docheader for literal templates\n'
+  > EOF
+  $ hg log -l2 -Tmyjson
+  {
+   {"node": "95c24699272e", "rev": 8},
+   {"node": "29114dbae42b", "rev": 7}
+  }
+  $ hg log -l1 -T'{rev}\n'
+  8
 
 Template should precede style option
 
@@ -1180,7 +1227,10 @@ Check that recursive reference does not fall into RuntimeError (issue4758):
 
  common mistake:
 
-  $ hg log -T '{changeset}\n'
+  $ cat << EOF > issue4758
+  > changeset = '{changeset}\n'
+  > EOF
+  $ hg log --style ./issue4758
   abort: recursive reference 'changeset' in template
   [255]
 
@@ -1196,7 +1246,10 @@ Check that recursive reference does not fall into RuntimeError (issue4758):
 
  buildmap() -> gettemplate(), where no thunk was made:
 
-  $ hg log -T '{files % changeset}\n'
+  $ cat << EOF > issue4758
+  > changeset = '{files % changeset}\n'
+  > EOF
+  $ hg log --style ./issue4758
   abort: recursive reference 'changeset' in template
   [255]
 
@@ -3503,6 +3556,9 @@ Test shortest(node) function:
   hg: parse error: shortest() expects an integer minlength
   [255]
 
+  $ hg log -r 'wdir()' -T '{node|shortest}\n'
+  ffff
+
   $ cd ..
 
 Test shortest(node) with the repo having short hash collision:
@@ -3838,10 +3894,37 @@ Test active bookmark templating
 
 Test namespaces dict
 
-  $ hg log -T '{rev}{namespaces % " {namespace}={join(names, ",")}"}\n'
-  2 bookmarks=bar,foo tags=tip branches=text.{rev}
-  1 bookmarks=baz tags= branches=text.{rev}
-  0 bookmarks= tags= branches=default
+  $ hg --config extensions.revnamesext=$TESTDIR/revnamesext.py log -T '{rev}\n{namespaces % " {namespace} color={colorname} builtin={builtin}\n  {join(names, ",")}\n"}\n'
+  2
+   bookmarks color=bookmark builtin=True
+    bar,foo
+   tags color=tag builtin=True
+    tip
+   branches color=branch builtin=True
+    text.{rev}
+   revnames color=revname builtin=False
+    r2
+  
+  1
+   bookmarks color=bookmark builtin=True
+    baz
+   tags color=tag builtin=True
+    
+   branches color=branch builtin=True
+    text.{rev}
+   revnames color=revname builtin=False
+    r1
+  
+  0
+   bookmarks color=bookmark builtin=True
+    
+   tags color=tag builtin=True
+    
+   branches color=branch builtin=True
+    default
+   revnames color=revname builtin=False
+    r0
+  
   $ hg log -r2 -T '{namespaces % "{namespace}: {names}\n"}'
   bookmarks: bar foo
   tags: tip

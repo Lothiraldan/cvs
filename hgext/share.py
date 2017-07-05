@@ -43,11 +43,11 @@ import errno
 from mercurial.i18n import _
 from mercurial import (
     bookmarks,
-    cmdutil,
     commands,
     error,
     extensions,
     hg,
+    registrar,
     txnutil,
     util,
 )
@@ -56,7 +56,7 @@ repository = hg.repository
 parseurl = hg.parseurl
 
 cmdtable = {}
-command = cmdutil.command(cmdtable)
+command = registrar.command(cmdtable)
 # Note for extension authors: ONLY specify testedwith = 'ships-with-hg-core' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
 # be specifying the version(s) of Mercurial they are tested with, or
@@ -132,10 +132,10 @@ def clone(orig, ui, source, *args, **opts):
     if pool:
         pool = util.expandpath(pool)
 
-    opts['shareopts'] = dict(
-        pool=pool,
-        mode=ui.config('share', 'poolnaming', 'identity'),
-    )
+    opts[r'shareopts'] = {
+        'pool': pool,
+        'mode': ui.config('share', 'poolnaming', 'identity'),
+    }
 
     return orig(ui, source, *args, **opts)
 

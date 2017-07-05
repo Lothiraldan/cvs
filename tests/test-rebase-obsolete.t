@@ -902,7 +902,7 @@ rebase source is obsoleted (issue5198)
   $ hg up 9520eea781bc
   1 files updated, 0 files merged, 2 files removed, 0 files unresolved
   $ echo 1 >> E
-  $ hg commit --amend -m "E'"
+  $ hg commit --amend -m "E'" -d "0 0"
   $ hg log -G
   @  9:69abe8906104 E'
   |
@@ -967,7 +967,7 @@ equivalents in destination
   $ hg up 2 && hg log -r .  # working dir is at rev 2 again
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   2:1e9a3c00cbe9 b (no-eol)
-  $ hg rebase -r 2 -d 3
+  $ hg rebase -r 2 -d 3 --config experimental.evolution.track-operation=1
   note: not rebasing 2:1e9a3c00cbe9 "b" (mybook), already in destination as 3:be1832deae9a "b"
 Check that working directory was updated to rev 3 although rev 2 was skipped
 during the rebase operation
@@ -978,3 +978,5 @@ Check that bookmark was moved to rev 3 although rev 2 was skipped
 during the rebase operation
   $ hg bookmarks
      mybook                    3:be1832deae9a
+  $ hg debugobsolete --rev tip
+  1e9a3c00cbe90d236ac05ef61efcc5e40b7412bc be1832deae9ac531caa7438b8dcf6055a122cd8e 0 (*) {'user': 'test'} (glob)

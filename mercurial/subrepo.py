@@ -538,7 +538,7 @@ class abstractsubrepo(object):
         self.ui.warn("%s: %s" % (prefix, _("addremove is not supported")))
         return 1
 
-    def cat(self, match, prefix, **opts):
+    def cat(self, match, fm, fntemplate, prefix, **opts):
         return 1
 
     def status(self, rev2, **opts):
@@ -767,10 +767,11 @@ class hgsubrepo(abstractsubrepo):
                                  dry_run, similarity)
 
     @annotatesubrepoerror
-    def cat(self, match, prefix, **opts):
+    def cat(self, match, fm, fntemplate, prefix, **opts):
         rev = self._state[1]
         ctx = self._repo[rev]
-        return cmdutil.cat(self.ui, self._repo, ctx, match, prefix, **opts)
+        return cmdutil.cat(self.ui, self._repo, ctx, match, fm, fntemplate,
+                           prefix, **opts)
 
     @annotatesubrepoerror
     def status(self, rev2, **opts):
@@ -1771,7 +1772,7 @@ class gitsubrepo(abstractsubrepo):
                 if exact:
                     rejected.append(f)
                 continue
-            if not opts.get('dry_run'):
+            if not opts.get(r'dry_run'):
                 self._gitcommand(command + [f])
 
         for f in rejected:
@@ -1832,7 +1833,7 @@ class gitsubrepo(abstractsubrepo):
 
 
     @annotatesubrepoerror
-    def cat(self, match, prefix, **opts):
+    def cat(self, match, fm, fntemplate, prefix, **opts):
         rev = self._state[1]
         if match.anypats():
             return 1 #No support for include/exclude yet
@@ -1840,9 +1841,10 @@ class gitsubrepo(abstractsubrepo):
         if not match.files():
             return 1
 
+        # TODO: add support for non-plain formatter (see cmdutil.cat())
         for f in match.files():
             output = self._gitcommand(["show", "%s:%s" % (rev, f)])
-            fp = cmdutil.makefileobj(self._subparent, opts.get('output'),
+            fp = cmdutil.makefileobj(self._subparent, fntemplate,
                                      self._ctx.node(),
                                      pathname=self.wvfs.reljoin(prefix, f))
             fp.write(output)
@@ -1878,9 +1880,9 @@ class gitsubrepo(abstractsubrepo):
         deleted, unknown, ignored, clean = [], [], [], []
 
         command = ['status', '--porcelain', '-z']
-        if opts.get('unknown'):
+        if opts.get(r'unknown'):
             command += ['--untracked-files=all']
-        if opts.get('ignored'):
+        if opts.get(r'ignored'):
             command += ['--ignored']
         out = self._gitcommand(command)
 
@@ -1908,7 +1910,7 @@ class gitsubrepo(abstractsubrepo):
             elif st == '!!':
                 ignored.append(filename1)
 
-        if opts.get('clean'):
+        if opts.get(r'clean'):
             out = self._gitcommand(['ls-files'])
             for f in out.split('\n'):
                 if not f in changedfiles:
@@ -1921,7 +1923,7 @@ class gitsubrepo(abstractsubrepo):
     def diff(self, ui, diffopts, node2, match, prefix, **opts):
         node1 = self._state[1]
         cmd = ['diff', '--no-renames']
-        if opts['stat']:
+        if opts[r'stat']:
             cmd.append('--stat')
         else:
             # for Git, this also implies '-p'
@@ -1964,7 +1966,7 @@ class gitsubrepo(abstractsubrepo):
     @annotatesubrepoerror
     def revert(self, substate, *pats, **opts):
         self.ui.status(_('reverting subrepo %s\n') % substate[0])
-        if not opts.get('no_backup'):
+        if not opts.get(r'no_backup'):
             status = self.status(None)
             names = status.modified
             for name in names:
@@ -1973,7 +1975,7 @@ class gitsubrepo(abstractsubrepo):
                         (name, bakname))
                 self.wvfs.rename(name, bakname)
 
-        if not opts.get('dry_run'):
+        if not opts.get(r'dry_run'):
             self.get(substate, overwrite=True)
         return []
 

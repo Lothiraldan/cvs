@@ -13,9 +13,14 @@ from mercurial import (
     ancestor,
     debugcommands,
     hg,
+    pycompat,
     ui as uimod,
     util,
 )
+
+if pycompat.ispy3:
+    long = int
+    xrange = range
 
 def buildgraph(rng, nodes=100, rootprob=0.05, mergeprob=0.2, prevprob=0.7):
     '''nodes: total number of nodes in the graph
@@ -37,7 +42,7 @@ def buildgraph(rng, nodes=100, rootprob=0.05, mergeprob=0.2, prevprob=0.7):
                 p1 = i - 1
             else:
                 p1 = rng.randrange(i - 1)
-            p2 = rng.choice(range(0, p1) + range(p1 + 1, i))
+            p2 = rng.choice(list(range(0, p1)) + list(range(p1 + 1, i)))
             graph[i] = [p1, p2]
         elif rng.random() < prevprob:
             graph[i] = [i - 1]
@@ -49,7 +54,7 @@ def buildgraph(rng, nodes=100, rootprob=0.05, mergeprob=0.2, prevprob=0.7):
 def buildancestorsets(graph):
     ancs = [None] * len(graph)
     for i in xrange(len(graph)):
-        ancs[i] = set([i])
+        ancs[i] = {i}
         if graph[i] == [nullrev]:
             continue
         for p in graph[i]:
@@ -220,7 +225,7 @@ dagtests = [
 def test_gca():
     u = uimod.ui.load()
     for i, dag in enumerate(dagtests):
-        repo = hg.repository(u, 'gca%d' % i, create=1)
+        repo = hg.repository(u, b'gca%d' % i, create=1)
         cl = repo.changelog
         if not util.safehasattr(cl.index, 'ancestors'):
             # C version not available

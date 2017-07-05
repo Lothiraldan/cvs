@@ -52,6 +52,8 @@ Ensure branchcache got copied over:
   checkisexec (execbit !)
   checklink (symlink !)
   checklink-target (symlink !)
+  rbc-names-v1
+  rbc-revs-v1
 
   $ cat a
   a
@@ -99,6 +101,8 @@ Ensure branchcache got copied over:
 
   $ ls .hg/cache
   branch2-served
+  rbc-names-v1
+  rbc-revs-v1
 
   $ cat a 2>/dev/null || echo "a not present"
   a not present
@@ -520,7 +524,7 @@ iterable in addbranchrevs()
   > hg.clone(myui, {}, repo, dest="ua")
   > EOF
 
-  $ python simpleclone.py
+  $ $PYTHON simpleclone.py
   updating to branch default
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
@@ -534,7 +538,7 @@ iterable in addbranchrevs()
   > hg.clone(myui, {}, repo, dest="ua", branch=["stable",])
   > EOF
 
-  $ python branchclone.py
+  $ $PYTHON branchclone.py
   adding changesets
   adding manifests
   adding file changes

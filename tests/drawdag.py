@@ -72,6 +72,13 @@ as expected - the result would be an isomorphic graph::
 
 This is because 'o' is specially handled in the input: instead of using 'o' as
 the node name, the word to the right will be used.
+
+Some special comments could have side effects:
+
+    - Create obsmarkers
+      # replace: A -> B -> C -> D  # chained 1 to 1 replacements
+      # split: A -> B, C           # 1 to many
+      # prune: A, B, C             # many to nothing
 """
 from __future__ import absolute_import, print_function
 
@@ -80,16 +87,17 @@ import itertools
 
 from mercurial.i18n import _
 from mercurial import (
-    cmdutil,
     context,
     error,
     node,
+    obsolete,
+    registrar,
     scmutil,
     tags as tagsmod,
 )
 
 cmdtable = {}
-command = cmdutil.command(cmdtable)
+command = registrar.command(cmdtable)
 
 _pipechars = '\\/+-|'
 _nonpipechars = ''.join(chr(i) for i in xrange(33, 127)
@@ -145,7 +153,7 @@ def _parseasciigraph(text):
     def parents(y, x):
         """(int, int) -> [str]. follow the ASCII edges at given position,
         return a list of parents"""
-        visited = set([(y, x)])
+        visited = {(y, x)}
         visit = []
         result = []
 
@@ -213,6 +221,9 @@ class simplefilectx(object):
 
     def data(self):
         return self._data
+
+    def filenode(self):
+        return None
 
     def path(self):
         return self._path
@@ -311,3 +322,33 @@ def debugdrawdag(ui, repo, **opts):
         committed[name] = n
         tagsmod.tag(repo, name, n, message=None, user=None, date=None,
                     local=True)
+
+    # handle special comments
+    with repo.wlock(), repo.lock(), repo.transaction('drawdag'):
+        getctx = lambda x: repo.unfiltered()[committed[x.strip()]]
+        for line in text.splitlines():
+            if ' # ' not in line:
+                continue
+
+            rels = [] # obsolete relationships
+            comment = line.split(' # ', 1)[1].split(' # ')[0].strip()
+            args = comment.split(':', 1)
+            if len(args) <= 1:
+                continue
+
+            cmd = args[0].strip()
+            arg = args[1].strip()
+
+            if cmd in ('replace', 'rebase', 'amend'):
+                nodes = [getctx(m) for m in arg.split('->')]
+                for i in range(len(nodes) - 1):
+                    rels.append((nodes[i], (nodes[i + 1],)))
+            elif cmd in ('split',):
+                pre, succs = arg.split('->')
+                succs = succs.split(',')
+                rels.append((getctx(pre), (getctx(s) for s in succs)))
+            elif cmd in ('prune',):
+                for n in arg.split(','):
+                    rels.append((getctx(n), ()))
+            if rels:
+                obsolete.createmarkers(repo, rels, date=(0, 0), operation=cmd)

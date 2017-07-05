@@ -14,6 +14,8 @@ from mercurial import (
     lock as lockmod,
     merge,
     node as nodemod,
+    pycompat,
+    registrar,
     repair,
     scmutil,
     util,
@@ -22,7 +24,7 @@ nullid = nodemod.nullid
 release = lockmod.release
 
 cmdtable = {}
-command = cmdutil.command(cmdtable)
+command = registrar.command(cmdtable)
 # Note for extension authors: ONLY specify testedwith = 'ships-with-hg-core' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
 # be specifying the version(s) of Mercurial they are tested with, or
@@ -57,10 +59,7 @@ def checklocalchanges(repo, force=False, excsuffix=''):
     return s
 
 def strip(ui, repo, revs, update=True, backup=True, force=None, bookmarks=None):
-    wlock = lock = None
-    try:
-        wlock = repo.wlock()
-        lock = repo.lock()
+    with repo.wlock(), repo.lock():
 
         if update:
             checklocalchanges(repo, force=force)
@@ -84,9 +83,6 @@ def strip(ui, repo, revs, update=True, backup=True, force=None, bookmarks=None):
                 repomarks.recordchange(tr)
             for bookmark in sorted(bookmarks):
                 ui.write(_("bookmark '%s' deleted\n") % bookmark)
-    finally:
-        release(lock, wlock)
-
 
 @command("strip",
          [
@@ -132,6 +128,7 @@ def stripcmd(ui, repo, *revs, **opts):
 
     Return 0 on success.
     """
+    opts = pycompat.byteskwargs(opts)
     backup = True
     if opts.get('no_backup') or opts.get('nobackup'):
         backup = False
@@ -159,18 +156,12 @@ def stripcmd(ui, repo, *revs, **opts):
                     rsrevs = repair.stripbmrevset(repo, marks[0])
                     revs.update(set(rsrevs))
             if not revs:
-                lock = tr = None
-                try:
-                    lock = repo.lock()
-                    tr = repo.transaction('bookmark')
+                with repo.lock(), repo.transaction('bookmark') as tr:
                     for bookmark in bookmarks:
                         del repomarks[bookmark]
                     repomarks.recordchange(tr)
-                    tr.close()
-                    for bookmark in sorted(bookmarks):
-                        ui.write(_("bookmark '%s' deleted\n") % bookmark)
-                finally:
-                    release(lock, tr)
+                for bookmark in sorted(bookmarks):
+                    ui.write(_("bookmark '%s' deleted\n") % bookmark)
 
         if not revs:
             raise error.Abort(_('empty revision set'))

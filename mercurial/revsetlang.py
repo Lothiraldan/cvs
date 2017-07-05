@@ -44,9 +44,9 @@ elements = {
     "end": (0, None, None, None, None),
 }
 
-keywords = set(['and', 'or', 'not'])
+keywords = {'and', 'or', 'not'}
 
-_quoteletters = set(['"', "'"])
+_quoteletters = {'"', "'"}
 _simpleopletters = set(pycompat.iterbytestr("():=,-|&+!~^%"))
 
 # default set of valid characters for the initial letter of symbols
@@ -236,6 +236,25 @@ def getargsdict(x, funcname, keys):
     return parser.buildargsdict(getlist(x), funcname, parser.splitargspec(keys),
                                 keyvaluenode='keyvalue', keynode='symbol')
 
+def _isnamedfunc(x, funcname):
+    """Check if given tree matches named function"""
+    return x and x[0] == 'func' and getsymbol(x[1]) == funcname
+
+def _isposargs(x, n):
+    """Check if given tree is n-length list of positional arguments"""
+    l = getlist(x)
+    return len(l) == n and all(y and y[0] != 'keyvalue' for y in l)
+
+def _matchnamedfunc(x, funcname):
+    """Return args tree if given tree matches named function; otherwise None
+
+    This can't be used for testing a nullary function since its args tree
+    is also None. Use _isnamedfunc() instead.
+    """
+    if not _isnamedfunc(x, funcname):
+        return
+    return x[2]
+
 # Constants for ordering requirement, used in _analyze():
 #
 # If 'define', any nested functions and operations can change the ordering of
@@ -286,14 +305,10 @@ def _matchonly(revs, bases):
     >>> f('ancestors(A)', 'not ancestors(B)')
     ('list', ('symbol', 'A'), ('symbol', 'B'))
     """
-    if (revs is not None
-        and revs[0] == 'func'
-        and getsymbol(revs[1]) == 'ancestors'
-        and bases is not None
-        and bases[0] == 'not'
-        and bases[1][0] == 'func'
-        and getsymbol(bases[1][1]) == 'ancestors'):
-        return ('list', revs[2], bases[1][2])
+    ta = _matchnamedfunc(revs, 'ancestors')
+    tb = bases and bases[0] == 'not' and _matchnamedfunc(bases[1], 'ancestors')
+    if _isposargs(ta, 1) and _isposargs(tb, 1):
+        return ('list', ta, tb)
 
 def _fixops(x):
     """Rewrite raw parsed tree to resolve ambiguous syntax which cannot be

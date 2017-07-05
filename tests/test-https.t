@@ -333,20 +333,9 @@ Disabling the TLS 1.0 warning works
   > --config hostsecurity.disabletls10warning=true
   5fed3813f7f5
 
-#if no-sslcontext no-py27+
-Setting ciphers doesn't work in Python 2.6
-  $ P="$CERTSDIR" hg --config hostsecurity.ciphers=HIGH -R copy-pull id https://localhost:$HGPORT/
-  warning: connecting to localhost using legacy security technology (TLS 1.0); see https://mercurial-scm.org/wiki/SecureConnections for more info
-  abort: setting ciphers in [hostsecurity] is not supported by this version of Python
-  (remove the config option or run Mercurial with a modern Python version (preferred))
-  [255]
-#endif
+Error message for setting ciphers is different depending on SSLContext support
 
-Setting ciphers works in Python 2.7+ but the error message is different on
-legacy ssl. We test legacy once and do more feature checking on modern
-configs.
-
-#if py27+ no-sslcontext
+#if no-sslcontext
   $ P="$CERTSDIR" hg --config hostsecurity.ciphers=invalid -R copy-pull id https://localhost:$HGPORT/
   warning: connecting to localhost using legacy security technology (TLS 1.0); see https://mercurial-scm.org/wiki/SecureConnections for more info
   abort: *No cipher can be selected. (glob)
@@ -383,7 +372,7 @@ Fingerprints
 - works without cacerts (hostfingerprints)
   $ hg -R copy-pull id https://localhost:$HGPORT/ --insecure --config hostfingerprints.localhost=ec:d8:7c:d6:b3:86:d0:4f:c1:b8:b4:1c:9d:8f:5e:16:8e:ef:1c:03
   warning: connecting to localhost using legacy security technology (TLS 1.0); see https://mercurial-scm.org/wiki/SecureConnections for more info (?)
-  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, set the following config value in [hostsecurity] and remove the old one from [hostfingerprints] to upgrade to a more secure SHA-256 fingerprint: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
+  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, remove the old SHA-1 fingerprint from [hostfingerprints] and add the following entry to the new [hostsecurity] section: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
   5fed3813f7f5
 
 - works without cacerts (hostsecurity)
@@ -398,7 +387,7 @@ Fingerprints
 - multiple fingerprints specified and first matches
   $ hg --config 'hostfingerprints.localhost=ecd87cd6b386d04fc1b8b41c9d8f5e168eef1c03, deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' -R copy-pull id https://localhost:$HGPORT/ --insecure
   warning: connecting to localhost using legacy security technology (TLS 1.0); see https://mercurial-scm.org/wiki/SecureConnections for more info (?)
-  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, set the following config value in [hostsecurity] and remove the old one from [hostfingerprints] to upgrade to a more secure SHA-256 fingerprint: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
+  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, remove the old SHA-1 fingerprint from [hostfingerprints] and add the following entry to the new [hostsecurity] section: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
   5fed3813f7f5
 
   $ hg --config 'hostsecurity.localhost:fingerprints=sha1:ecd87cd6b386d04fc1b8b41c9d8f5e168eef1c03, sha1:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' -R copy-pull id https://localhost:$HGPORT/
@@ -408,7 +397,7 @@ Fingerprints
 - multiple fingerprints specified and last matches
   $ hg --config 'hostfingerprints.localhost=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef, ecd87cd6b386d04fc1b8b41c9d8f5e168eef1c03' -R copy-pull id https://localhost:$HGPORT/ --insecure
   warning: connecting to localhost using legacy security technology (TLS 1.0); see https://mercurial-scm.org/wiki/SecureConnections for more info (?)
-  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, set the following config value in [hostsecurity] and remove the old one from [hostfingerprints] to upgrade to a more secure SHA-256 fingerprint: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
+  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, remove the old SHA-1 fingerprint from [hostfingerprints] and add the following entry to the new [hostsecurity] section: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
   5fed3813f7f5
 
   $ hg --config 'hostsecurity.localhost:fingerprints=sha1:deadbeefdeadbeefdeadbeefdeadbeefdeadbeef, sha1:ecd87cd6b386d04fc1b8b41c9d8f5e168eef1c03' -R copy-pull id https://localhost:$HGPORT/
@@ -440,7 +429,7 @@ Fingerprints
 - ignores that certificate doesn't match hostname
   $ hg -R copy-pull id https://$LOCALIP:$HGPORT/ --config hostfingerprints.$LOCALIP=ecd87cd6b386d04fc1b8b41c9d8f5e168eef1c03
   warning: connecting to $LOCALIP using legacy security technology (TLS 1.0); see https://mercurial-scm.org/wiki/SecureConnections for more info (?)
-  (SHA-1 fingerprint for $LOCALIP found in legacy [hostfingerprints] section; if you trust this fingerprint, set the following config value in [hostsecurity] and remove the old one from [hostfingerprints] to upgrade to a more secure SHA-256 fingerprint: $LOCALIP:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
+  (SHA-1 fingerprint for $LOCALIP found in legacy [hostfingerprints] section; if you trust this fingerprint, remove the old SHA-1 fingerprint from [hostfingerprints] and add the following entry to the new [hostsecurity] section: $LOCALIP:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
   5fed3813f7f5
 
 Ports used by next test. Kill servers.
@@ -579,7 +568,7 @@ Test https with cacert and fingerprint through proxy
   $ http_proxy=http://localhost:$HGPORT1/ hg -R copy-pull pull https://localhost:$HGPORT/ --config hostfingerprints.localhost=ecd87cd6b386d04fc1b8b41c9d8f5e168eef1c03 --trace
   pulling from https://*:$HGPORT/ (glob)
   warning: connecting to localhost using legacy security technology (TLS 1.0); see https://mercurial-scm.org/wiki/SecureConnections for more info (?)
-  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, set the following config value in [hostsecurity] and remove the old one from [hostfingerprints] to upgrade to a more secure SHA-256 fingerprint: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
+  (SHA-1 fingerprint for localhost found in legacy [hostfingerprints] section; if you trust this fingerprint, remove the old SHA-1 fingerprint from [hostfingerprints] and add the following entry to the new [hostsecurity] section: localhost:fingerprints=sha256:20:de:b3:ad:b4:cd:a5:42:f0:74:41:1c:a2:70:1e:da:6e:c0:5c:16:9e:e7:22:0f:f1:b7:e5:6e:e4:92:af:7e)
   searching for changes
   no changes found
 

@@ -67,8 +67,6 @@ def read(repo):
             partial.setdefault(label, []).append(node)
             if state == 'c':
                 partial._closednodes.add(node)
-    except KeyboardInterrupt:
-        raise
     except Exception as inst:
         if repo.ui.debugflag:
             msg = 'invalid branchheads cache'
@@ -408,8 +406,7 @@ class revbranchcache(object):
 
         # fast path: extract data from cache, use it if node is matching
         reponode = changelog.node(rev)[:_rbcnodelen]
-        cachenode, branchidx = unpack_from(
-            _rbcrecfmt, util.buffer(self._rbcrevs), rbcrevidx)
+        cachenode, branchidx = unpack_from(_rbcrecfmt, self._rbcrevs, rbcrevidx)
         close = bool(branchidx & _rbccloseflag)
         if close:
             branchidx &= _rbcbranchidxmask

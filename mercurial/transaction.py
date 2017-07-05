@@ -26,10 +26,10 @@ version = 2
 # These are the file generators that should only be executed after the
 # finalizers are done, since they rely on the output of the finalizers (like
 # the changelog having been written).
-postfinalizegenerators = set([
+postfinalizegenerators = {
     'bookmarks',
     'dirstate'
-])
+}
 
 gengroupall='all'
 gengroupprefinalize='prefinalize'
@@ -136,6 +136,10 @@ class transaction(object):
         if releasefn is None:
             releasefn = lambda tr, success: None
         self.releasefn = releasefn
+
+        # A dict dedicated to precisely tracking the changes introduced in the
+        # transaction.
+        self.changes = {}
 
         # a dict of arguments to be passed to hooks
         self.hookargs = {}
@@ -288,6 +292,12 @@ class transaction(object):
         # but for bookmarks that are handled outside this mechanism.
         self._filegenerators[genid] = (order, filenames, genfunc, location)
 
+    @active
+    def removefilegenerator(self, genid):
+        """reverse of addfilegenerator, remove a file generator function"""
+        if genid in self._filegenerators:
+            del self._filegenerators[genid]
+
     def _generatefiles(self, suffix='', group=gengroupall):
         # write files registered for generation
         any = False
@@ -402,7 +412,7 @@ class transaction(object):
 
     @active
     def addpostclose(self, category, callback):
-        """add a callback to be called after the transaction is closed
+        """add or replace a callback to be called after the transaction closed
 
         The transaction will be given as callback's first argument.
 
@@ -410,6 +420,11 @@ class transaction(object):
         with a newer callback.
         """
         self._postclosecallback[category] = callback
+
+    @active
+    def getpostclose(self, category):
+        """return a postclose callback added before, or None"""
+        return self._postclosecallback.get(category, None)
 
     @active
     def addabort(self, category, callback):
@@ -427,6 +442,7 @@ class transaction(object):
         '''commit the transaction'''
         if self.count == 1:
             self.validator(self)  # will raise exception if needed
+            self.validator = None # Help prevent cycles.
             self._generatefiles(group=gengroupprefinalize)
             categories = sorted(self._finalizecallback)
             for cat in categories:
@@ -460,6 +476,7 @@ class transaction(object):
         self._writeundo()
         if self.after:
             self.after()
+            self.after = None # Help prevent cycles.
         if self.opener.isfile(self._backupjournal):
             self.opener.unlink(self._backupjournal)
         if self.opener.isfile(self.journal):
@@ -483,6 +500,7 @@ class transaction(object):
         self.journal = None
 
         self.releasefn(self, True) # notify success of closing transaction
+        self.releasefn = None # Help prevent cycles.
 
         # run post close action
         categories = sorted(self._postclosecallback)
@@ -553,6 +571,7 @@ class transaction(object):
         finally:
             self.journal = None
             self.releasefn(self, False) # notify failure of transaction
+            self.releasefn = None # Help prevent cycles.
 
 def rollback(opener, vfsmap, file, report):
     """Rolls back the transaction contained in the given file

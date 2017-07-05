@@ -203,7 +203,7 @@ divergent bookmarks
 
 (test that too many divergence of bookmark)
 
-  $ python $TESTDIR/seq.py 1 100 | while read i; do hg bookmarks -r 000000000000 "X@${i}"; done
+  $ $PYTHON $TESTDIR/seq.py 1 100 | while read i; do hg bookmarks -r 000000000000 "X@${i}"; done
   $ hg pull ../a
   pulling from ../a
   searching for changes
@@ -231,7 +231,7 @@ divergent bookmarks
      @1                        2:0d2164f0ce0d
      @foo                      2:0d2164f0ce0d
 
-  $ python $TESTDIR/seq.py 1 100 | while read i; do hg bookmarks -d "X@${i}"; done
+  $ $PYTHON $TESTDIR/seq.py 1 100 | while read i; do hg bookmarks -d "X@${i}"; done
   $ hg bookmarks -d "@1"
 
   $ hg push -f ../a
@@ -484,6 +484,7 @@ Update to a successor works
   remote: adding file changes
   remote: added 2 changesets with 2 changes to 1 files (+1 heads)
   remote: 2 new obsolescence markers
+  remote: obsoleted 1 changesets
   updating bookmark Y
   $ hg -R ../a book
      @                         1:0d2164f0ce0d

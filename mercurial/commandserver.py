@@ -409,13 +409,12 @@ class unixservicehandler(object):
 
     def bindsocket(self, sock, address):
         util.bindunixsocket(sock, address)
+        sock.listen(socket.SOMAXCONN)
+        self.ui.status(_('listening at %s\n') % address)
+        self.ui.flush()  # avoid buffering of status message
 
     def unlinksocket(self, address):
         os.unlink(address)
-
-    def printbanner(self, address):
-        self.ui.status(_('listening at %s\n') % address)
-        self.ui.flush()  # avoid buffering of status message
 
     def shouldexit(self):
         """True if server should shut down; checked per pollinterval"""
@@ -452,10 +451,8 @@ class unixforkingservice(object):
     def init(self):
         self._sock = socket.socket(socket.AF_UNIX)
         self._servicehandler.bindsocket(self._sock, self.address)
-        self._sock.listen(socket.SOMAXCONN)
         o = signal.signal(signal.SIGCHLD, self._sigchldhandler)
         self._oldsigchldhandler = o
-        self._servicehandler.printbanner(self.address)
         self._socketunlinked = False
 
     def _unlinksocket(self):

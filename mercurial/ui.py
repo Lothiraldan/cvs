@@ -27,6 +27,7 @@ from .node import hex
 from . import (
     color,
     config,
+    configitems,
     encoding,
     error,
     formatter,
@@ -42,6 +43,20 @@ urlreq = util.urlreq
 # for use with str.translate(None, _keepalnum), to keep just alphanumerics
 _keepalnum = ''.join(c for c in map(pycompat.bytechr, range(256))
                      if not c.isalnum())
+
+# The config knobs that will be altered (if unset) by ui.tweakdefaults.
+tweakrc = """
+[ui]
+# The rollback command is dangerous. As a rule, don't use it.
+rollback = False
+
+[commands]
+# Make `hg status` emit cwd-relative paths by default.
+status.relative = yes
+
+[diff]
+git = 1
+"""
 
 samplehgrcs = {
     'user':
@@ -140,6 +155,10 @@ class httppasswordmgrdbproxy(object):
 def _catchterm(*args):
     raise error.SignalInterrupt
 
+# unique object used to detect no default value has been provided when
+# retrieving configuration value.
+_unset = object()
+
 class ui(object):
     def __init__(self, src=None):
         """Create a fresh new ui object if no src given
@@ -160,6 +179,7 @@ class ui(object):
         self._bufferapplylabels = None
         self.quiet = self.verbose = self.debugflag = self.tracebackflag = False
         self._reportuntrusted = True
+        self._knownconfig = configitems.coreitems
         self._ocfg = config.config() # overlay
         self._tcfg = config.config() # trusted
         self._ucfg = config.config() # untrusted
@@ -182,6 +202,7 @@ class ui(object):
             self.fin = src.fin
             self.pageractive = src.pageractive
             self._disablepager = src._disablepager
+            self._tweaked = src._tweaked
 
             self._tcfg = src._tcfg.copy()
             self._ucfg = src._ucfg.copy()
@@ -205,6 +226,7 @@ class ui(object):
             self.fin = util.stdin
             self.pageractive = False
             self._disablepager = False
+            self._tweaked = False
 
             # shared read-only environment
             self.environ = encoding.environ
@@ -241,7 +263,28 @@ class ui(object):
                     u.fixconfig(section=section)
             else:
                 raise error.ProgrammingError('unknown rctype: %s' % t)
+        u._maybetweakdefaults()
         return u
+
+    def _maybetweakdefaults(self):
+        if not self.configbool('ui', 'tweakdefaults'):
+            return
+        if self._tweaked or self.plain('tweakdefaults'):
+            return
+
+        # Note: it is SUPER IMPORTANT that you set self._tweaked to
+        # True *before* any calls to setconfig(), otherwise you'll get
+        # infinite recursion between setconfig and this method.
+        #
+        # TODO: We should extract an inner method in setconfig() to
+        # avoid this weirdness.
+        self._tweaked = True
+        tmpcfg = config.config()
+        tmpcfg.parse('<tweakdefaults>', tweakrc)
+        for section in tmpcfg:
+            for name, value in tmpcfg.items(section):
+                if not self.hasconfig(section, name):
+                    self.setconfig(section, name, value, "<tweakdefaults>")
 
     def copy(self):
         return self.__class__(self)
@@ -263,7 +306,7 @@ class ui(object):
                 (util.timer() - starttime) * 1000
 
     def formatter(self, topic, opts):
-        return formatter.formatter(self, topic, opts)
+        return formatter.formatter(self, self, topic, opts)
 
     def _trusted(self, fp, f):
         st = util.fstat(fp)
@@ -387,6 +430,7 @@ class ui(object):
         for cfg in (self._ocfg, self._tcfg, self._ucfg):
             cfg.set(section, name, value, source)
         self.fixconfig(section=section)
+        self._maybetweakdefaults()
 
     def _data(self, untrusted):
         return untrusted and self._ucfg or self._tcfg
@@ -394,19 +438,41 @@ class ui(object):
     def configsource(self, section, name, untrusted=False):
         return self._data(untrusted).source(section, name)
 
-    def config(self, section, name, default=None, untrusted=False):
+    def config(self, section, name, default=_unset, untrusted=False):
+        """return the plain string version of a config"""
+        value = self._config(section, name, default=default,
+                             untrusted=untrusted)
+        if value is _unset:
+            return None
+        return value
+
+    def _config(self, section, name, default=_unset, untrusted=False):
+        value = default
         if isinstance(name, list):
             alternates = name
         else:
+            item = self._knownconfig.get(section, {}).get(name)
+            if default is _unset:
+                if item is None:
+                    value = default
+                elif callable(item.default):
+                    value = item.default()
+                else:
+                    value = item.default
+            elif item is not None:
+                msg = ("specifying a default value for a registered "
+                       "config item: '%s.%s' '%s'")
+                msg %= (section, name, default)
+                self.develwarn(msg, 2, 'warn-config-default')
+
             alternates = [name]
 
         for n in alternates:
-            value = self._data(untrusted).get(section, n, None)
-            if value is not None:
+            candidate = self._data(untrusted).get(section, n, None)
+            if candidate is not None:
+                value = candidate
                 name = n
                 break
-        else:
-            value = default
 
         if self.debugflag and not untrusted and self._reportuntrusted:
             for n in alternates:
@@ -416,7 +482,7 @@ class ui(object):
                                "%s.%s = %s\n" % (section, n, uvalue))
         return value
 
-    def configsuboptions(self, section, name, default=None, untrusted=False):
+    def configsuboptions(self, section, name, default=_unset, untrusted=False):
         """Get a config option and all sub-options.
 
         Some config options have sub-options that are declared with the
@@ -426,14 +492,8 @@ class ui(object):
         Returns a 2-tuple of ``(option, sub-options)``, where `sub-options``
         is a dict of defined sub-options where keys and values are strings.
         """
+        main = self.config(section, name, default, untrusted=untrusted)
         data = self._data(untrusted)
-        main = data.get(section, name, default)
-        if self.debugflag and not untrusted and self._reportuntrusted:
-            uvalue = self._ucfg.get(section, name)
-            if uvalue is not None and uvalue != main:
-                self.debug('ignoring untrusted configuration option '
-                           '%s.%s = %s\n' % (section, name, uvalue))
-
         sub = {}
         prefix = '%s:' % name
         for k, v in data.items(section):
@@ -449,7 +509,7 @@ class ui(object):
 
         return main, sub
 
-    def configpath(self, section, name, default=None, untrusted=False):
+    def configpath(self, section, name, default=_unset, untrusted=False):
         'get a path config item, expanded relative to repo root or config file'
         v = self.config(section, name, default, untrusted)
         if v is None:
@@ -461,7 +521,7 @@ class ui(object):
                 v = os.path.join(base, os.path.expanduser(v))
         return v
 
-    def configbool(self, section, name, default=False, untrusted=False):
+    def configbool(self, section, name, default=_unset, untrusted=False):
         """parse a configuration element as a boolean
 
         >>> u = ui(); s = 'foo'
@@ -482,8 +542,12 @@ class ui(object):
         ConfigError: foo.invalid is not a boolean ('somevalue')
         """
 
-        v = self.config(section, name, None, untrusted)
+        v = self._config(section, name, default, untrusted=untrusted)
         if v is None:
+            return v
+        if v is _unset:
+            if default is _unset:
+                return False
             return default
         if isinstance(v, bool):
             return v
@@ -493,7 +557,7 @@ class ui(object):
                                     % (section, name, v))
         return b
 
-    def configwith(self, convert, section, name, default=None,
+    def configwith(self, convert, section, name, default=_unset,
                    desc=None, untrusted=False):
         """parse a configuration element with a conversion function
 
@@ -505,7 +569,7 @@ class ui(object):
         >>> u.configwith(float, s, 'float2')
         -4.25
         >>> u.configwith(float, s, 'unknown', 7)
-        7
+        7.0
         >>> u.setconfig(s, 'invalid', 'somevalue')
         >>> u.configwith(float, s, 'invalid')
         Traceback (most recent call last):
@@ -517,18 +581,18 @@ class ui(object):
         ConfigError: foo.invalid is not a valid womble ('somevalue')
         """
 
-        v = self.config(section, name, None, untrusted)
+        v = self.config(section, name, default, untrusted)
         if v is None:
-            return default
+            return v # do not attempt to convert None
         try:
             return convert(v)
-        except ValueError:
+        except (ValueError, error.ParseError):
             if desc is None:
                 desc = convert.__name__
             raise error.ConfigError(_("%s.%s is not a valid %s ('%s')")
                                     % (section, name, desc, v))
 
-    def configint(self, section, name, default=None, untrusted=False):
+    def configint(self, section, name, default=_unset, untrusted=False):
         """parse a configuration element as an integer
 
         >>> u = ui(); s = 'foo'
@@ -550,7 +614,7 @@ class ui(object):
         return self.configwith(int, section, name, default, 'integer',
                                untrusted)
 
-    def configbytes(self, section, name, default=0, untrusted=False):
+    def configbytes(self, section, name, default=_unset, untrusted=False):
         """parse a configuration element as a quantity in bytes
 
         Units can be specified as b (bytes), k or kb (kilobytes), m or
@@ -572,18 +636,20 @@ class ui(object):
         ConfigError: foo.invalid is not a byte quantity ('somevalue')
         """
 
-        value = self.config(section, name, None, untrusted)
-        if value is None:
-            if not isinstance(default, str):
-                return default
+        value = self._config(section, name, default, untrusted)
+        if value is _unset:
+            if default is _unset:
+                default = 0
             value = default
+        if not isinstance(value, str):
+            return value
         try:
             return util.sizetoint(value)
         except error.ParseError:
             raise error.ConfigError(_("%s.%s is not a byte quantity ('%s')")
                                     % (section, name, value))
 
-    def configlist(self, section, name, default=None, untrusted=False):
+    def configlist(self, section, name, default=_unset, untrusted=False):
         """parse a configuration element as a list of comma/space separated
         strings
 
@@ -593,10 +659,28 @@ class ui(object):
         ['this', 'is', 'a small', 'test']
         """
         # default is not always a list
-        if isinstance(default, bytes):
-            default = config.parselist(default)
-        return self.configwith(config.parselist, section, name, default or [],
+        v = self.configwith(config.parselist, section, name, default,
                                'list', untrusted)
+        if isinstance(v, bytes):
+            return config.parselist(v)
+        elif v is None:
+            return []
+        return v
+
+    def configdate(self, section, name, default=_unset, untrusted=False):
+        """parse a configuration element as a tuple of ints
+
+        >>> u = ui(); s = 'foo'
+        >>> u.setconfig(s, 'date', '0 0')
+        >>> u.configdate(s, 'date')
+        (0, 0)
+        """
+        if self.config(section, name, default, untrusted):
+            return self.configwith(util.parsedate, section, name, default,
+                                   'date', untrusted)
+        if default is _unset:
+            return None
+        return default
 
     def hasconfig(self, section, name, untrusted=False):
         return self._data(untrusted).hasitem(section, name)
@@ -1057,7 +1141,7 @@ class ui(object):
 
         This function refers to input only; for output, see `ui.formatted()'.
         '''
-        i = self.configbool("ui", "interactive", None)
+        i = self.configbool("ui", "interactive")
         if i is None:
             # some environments replace stdin without implementing isatty
             # usually those are non-interactive
@@ -1175,7 +1259,7 @@ class ui(object):
         # prompt to start parsing. Sadly, we also can't rely on
         # choices containing spaces, ASCII, or basically anything
         # except an ampersand followed by a character.
-        m = re.match(r'(?s)(.+?)\$\$([^\$]*&[^ \$].*)', prompt)
+        m = re.match(br'(?s)(.+?)\$\$([^\$]*&[^ \$].*)', prompt)
         msg = m.group(1)
         choices = [p.strip(' ') for p in m.group(2).split('$$')]
         return (msg,

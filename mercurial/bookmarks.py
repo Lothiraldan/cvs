@@ -13,15 +13,24 @@ from .i18n import _
 from .node import (
     bin,
     hex,
+    short,
 )
 from . import (
     encoding,
     error,
     lock as lockmod,
-    obsolete,
+    obsutil,
+    pycompat,
+    scmutil,
     txnutil,
     util,
 )
+
+# label constants
+# until 3.5, bookmarks.current was the advertised name, not
+# bookmarks.active, so we must use both to avoid breaking old
+# custom styles
+activebookmarklabel = 'bookmarks.active bookmarks.current'
 
 def _getbkfile(repo):
     """Hook so that extensions that mess with the store can hook bm storage.
@@ -50,28 +59,35 @@ class bmstore(dict):
     def __init__(self, repo):
         dict.__init__(self)
         self._repo = repo
+        self._clean = True
+        self._aclean = True
+        nm = repo.changelog.nodemap
+        tonode = bin # force local lookup
+        setitem = dict.__setitem__
         try:
-            bkfile = _getbkfile(repo)
-            for line in bkfile:
-                line = line.strip()
-                if not line:
-                    continue
-                if ' ' not in line:
-                    repo.ui.warn(_('malformed line in .hg/bookmarks: %r\n')
-                                 % line)
-                    continue
-                sha, refspec = line.split(' ', 1)
-                refspec = encoding.tolocal(refspec)
-                try:
-                    self[refspec] = repo.changelog.lookup(sha)
-                except LookupError:
-                    pass
+            with _getbkfile(repo) as bkfile:
+                for line in bkfile:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        sha, refspec = line.split(' ', 1)
+                        node = tonode(sha)
+                        if node in nm:
+                            refspec = encoding.tolocal(refspec)
+                            setitem(self, refspec, node)
+                    except (TypeError, ValueError):
+                        # TypeError:
+                        # - bin(...)
+                        # ValueError:
+                        # - node in nm, for non-20-bytes entry
+                        # - split(...), for string without ' '
+                        repo.ui.warn(_('malformed line in .hg/bookmarks: %r\n')
+                                     % line)
         except IOError as inst:
             if inst.errno != errno.ENOENT:
                 raise
-        self._clean = True
         self._active = _readactive(repo, self)
-        self._aclean = True
 
     @property
     def active(self):
@@ -147,6 +163,61 @@ class bmstore(dict):
             else:
                 raise error.Abort(_("no active bookmark"))
         return bname
+
+    def checkconflict(self, mark, force=False, target=None):
+        """check repo for a potential clash of mark with an existing bookmark,
+        branch, or hash
+
+        If target is supplied, then check that we are moving the bookmark
+        forward.
+
+        If force is supplied, then forcibly move the bookmark to a new commit
+        regardless if it is a move forward.
+        """
+        cur = self._repo.changectx('.').node()
+        if mark in self and not force:
+            if target:
+                if self[mark] == target and target == cur:
+                    # re-activating a bookmark
+                    return
+                rev = self._repo[target].rev()
+                anc = self._repo.changelog.ancestors([rev])
+                bmctx = self._repo[self[mark]]
+                divs = [self._repo[b].node() for b in self
+                        if b.split('@', 1)[0] == mark.split('@', 1)[0]]
+
+                # allow resolving a single divergent bookmark even if moving
+                # the bookmark across branches when a revision is specified
+                # that contains a divergent bookmark
+                if bmctx.rev() not in anc and target in divs:
+                    deletedivergent(self._repo, [target], mark)
+                    return
+
+                deletefrom = [b for b in divs
+                              if self._repo[b].rev() in anc or b == target]
+                deletedivergent(self._repo, deletefrom, mark)
+                if validdest(self._repo, bmctx, self._repo[target]):
+                    self._repo.ui.status(
+                        _("moving bookmark '%s' forward from %s\n") %
+                        (mark, short(bmctx.node())))
+                    return
+            raise error.Abort(_("bookmark '%s' already exists "
+                                "(use -f to force)") % mark)
+        if ((mark in self._repo.branchmap() or
+             mark == self._repo.dirstate.branch()) and not force):
+            raise error.Abort(
+                _("a bookmark cannot have the name of an existing branch"))
+        if len(mark) > 3 and not force:
+            try:
+                shadowhash = (mark in self._repo)
+            except error.LookupError:  # ambiguous identifier
+                shadowhash = False
+            if shadowhash:
+                self._repo.ui.warn(
+                    _("bookmark %s matches a changeset hash\n"
+                      "(did you leave a -r out of an 'hg bookmark' "
+                      "command?)\n")
+                    % mark)
 
 def _readactive(repo, marks):
     """
@@ -225,6 +296,28 @@ def deletedivergent(repo, deletefrom, bm):
                 del marks[mark]
                 deleted = True
     return deleted
+
+def headsforactive(repo):
+    """Given a repo with an active bookmark, return divergent bookmark nodes.
+
+    Args:
+      repo: A repository with an active bookmark.
+
+    Returns:
+      A list of binary node ids that is the full list of other
+      revisions with bookmarks divergent from the active bookmark. If
+      there were no divergent bookmarks, then this list will contain
+      only one entry.
+    """
+    if not repo._activebookmark:
+        raise ValueError(
+            'headsforactive() only makes sense with an active bookmark')
+    name = repo._activebookmark.split('@', 1)[0]
+    heads = []
+    for mark, n in repo._bookmarks.iteritems():
+        if mark.split('@', 1)[0] == name:
+            heads.append(n)
+    return heads
 
 def calculateupdate(ui, repo, checkout):
     '''Return a tuple (targetrev, movemarkfrom) indicating the rev to
@@ -589,7 +682,126 @@ def validdest(repo, old, new):
         # (new != nullrev has been excluded by the previous check)
         return True
     elif repo.obsstore:
-        return new.node() in obsolete.foreground(repo, [old.node()])
+        return new.node() in obsutil.foreground(repo, [old.node()])
     else:
         # still an independent clause as it is lazier (and therefore faster)
         return old.descendant(new)
+
+def checkformat(repo, mark):
+    """return a valid version of a potential bookmark name
+
+    Raises an abort error if the bookmark name is not valid.
+    """
+    mark = mark.strip()
+    if not mark:
+        raise error.Abort(_("bookmark names cannot consist entirely of "
+                            "whitespace"))
+    scmutil.checknewlabel(repo, mark, 'bookmark')
+    return mark
+
+def delete(repo, tr, names):
+    """remove a mark from the bookmark store
+
+    Raises an abort error if mark does not exist.
+    """
+    marks = repo._bookmarks
+    for mark in names:
+        if mark not in marks:
+            raise error.Abort(_("bookmark '%s' does not exist") % mark)
+        if mark == repo._activebookmark:
+            deactivate(repo)
+        del marks[mark]
+    marks.recordchange(tr)
+
+def rename(repo, tr, old, new, force=False, inactive=False):
+    """rename a bookmark from old to new
+
+    If force is specified, then the new name can overwrite an existing
+    bookmark.
+
+    If inactive is specified, then do not activate the new bookmark.
+
+    Raises an abort error if old is not in the bookmark store.
+    """
+    marks = repo._bookmarks
+    mark = checkformat(repo, new)
+    if old not in marks:
+        raise error.Abort(_("bookmark '%s' does not exist") % old)
+    marks.checkconflict(mark, force)
+    marks[mark] = marks[old]
+    if repo._activebookmark == old and not inactive:
+        activate(repo, mark)
+    del marks[old]
+    marks.recordchange(tr)
+
+def addbookmarks(repo, tr, names, rev=None, force=False, inactive=False):
+    """add a list of bookmarks
+
+    If force is specified, then the new name can overwrite an existing
+    bookmark.
+
+    If inactive is specified, then do not activate any bookmark. Otherwise, the
+    first bookmark is activated.
+
+    Raises an abort error if old is not in the bookmark store.
+    """
+    marks = repo._bookmarks
+    cur = repo.changectx('.').node()
+    newact = None
+    for mark in names:
+        mark = checkformat(repo, mark)
+        if newact is None:
+            newact = mark
+        if inactive and mark == repo._activebookmark:
+            deactivate(repo)
+            return
+        tgt = cur
+        if rev:
+            tgt = scmutil.revsingle(repo, rev).node()
+        marks.checkconflict(mark, force, tgt)
+        marks[mark] = tgt
+    if not inactive and cur == marks[newact] and not rev:
+        activate(repo, newact)
+    elif cur != tgt and newact == repo._activebookmark:
+        deactivate(repo)
+    marks.recordchange(tr)
+
+def _printbookmarks(ui, repo, bmarks, **opts):
+    """private method to print bookmarks
+
+    Provides a way for extensions to control how bookmarks are printed (e.g.
+    prepend or postpend names)
+    """
+    opts = pycompat.byteskwargs(opts)
+    fm = ui.formatter('bookmarks', opts)
+    hexfn = fm.hexfunc
+    if len(bmarks) == 0 and fm.isplain():
+        ui.status(_("no bookmarks set\n"))
+    for bmark, (n, prefix, label) in sorted(bmarks.iteritems()):
+        fm.startitem()
+        if not ui.quiet:
+            fm.plain(' %s ' % prefix, label=label)
+        fm.write('bookmark', '%s', bmark, label=label)
+        pad = " " * (25 - encoding.colwidth(bmark))
+        fm.condwrite(not ui.quiet, 'rev node', pad + ' %d:%s',
+                     repo.changelog.rev(n), hexfn(n), label=label)
+        fm.data(active=(activebookmarklabel in label))
+        fm.plain('\n')
+    fm.end()
+
+def printbookmarks(ui, repo, **opts):
+    """print bookmarks to a formatter
+
+    Provides a way for extensions to control how bookmarks are printed.
+    """
+    marks = repo._bookmarks
+    bmarks = {}
+    for bmark, n in sorted(marks.iteritems()):
+        active = repo._activebookmark
+        if bmark == active:
+            prefix, label = '*', activebookmarklabel
+        else:
+            prefix, label = ' ', ''
+
+        bmarks[bmark] = (n, prefix, label)
+    _printbookmarks(ui, repo, bmarks, **opts)

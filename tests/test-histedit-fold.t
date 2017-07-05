@@ -154,7 +154,7 @@ check saving last-message.txt
   > from mercurial import util
   > def abortfolding(ui, repo, hooktype, **kwargs):
   >     ctx = repo[kwargs.get('node')]
-  >     if set(ctx.files()) == set(['c', 'd', 'f']):
+  >     if set(ctx.files()) == {'c', 'd', 'f'}:
   >         return True # abort folding commit only
   >     ui.warn('allow non-folding commit\\n')
   > EOF
@@ -488,6 +488,7 @@ into the hook command.
   $ echo "foo" > amended.txt
   $ hg add amended.txt
   $ hg ci -q --config extensions.largefiles= --amend -I amended.txt
+  The fsmonitor extension is incompatible with the largefiles extension and has been disabled. (fsmonitor !)
 
 Test that folding multiple changes in a row doesn't show multiple
 editors.

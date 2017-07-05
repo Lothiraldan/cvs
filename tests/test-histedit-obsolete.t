@@ -545,7 +545,7 @@ attempted later.
   |
   o  0:cb9a9f314b8b (public) a
   
-  $ hg histedit -r 'b449568bf7fc' --commands - << EOF
+  $ hg histedit -r 'b449568bf7fc' --commands - << EOF --config experimental.evolution.track-operation=1
   > pick b449568bf7fc 13 f
   > pick 7395e1ff83bd 15 h
   > pick 6b70183d2492 14 g
@@ -556,7 +556,7 @@ attempted later.
   Editing (ee118ab9fa44), you may commit or record as needed now.
   (hg histedit --continue to resume)
   [1]
-  $ hg histedit --continue
+  $ hg histedit --continue --config experimental.evolution.track-operation=1
   $ hg log -G
   @  23:175d6b286a22 (secret) k
   |
@@ -574,3 +574,5 @@ attempted later.
   |
   o  0:cb9a9f314b8b (public) a
   
+  $ hg debugobsolete --rev .
+  ee118ab9fa44ebb86be85996548b5517a39e5093 175d6b286a224c23f192e79a581ce83131a53fa2 0 (*) {'operation': 'histedit', 'user': 'test'} (glob)
