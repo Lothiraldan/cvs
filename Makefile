@@ -14,6 +14,7 @@ DOCFILES=mercurial/help/*.txt
 export LANGUAGE=C
 export LC_ALL=C
 TESTFLAGS ?= $(shell echo $$HGTESTFLAGS)
+OSXVERSIONFLAGS ?= $(shell echo $$OSXVERSIONFLAGS)
 
 # Set this to e.g. "mingw32" to use a non-default compiler.
 COMPILER=
@@ -62,9 +63,8 @@ doc:
 
 cleanbutpackages:
 	-$(PYTHON) setup.py clean --all # ignore errors from this command
-	find contrib doc hgext hgext3rd i18n mercurial tests \
+	find contrib doc hgext hgext3rd i18n mercurial tests hgdemandimport \
 		\( -name '*.py[cdo]' -o -name '*.so' \) -exec rm -f '{}' ';'
-	rm -f $(addprefix mercurial/,$(notdir $(wildcard mercurial/pure/[a-z]*.py)))
 	rm -f MANIFEST MANIFEST.in hgext/__index__.py tests/*.err
 	rm -f mercurial/__modulepolicy__.py
 	if test -d .hg; then rm -f mercurial/__version__.py; fi
@@ -177,8 +177,16 @@ osx:
         # location of our own.
 	install -d build/mercurial/usr/local/hg/contrib/
 	install -m 0644 contrib/bash_completion build/mercurial/usr/local/hg/contrib/hg-completion.bash
+	make -C contrib/chg \
+	  HGPATH=/usr/local/bin/hg \
+	  PYTHON=/usr/bin/python2.7 \
+	  HG=/usr/local/bin/hg \
+	  HGEXTDIR=/Library/Python/2.7/site-packages/hgext \
+	  DESTDIR=../../build/mercurial \
+	  PREFIX=/usr/local \
+	  clean install
 	mkdir -p $${OUTPUTDIR:-dist}
-	HGVER=$$((cat build/mercurial/Library/Python/2.7/site-packages/mercurial/__version__.py; echo 'print(version)') | python) && \
+	HGVER=$(shell python contrib/genosxversion.py $(OSXVERSIONFLAGS) build/mercurial/Library/Python/2.7/site-packages/mercurial/__version__.py ) && \
 	OSXVER=$$(sw_vers -productVersion | cut -d. -f1,2) && \
 	pkgbuild --filter \\.DS_Store --root build/mercurial/ \
 	  --identifier org.mercurial-scm.mercurial \
@@ -268,13 +276,13 @@ docker-centos5:
 
 centos6:
 	mkdir -p packages/centos6
-	contrib/buildrpm
+	contrib/buildrpm --withpython
 	cp rpmbuild/RPMS/*/* packages/centos6
 	cp rpmbuild/SRPMS/* packages/centos6
 
 docker-centos6:
 	mkdir -p packages/centos6
-	contrib/dockerrpm centos6
+	contrib/dockerrpm centos6 --withpython
 
 centos7:
 	mkdir -p packages/centos7

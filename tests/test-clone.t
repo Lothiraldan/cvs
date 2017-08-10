@@ -52,6 +52,8 @@ Ensure branchcache got copied over:
   checkisexec (execbit !)
   checklink (symlink !)
   checklink-target (symlink !)
+  rbc-names-v1
+  rbc-revs-v1
 
   $ cat a
   a
@@ -99,6 +101,8 @@ Ensure branchcache got copied over:
 
   $ ls .hg/cache
   branch2-served
+  rbc-names-v1
+  rbc-revs-v1
 
   $ cat a 2>/dev/null || echo "a not present"
   a not present
@@ -520,7 +524,7 @@ iterable in addbranchrevs()
   > hg.clone(myui, {}, repo, dest="ua")
   > EOF
 
-  $ python simpleclone.py
+  $ $PYTHON simpleclone.py
   updating to branch default
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
@@ -534,7 +538,7 @@ iterable in addbranchrevs()
   > hg.clone(myui, {}, repo, dest="ua", branch=["stable",])
   > EOF
 
-  $ python branchclone.py
+  $ $PYTHON branchclone.py
   adding changesets
   adding manifests
   adding file changes
@@ -710,6 +714,7 @@ Create repositories to test auto sharing functionality
   $ echo initial2 > foo
   $ hg -q commit -A -m initial1
   $ hg debugobsolete c05d5c47a5cf81401869999f3d05f7d699d2b29a e082c1832e09a7d1e78b7fd49a592d372de854c8
+  obsoleted 1 changesets
   $ cd ..
 
   $ hg -q clone --pull source1a source1b
@@ -1040,7 +1045,7 @@ Test that auto sharing doesn't cause failure of "hg clone local remote"
   $ hg id -R remote -r 0
   abort: repository remote not found!
   [255]
-  $ hg --config share.pool=share -q clone -e "python \"$TESTDIR/dummyssh\"" a ssh://user@dummy/remote
+  $ hg --config share.pool=share -q clone -e "\"$PYTHON\" \"$TESTDIR/dummyssh\"" a ssh://user@dummy/remote
   $ hg -R remote id -r 0
   acb14030fe0a
 
@@ -1092,66 +1097,3 @@ pooled".
   adding remote bookmark bookA
   updating working directory
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-
-SEC: check for unsafe ssh url
-
-  $ cat >> $HGRCPATH << EOF
-  > [ui]
-  > ssh = sh -c "read l; read l; read l"
-  > EOF
-
-  $ hg clone 'ssh://-oProxyCommand=touch${IFS}owned/path'
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch${IFS}owned/path'
-  [255]
-  $ hg clone 'ssh://%2DoProxyCommand=touch${IFS}owned/path'
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch${IFS}owned/path'
-  [255]
-  $ hg clone 'ssh://fakehost|touch%20owned/path'
-  abort: no suitable response from remote hg!
-  [255]
-  $ hg clone 'ssh://fakehost%7Ctouch%20owned/path'
-  abort: no suitable response from remote hg!
-  [255]
-
-  $ hg clone 'ssh://-oProxyCommand=touch owned%20foo@example.com/nonexistent/path'
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch owned foo@example.com/nonexistent/path'
-  [255]
-
-#if windows
-  $ hg clone "ssh://%26touch%20owned%20/" --debug
-  running sh -c "read l; read l; read l" "&touch owned " "hg -R . serve --stdio"
-  sending hello command
-  sending between command
-  abort: no suitable response from remote hg!
-  [255]
-  $ hg clone "ssh://example.com:%26touch%20owned%20/" --debug
-  running sh -c "read l; read l; read l" -p "&touch owned " example.com "hg -R . serve --stdio"
-  sending hello command
-  sending between command
-  abort: no suitable response from remote hg!
-  [255]
-#else
-  $ hg clone "ssh://%3btouch%20owned%20/" --debug
-  running sh -c "read l; read l; read l" ';touch owned ' 'hg -R . serve --stdio'
-  sending hello command
-  sending between command
-  abort: no suitable response from remote hg!
-  [255]
-  $ hg clone "ssh://example.com:%3btouch%20owned%20/" --debug
-  running sh -c "read l; read l; read l" -p ';touch owned ' example.com 'hg -R . serve --stdio'
-  sending hello command
-  sending between command
-  abort: no suitable response from remote hg!
-  [255]
-#endif
-
-  $ hg clone "ssh://v-alid.example.com/" --debug
-  running sh -c "read l; read l; read l" v-alid\.example\.com ['"]hg -R \. serve --stdio['"] (re)
-  sending hello command
-  sending between command
-  abort: no suitable response from remote hg!
-  [255]
-
-We should not have created a file named owned - if it exists, the
-attack succeeded.
-  $ if test -f owned; then echo 'you got owned'; fi

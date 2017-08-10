@@ -17,8 +17,7 @@ import sys
 from .i18n import _
 from . import (
     encoding,
-    error,
-    osutil,
+    policy,
     pycompat,
     win32,
 )
@@ -28,6 +27,8 @@ try:
     winreg.CloseKey
 except ImportError:
     import winreg
+
+osutil = policy.importmod(r'osutil')
 
 executablepath = win32.executablepath
 getuser = win32.getuser
@@ -137,6 +138,9 @@ def posixfile(name, mode='r', buffering=-1):
         # convert to a friendlier exception
         raise IOError(err.errno, '%s: %s' % (name, err.strerror))
 
+# may be wrapped by win32mbcs extension
+listdir = osutil.listdir
+
 class winstdout(object):
     '''stdout on windows misbehaves if sent through a pipe'''
 
@@ -176,7 +180,6 @@ class winstdout(object):
         except IOError as inst:
             if inst.errno != errno.EINVAL:
                 raise
-            self.close()
             raise IOError(errno.EPIPE, 'Broken pipe')
 
 def _is_win_9x():
@@ -200,14 +203,7 @@ def sshargs(sshcmd, host, user, port):
     '''Build argument list for ssh or Plink'''
     pflag = 'plink' in sshcmd.lower() and '-P' or '-p'
     args = user and ("%s@%s" % (user, host)) or host
-    if args.startswith('-') or args.startswith('/'):
-        raise error.Abort(
-            _('illegal ssh hostname or username starting with - or /: %s') %
-            args)
-    args = shellquote(args)
-    if port:
-        args = '%s %s %s' % (pflag, shellquote(port), args)
-    return args
+    return port and ("%s %s %s" % (args, pflag, port)) or args
 
 def setflags(f, l, x):
     pass
@@ -339,7 +335,7 @@ def findexe(command):
             return executable
     return findexisting(os.path.expanduser(os.path.expandvars(command)))
 
-_wantedkinds = set([stat.S_IFREG, stat.S_IFLNK])
+_wantedkinds = {stat.S_IFREG, stat.S_IFLNK}
 
 def statfiles(files):
     '''Stat each file in files. Yield each stat, or None if a file
@@ -357,7 +353,7 @@ def statfiles(files):
         if cache is None:
             try:
                 dmap = dict([(normcase(n), s)
-                             for n, k, s in osutil.listdir(dir, True)
+                             for n, k, s in listdir(dir, True)
                              if getkind(s.st_mode) in _wantedkinds])
             except OSError as err:
                 # Python >= 2.5 returns ENOENT and adds winerror field
@@ -384,7 +380,7 @@ def groupname(gid=None):
 def removedirs(name):
     """special version of os.removedirs that does not remove symlinked
     directories or junction points if they actually contain files"""
-    if osutil.listdir(name):
+    if listdir(name):
         return
     os.rmdir(name)
     head, tail = os.path.split(name)
@@ -392,7 +388,7 @@ def removedirs(name):
         head, tail = os.path.split(head)
     while head and tail:
         try:
-            if osutil.listdir(head):
+            if listdir(head):
                 return
             os.rmdir(head)
         except (ValueError, OSError):

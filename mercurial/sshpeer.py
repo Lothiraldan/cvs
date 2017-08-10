@@ -12,6 +12,7 @@ import re
 from .i18n import _
 from . import (
     error,
+    pycompat,
     util,
     wireproto,
 )
@@ -138,8 +139,6 @@ class sshpeer(wireproto.wirepeer):
         if u.scheme != 'ssh' or not u.host or u.path is None:
             self._abort(error.RepoError(_("couldn't parse location %s") % path))
 
-        util.checksafessh(path)
-
         self.user = u.user
         if u.passwd is not None:
             self._abort(error.RepoError(_("password in URL not supported")))
@@ -147,10 +146,13 @@ class sshpeer(wireproto.wirepeer):
         self.port = u.port
         self.path = u.path or "."
 
-        sshcmd = self.ui.config("ui", "ssh", "ssh")
-        remotecmd = self.ui.config("ui", "remotecmd", "hg")
+        sshcmd = self.ui.config("ui", "ssh")
+        remotecmd = self.ui.config("ui", "remotecmd")
 
-        args = util.sshargs(sshcmd, self.host, self.user, self.port)
+        args = util.sshargs(sshcmd,
+                            _serverquote(self.host),
+                            _serverquote(self.user),
+                            _serverquote(self.port))
 
         if create:
             cmd = '%s %s %s' % (sshcmd, args,
@@ -258,6 +260,7 @@ class sshpeer(wireproto.wirepeer):
         yield wireproto.unescapearg(work)
 
     def _callstream(self, cmd, **args):
+        args = pycompat.byteskwargs(args)
         self.ui.debug("sending %s command\n" % cmd)
         self.pipeo.write("%s\n" % cmd)
         _func, names = wireproto.commands[cmd]

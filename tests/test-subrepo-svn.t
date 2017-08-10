@@ -113,7 +113,7 @@ missing svn file, commit should fail
   $ rm s/alpha
   $ hg commit --subrepos -m 'abort on missing file'
   committing subrepository s
-  abort: cannot commit missing svn entries (in subrepo s)
+  abort: cannot commit missing svn entries (in subrepository "s")
   [255]
   $ svn revert s/alpha > /dev/null
 
@@ -170,7 +170,7 @@ this commit fails because of externals changes
   $ echo zzz > s/externals/other
   $ hg ci --subrepos -m 'amend externals from hg'
   committing subrepository s
-  abort: cannot commit svn externals (in subrepo s)
+  abort: cannot commit svn externals (in subrepository "s")
   [255]
   $ hg diff --subrepos -r 1:2 | grep -v diff
   --- a/.hgsubstate	Thu Jan 01 00:00:00 1970 +0000
@@ -192,7 +192,7 @@ this commit fails because of externals meta changes
   property 'svn:mime-type' set on 's/externals/other' (glob)
   $ hg ci --subrepos -m 'amend externals from hg'
   committing subrepository s
-  abort: cannot commit svn externals (in subrepo s)
+  abort: cannot commit svn externals (in subrepository "s")
   [255]
   $ svn revert -q s/externals/other
 
@@ -639,43 +639,3 @@ Test that sanitizing is omitted in meta data area:
   $ hg update -q -C '.^1'
 
   $ cd ../..
-
-SEC: test for ssh exploit
-
-  $ hg init ssh-vuln
-  $ cd ssh-vuln
-  $ echo "s = [svn]$SVNREPOURL/src" >> .hgsub
-  $ svn co --quiet "$SVNREPOURL"/src s
-  $ hg add .hgsub
-  $ hg ci -m1
-  $ echo "s = [svn]svn+ssh://-oProxyCommand=touch%20owned%20nested" > .hgsub
-  $ hg ci -m2
-  $ cd ..
-  $ hg clone ssh-vuln ssh-vuln-clone
-  updating to branch default
-  abort: potentially unsafe url: 'svn+ssh://-oProxyCommand=touch owned nested' (in subrepo s)
-  [255]
-
-also check that a percent encoded '-' (%2D) doesn't work
-
-  $ cd ssh-vuln
-  $ echo "s = [svn]svn+ssh://%2DoProxyCommand=touch%20owned%20nested" > .hgsub
-  $ hg ci -m3
-  $ cd ..
-  $ rm -r ssh-vuln-clone
-  $ hg clone ssh-vuln ssh-vuln-clone
-  updating to branch default
-  abort: potentially unsafe url: 'svn+ssh://-oProxyCommand=touch owned nested' (in subrepo s)
-  [255]
-
-also check that hiding the attack in the username doesn't work:
-
-  $ cd ssh-vuln
-  $ echo "s = [svn]svn+ssh://%2DoProxyCommand=touch%20owned%20foo@example.com/nested" > .hgsub
-  $ hg ci -m3
-  $ cd ..
-  $ rm -r ssh-vuln-clone
-  $ hg clone ssh-vuln ssh-vuln-clone
-  updating to branch default
-  abort: potentially unsafe url: 'svn+ssh://-oProxyCommand=touch owned foo@example.com/nested' (in subrepo s)
-  [255]

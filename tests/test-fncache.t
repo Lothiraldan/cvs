@@ -92,6 +92,7 @@ Non store repo:
   .hg/data/tst.d.hg
   .hg/data/tst.d.hg/foo.i
   .hg/dirstate
+  .hg/fsmonitor.state (fsmonitor !)
   .hg/last-message.txt
   .hg/phaseroots
   .hg/requires
@@ -121,6 +122,7 @@ Non fncache repo:
   .hg/cache/rbc-names-v1
   .hg/cache/rbc-revs-v1
   .hg/dirstate
+  .hg/fsmonitor.state (fsmonitor !)
   .hg/last-message.txt
   .hg/requires
   .hg/store
@@ -268,7 +270,11 @@ Aborting transaction prevents fncache change
   > cmdtable = {}
   > 
   > EOF
+
+Clean cached version
   $ rm -f "${extpath}c"
+  $ rm -Rf "`dirname $extpath`/__pycache__"
+
   $ touch z
   $ hg ci -qAm z
   transaction abort!
@@ -303,7 +309,11 @@ Aborted transactions can be recovered later
   > cmdtable = {}
   > 
   > EOF
+
+Clean cached versions
   $ rm -f "${extpath}c"
+  $ rm -Rf "`dirname $extpath`/__pycache__"
+
   $ hg up -q 1
   $ touch z
   $ hg ci -qAm z 2>/dev/null

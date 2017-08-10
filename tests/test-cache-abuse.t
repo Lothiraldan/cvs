@@ -24,6 +24,7 @@ Build a repo with some cacheable bits:
   $ echo dumb > dumb
   $ hg ci -qAmdumb
   $ hg debugobsolete b1174d11b69e63cb0c5726621a43c859f0858d7f
+  obsoleted 1 changesets
 
   $ hg phase -pr t1
   $ hg phase -fsr t2
@@ -46,21 +47,21 @@ Make a helper function to check cache damage invariants:
   >  echo bad > $CACHE
   >  test -z "$CLEAN" || $CLEAN
   >  hg $CMD > after
-  >  diff -u before after || echo "*** overwrite corruption"
+  >  "$RUNTESTDIR/pdiff" before after || echo "*** overwrite corruption"
   >  echo corruption >> $CACHE
   >  test -z "$CLEAN" || $CLEAN
   >  hg $CMD > after
-  >  diff -u before after || echo "*** append corruption"
+  >  "$RUNTESTDIR/pdiff" before after || echo "*** append corruption"
   >  rm $CACHE
   >  mkdir $CACHE
   >  test -z "$CLEAN" || $CLEAN
   >  hg $CMD > after
-  >  diff -u before after || echo "*** read-only corruption"
+  >  "$RUNTESTDIR/pdiff" before after || echo "*** read-only corruption"
   >  test -d $CACHE || echo "*** directory clobbered"
   >  rmdir $CACHE
   >  test -z "$CLEAN" || $CLEAN
   >  hg $CMD > after
-  >  diff -u before after || echo "*** missing corruption"
+  >  "$RUNTESTDIR/pdiff" before after || echo "*** missing corruption"
   >  test -f $CACHE || echo "not rebuilt"
   > }
 
@@ -69,10 +70,6 @@ Beat up tags caches:
   $ damage "tags --hidden" tags2
   $ damage tags tags2-visible
   $ damage "tag -f t3" hgtagsfnodes1
-
-Beat up hidden cache:
-
-  $ damage log hidden
 
 Beat up branch caches:
 

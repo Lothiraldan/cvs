@@ -111,7 +111,7 @@ commands that require a clean repo should respect subrepos
 
   $ echo b >> s/a
   $ hg backout tip
-  abort: uncommitted changes in subrepository 's'
+  abort: uncommitted changes in subrepository "s"
   [255]
   $ hg revert -C -R s s/a
 
@@ -163,7 +163,7 @@ leave sub dirty (and check ui.commitsubrepos=no aborts the commit)
 
   $ echo c > s/a
   $ hg --config ui.commitsubrepos=no ci -m4
-  abort: uncommitted changes in subrepository 's'
+  abort: uncommitted changes in subrepository "s"
   (use --subrepos for recursive commit)
   [255]
   $ hg id
@@ -305,7 +305,7 @@ merge tests
    subrepository t diverged (local revision: 20a0db6fbf6c, remote revision: 7af322bc1198)
   starting 4 threads for background file closing (?)
   (M)erge, keep (l)ocal [working copy] or keep (r)emote [merge rev]? m
-  merging subrepo t
+  merging subrepository "t"
     searching for copies back to rev 2
   resolving manifests
    branchmerge: True, force: False, partial: False
@@ -516,7 +516,7 @@ push -f
   no changes made to subrepo s/ss since last push to $TESTTMP/t/s/ss (glob)
   pushing subrepo s to $TESTTMP/t/s
   searching for changes
-  abort: push creates new remote head 12a213df6fa9! (in subrepo s)
+  abort: push creates new remote head 12a213df6fa9! (in subrepository "s")
   (merge or see 'hg help push' for details about pushing new heads)
   [255]
   $ hg push -f
@@ -680,6 +680,7 @@ update
   $ cd ../t
   $ hg up -C # discard our earlier merge
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  updated to "c373c8102e68: 12"
   2 other heads for branch "default"
   $ echo blah > t/t
   $ hg ci -m13
@@ -694,6 +695,7 @@ KeyError
 
   $ hg up -C # discard changes
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  updated to "925c17564ef8: 13"
   2 other heads for branch "default"
 
 pull
@@ -736,6 +738,7 @@ should pull t
   adding file changes
   added 1 changesets with 1 changes to 1 files
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  updated to "925c17564ef8: 13"
   2 other heads for branch "default"
   $ cat t/t
   blah
@@ -744,7 +747,7 @@ bogus subrepo path aborts
 
   $ echo 'bogus=[boguspath' >> .hgsub
   $ hg ci -m 'bogus subrepo path'
-  abort: missing ] in subrepo source
+  abort: missing ] in subrepository source
   [255]
 
 Issue1986: merge aborts when trying to merge a subrepo that
@@ -952,7 +955,7 @@ Issue1977: multirepo push should fail if subrepo push fails
   created new head
   $ hg -R repo2 ci -m3
   $ hg -q -R repo2 push
-  abort: push creates new remote head cc505f09a8b2! (in subrepo s)
+  abort: push creates new remote head cc505f09a8b2! (in subrepository "s")
   (merge or see 'hg help push' for details about pushing new heads)
   [255]
   $ hg -R repo update
@@ -980,7 +983,7 @@ filesystem (see also issue4583))
   > EOF
   $ hg -R repo update
   b: untracked file differs
-  abort: untracked files in working directory differ from files in requested revision (in subrepo s)
+  abort: untracked files in working directory differ from files in requested revision (in subrepository "s")
   [255]
   $ cat >> repo/.hg/hgrc <<EOF
   > [extensions]
@@ -1020,6 +1023,14 @@ Prepare a repo with subrepo
   $ hg cat sub/repo/foo
   test
   test
+  $ hg cat sub/repo/foo -Tjson | sed 's|\\\\|/|g'
+  [
+   {
+    "abspath": "foo",
+    "data": "test\ntest\n",
+    "path": "sub/repo/foo"
+   }
+  ]
   $ mkdir -p tmp/sub/repo
   $ hg cat -r 0 --output tmp/%p_p sub/repo/foo
   $ cat tmp/sub/repo/foo_p
@@ -1044,7 +1055,7 @@ Create repo without default path, pull top repo, and see what happens on update
   added 2 changesets with 3 changes to 2 files
   (run 'hg update' to get a working copy)
   $ hg -R issue1852b update
-  abort: default path for subrepository not found (in subrepo sub/repo) (glob)
+  abort: default path for subrepository not found (in subrepository "sub/repo") (glob)
   [255]
 
 Ensure a full traceback, not just the SubrepoAbort part
@@ -1204,6 +1215,7 @@ Check hg update --clean
   ? s/c
   $ hg update -C
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  updated to "925c17564ef8: 13"
   2 other heads for branch "default"
   $ hg status -S
   ? s/b
@@ -1777,77 +1789,3 @@ Test that '[paths]' is configured correctly at subrepo creation
   +bar
 
   $ cd ..
-
-test for ssh exploit 2017-07-25
-
-  $ cat >> $HGRCPATH << EOF
-  > [ui]
-  > ssh = sh -c "read l; read l; read l"
-  > EOF
-
-  $ hg init malicious-proxycommand
-  $ cd malicious-proxycommand
-  $ echo 's = [hg]ssh://-oProxyCommand=touch${IFS}owned/path' > .hgsub
-  $ hg init s
-  $ cd s
-  $ echo init > init
-  $ hg add
-  adding init
-  $ hg commit -m init
-  $ cd ..
-  $ hg add .hgsub
-  $ hg ci -m 'add subrepo'
-  $ cd ..
-  $ hg clone malicious-proxycommand malicious-proxycommand-clone
-  updating to branch default
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch${IFS}owned/path' (in subrepo s)
-  [255]
-
-also check that a percent encoded '-' (%2D) doesn't work
-
-  $ cd malicious-proxycommand
-  $ echo 's = [hg]ssh://%2DoProxyCommand=touch${IFS}owned/path' > .hgsub
-  $ hg ci -m 'change url to percent encoded'
-  $ cd ..
-  $ rm -r malicious-proxycommand-clone
-  $ hg clone malicious-proxycommand malicious-proxycommand-clone
-  updating to branch default
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch${IFS}owned/path' (in subrepo s)
-  [255]
-
-also check for a pipe
-
-  $ cd malicious-proxycommand
-  $ echo 's = [hg]ssh://fakehost|touch${IFS}owned/path' > .hgsub
-  $ hg ci -m 'change url to pipe'
-  $ cd ..
-  $ rm -r malicious-proxycommand-clone
-  $ hg clone malicious-proxycommand malicious-proxycommand-clone
-  updating to branch default
-  abort: no suitable response from remote hg!
-  [255]
-  $ [ ! -f owned ] || echo 'you got owned'
-
-also check that a percent encoded '|' (%7C) doesn't work
-
-  $ cd malicious-proxycommand
-  $ echo 's = [hg]ssh://fakehost%7Ctouch%20owned/path' > .hgsub
-  $ hg ci -m 'change url to percent encoded pipe'
-  $ cd ..
-  $ rm -r malicious-proxycommand-clone
-  $ hg clone malicious-proxycommand malicious-proxycommand-clone
-  updating to branch default
-  abort: no suitable response from remote hg!
-  [255]
-  $ [ ! -f owned ] || echo 'you got owned'
-
-and bad usernames:
-  $ cd malicious-proxycommand
-  $ echo 's = [hg]ssh://-oProxyCommand=touch owned@example.com/path' > .hgsub
-  $ hg ci -m 'owned username'
-  $ cd ..
-  $ rm -r malicious-proxycommand-clone
-  $ hg clone malicious-proxycommand malicious-proxycommand-clone
-  updating to branch default
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch owned@example.com/path' (in subrepo s)
-  [255]

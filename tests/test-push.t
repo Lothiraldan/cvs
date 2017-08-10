@@ -297,28 +297,22 @@ Test push hook locking
   lock:  user *, process * (*s) (glob)
   wlock: user *, process * (*s) (glob)
 
-SEC: check for unsafe ssh url
+Test bare push with multiple race checking options
+--------------------------------------------------
 
-  $ cat >> $HGRCPATH << EOF
-  > [ui]
-  > ssh = sh -c "read l; read l; read l"
-  > EOF
-
-  $ hg -R test-revflag push 'ssh://-oProxyCommand=touch${IFS}owned/path'
-  pushing to ssh://-oProxyCommand%3Dtouch%24%7BIFS%7Downed/path
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch${IFS}owned/path'
-  [255]
-  $ hg -R test-revflag push 'ssh://%2DoProxyCommand=touch${IFS}owned/path'
-  pushing to ssh://-oProxyCommand%3Dtouch%24%7BIFS%7Downed/path
-  abort: potentially unsafe url: 'ssh://-oProxyCommand=touch${IFS}owned/path'
-  [255]
-  $ hg -R test-revflag push 'ssh://fakehost|touch${IFS}owned/path'
-  pushing to ssh://fakehost%7Ctouch%24%7BIFS%7Downed/path
-  abort: no suitable response from remote hg!
-  [255]
-  $ hg -R test-revflag push 'ssh://fakehost%7Ctouch%20owned/path'
-  pushing to ssh://fakehost%7Ctouch%20owned/path
-  abort: no suitable response from remote hg!
-  [255]
-
-  $ [ ! -f owned ] || echo 'you got owned'
+  $ hg init test-bare-push-no-concurrency
+  $ hg init test-bare-push-unrelated-concurrency
+  $ hg -R test-revflag push -r 0 test-bare-push-no-concurrency --config server.concurrent-push-mode=strict
+  pushing to test-bare-push-no-concurrency
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  $ hg -R test-revflag push -r 0 test-bare-push-unrelated-concurrency --config server.concurrent-push-mode=check-related
+  pushing to test-bare-push-unrelated-concurrency
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
