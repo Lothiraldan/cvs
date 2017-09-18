@@ -63,7 +63,7 @@ doc:
 
 cleanbutpackages:
 	-$(PYTHON) setup.py clean --all # ignore errors from this command
-	find contrib doc hgext hgext3rd i18n mercurial tests \
+	find contrib doc hgext hgext3rd i18n mercurial tests hgdemandimport \
 		\( -name '*.py[cdo]' -o -name '*.so' \) -exec rm -f '{}' ';'
 	rm -f MANIFEST MANIFEST.in hgext/__index__.py tests/*.err
 	rm -f mercurial/__modulepolicy__.py
@@ -186,7 +186,7 @@ osx:
 	  PREFIX=/usr/local \
 	  clean install
 	mkdir -p $${OUTPUTDIR:-dist}
-	HGVER=$(shell python contrib/genosxversion.py $(OSXVERSIONFLAGS) build/mercurial/Library/Python/2.7/site-packages/mercurial/__version__.py ) && \
+	HGVER=$$(python contrib/genosxversion.py $(OSXVERSIONFLAGS) build/mercurial/Library/Python/2.7/site-packages/mercurial/__version__.py) && \
 	OSXVER=$$(sw_vers -productVersion | cut -d. -f1,2) && \
 	pkgbuild --filter \\.DS_Store --root build/mercurial/ \
 	  --identifier org.mercurial-scm.mercurial \

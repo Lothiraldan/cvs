@@ -904,7 +904,8 @@ class ui(object):
                 if not getattr(self.ferr, 'closed', False):
                     self.ferr.flush()
         except IOError as inst:
-            raise error.StdioError(inst)
+            if inst.errno not in (errno.EPIPE, errno.EIO, errno.EBADF):
+                raise error.StdioError(inst)
 
     def flush(self):
         # opencode timeblockedsection because this is a critical path
@@ -913,12 +914,14 @@ class ui(object):
             try:
                 self.fout.flush()
             except IOError as err:
-                raise error.StdioError(err)
+                if err.errno not in (errno.EPIPE, errno.EIO, errno.EBADF):
+                    raise error.StdioError(err)
             finally:
                 try:
                     self.ferr.flush()
                 except IOError as err:
-                    raise error.StdioError(err)
+                    if err.errno not in (errno.EPIPE, errno.EIO, errno.EBADF):
+                        raise error.StdioError(err)
         finally:
             self._blockedtimes['stdio_blocked'] += \
                 (util.timer() - starttime) * 1000
@@ -945,8 +948,14 @@ class ui(object):
                    not "history, "summary" not "summ", etc.
         """
         if (self._disablepager
-            or self.pageractive
-            or command in self.configlist('pager', 'ignore')
+            or self.pageractive):
+            # how pager should do is already determined
+            return
+
+        if not command.startswith('internal-always-') and (
+            # explicit --pager=on (= 'internal-always-' prefix) should
+            # take precedence over disabling factors below
+            command in self.configlist('pager', 'ignore')
             or not self.configbool('ui', 'paginate')
             or not self.configbool('pager', 'attend-' + command, True)
             # TODO: if we want to allow HGPLAINEXCEPT=pager,
@@ -1209,6 +1218,7 @@ class ui(object):
         # call write() so output goes through subclassed implementation
         # e.g. color extension on Windows
         self.write(prompt, prompt=True)
+        self.flush()
 
         # instead of trying to emulate raw_input, swap (self.fin,
         # self.fout) with (sys.stdin, sys.stdout)
