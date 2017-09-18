@@ -1,3 +1,5 @@
+#require fuzzywuzzy
+
   $ cat >> $HGRCPATH << EOF
   > [extensions]
   > releasenotes=
@@ -376,3 +378,45 @@ Overriding default sections (For eg. by default feature = New Features)
   
   * Adds a new feature.
 
+  $ cd ..
+
+Testing output for the --check (-c) flag
+
+  $ hg init check-flag
+  $ cd check-flag
+
+  $ touch a
+  $ hg -q commit -A -l - << EOF
+  > .. asf::
+  > 
+  >    First paragraph under this admonition.
+  > EOF
+
+Suggest similar admonition in place of the invalid one.
+
+  $ hg releasenotes -r . -c
+  Invalid admonition 'asf' present in changeset 4026fe9e1c20
+
+  $ touch b
+  $ hg -q commit -A -l - << EOF
+  > .. fixes::
+  > 
+  >    First paragraph under this admonition.
+  > EOF
+
+  $ hg releasenotes -r . -c
+  Invalid admonition 'fixes' present in changeset 0e7130d2705c
+  (did you mean fix?)
+
+  $ cd ..
+
+Usage of --list flag
+
+  $ hg init relnotes-list
+  $ cd relnotes-list
+  $ hg releasenotes -l
+  feature: New Features
+  bc: Backwards Compatibility Changes
+  fix: Bug Fixes
+  perf: Performance Improvements
+  api: API Changes

@@ -481,6 +481,13 @@ def showgraphnode(repo, ctx, **args):
     else:
         return 'o'
 
+@templatekeyword('graphwidth')
+def showgraphwidth(repo, ctx, templ, **args):
+    """Integer. The width of the graph drawn by 'log --graph' or zero."""
+    # The value args['graphwidth'] will be this function, so we use an internal
+    # name to pass the value through props into this function.
+    return args.get('_graphwidth', 0)
+
 @templatekeyword('index')
 def showindex(**args):
     """Integer. The current iteration of the loop. (0 indexed)"""
@@ -667,6 +674,48 @@ def showsuccessorssets(repo, ctx, **args):
     return _hybrid(gen(data), data, lambda x: {'successorset': x},
                    lambda d: d["successorset"])
 
+@templatekeyword("succsandmarkers")
+def showsuccsandmarkers(repo, ctx, **args):
+    """Returns a list of dict for each final successor of ctx.
+
+    The dict contains successors node id in "successors" keys and the list of
+    obs-markers from ctx to the set of successors in "markers"
+
+    (EXPERIMENTAL)
+    """
+
+    values = obsutil.successorsandmarkers(repo, ctx)
+
+    if values is None:
+        values = []
+
+    # Format successors and markers to avoid exposing binary to templates
+    data = []
+    for i in values:
+        # Format successors
+        successors = i['successors']
+
+        successors = [hex(n) for n in successors]
+        successors = _hybrid(None, successors,
+                             lambda x: {'ctx': repo[x], 'revcache': {}},
+                             lambda d: _formatrevnode(d['ctx']))
+
+        # Format markers
+        finalmarkers = []
+        for m in i['markers']:
+            hexprec = hex(m[0])
+            hexsucs = tuple(hex(n) for n in m[1])
+            hexparents = None
+            if m[5] is not None:
+                hexparents = tuple(hex(n) for n in m[5])
+            newmarker = (hexprec, hexsucs) + m[2:5] + (hexparents,) + m[6:]
+            finalmarkers.append(newmarker)
+
+        data.append({'successors': successors, 'markers': finalmarkers})
+
+    f = _showlist('succsandmarkers', data, args)
+    return _hybrid(f, data, lambda x: x, lambda d: d)
+
 @templatekeyword('p1rev')
 def showp1rev(repo, ctx, templ, **args):
     """Integer. The repository-local revision number of the changeset's
@@ -772,18 +821,31 @@ def loadkeyword(ui, extname, registrarobj):
         keywords[name] = func
 
 @templatekeyword('termwidth')
-def termwidth(repo, ctx, templ, **args):
+def showtermwidth(repo, ctx, templ, **args):
     """Integer. The width of the current terminal."""
     return repo.ui.termwidth()
 
 @templatekeyword('troubles')
-def showtroubles(**args):
+def showtroubles(repo, **args):
     """List of strings. Evolution troubles affecting the changeset.
+
+    (DEPRECATED)
+    """
+    msg = ("'troubles' is deprecated, "
+           "use 'instabilities'")
+    repo.ui.deprecwarn(msg, '4.4')
+
+    return showinstabilities(repo=repo, **args)
+
+@templatekeyword('instabilities')
+def showinstabilities(**args):
+    """List of strings. Evolution instabilities affecting the changeset.
 
     (EXPERIMENTAL)
     """
     args = pycompat.byteskwargs(args)
-    return showlist('trouble', args['ctx'].troubles(), args)
+    return showlist('instability', args['ctx'].instabilities(), args,
+                    plural='instabilities')
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = keywords.values()

@@ -9,6 +9,7 @@
 from __future__ import absolute_import
 
 import errno
+import io
 import os
 import socket
 import struct
@@ -86,13 +87,51 @@ def _wraphttpresponse(resp):
 
     resp.__class__ = readerproxy
 
+class _multifile(object):
+    def __init__(self, *fileobjs):
+        for f in fileobjs:
+            if not util.safehasattr(f, 'length'):
+                raise ValueError(
+                    '_multifile only supports file objects that '
+                    'have a length but this one does not:', type(f), f)
+        self._fileobjs = fileobjs
+        self._index = 0
+
+    @property
+    def length(self):
+        return sum(f.length for f in self._fileobjs)
+
+    def read(self, amt=None):
+        if amt <= 0:
+            return ''.join(f.read() for f in self._fileobjs)
+        parts = []
+        while amt and self._index < len(self._fileobjs):
+            parts.append(self._fileobjs[self._index].read(amt))
+            got = len(parts[-1])
+            if got < amt:
+                self._index += 1
+            amt -= got
+        return ''.join(parts)
+
+    def seek(self, offset, whence=os.SEEK_SET):
+        if whence != os.SEEK_SET:
+            raise NotImplementedError(
+                '_multifile does not support anything other'
+                ' than os.SEEK_SET for whence on seek()')
+        if offset != 0:
+            raise NotImplementedError(
+                '_multifile only supports seeking to start, but that '
+                'could be fixed if you need it')
+        for f in self._fileobjs:
+            f.seek(0)
+        self._index = 0
+
 class httppeer(wireproto.wirepeer):
     def __init__(self, ui, path):
-        self.path = path
-        self.caps = None
-        self.handler = None
-        self.urlopener = None
-        self.requestbuilder = None
+        self._path = path
+        self._caps = None
+        self._urlopener = None
+        self._requestbuilder = None
         u = util.url(path)
         if u.query or u.fragment:
             raise error.Abort(_('unsupported URL component: "%s"') %
@@ -101,39 +140,60 @@ class httppeer(wireproto.wirepeer):
         # urllib cannot handle URLs with embedded user or passwd
         self._url, authinfo = u.authinfo()
 
-        self.ui = ui
-        self.ui.debug('using %s\n' % self._url)
+        self._ui = ui
+        ui.debug('using %s\n' % self._url)
 
-        self.urlopener = url.opener(ui, authinfo)
-        self.requestbuilder = urlreq.request
+        self._urlopener = url.opener(ui, authinfo)
+        self._requestbuilder = urlreq.request
 
     def __del__(self):
-        urlopener = getattr(self, 'urlopener', None)
+        urlopener = getattr(self, '_urlopener', None)
         if urlopener:
             for h in urlopener.handlers:
                 h.close()
                 getattr(h, "close_all", lambda : None)()
 
+    # Begin of _basepeer interface.
+
+    @util.propertycache
+    def ui(self):
+        return self._ui
+
     def url(self):
-        return self.path
+        return self._path
+
+    def local(self):
+        return None
+
+    def peer(self):
+        return self
+
+    def canpush(self):
+        return True
+
+    def close(self):
+        pass
+
+    # End of _basepeer interface.
+
+    # Begin of _basewirepeer interface.
+
+    def capabilities(self):
+        if self._caps is None:
+            try:
+                self._fetchcaps()
+            except error.RepoError:
+                self._caps = set()
+            self.ui.debug('capabilities: %s\n' %
+                          (' '.join(self._caps or ['none'])))
+        return self._caps
+
+    # End of _basewirepeer interface.
 
     # look up capabilities only when needed
 
     def _fetchcaps(self):
-        self.caps = set(self._call('capabilities').split())
-
-    def _capabilities(self):
-        if self.caps is None:
-            try:
-                self._fetchcaps()
-            except error.RepoError:
-                self.caps = set()
-            self.ui.debug('capabilities: %s\n' %
-                          (' '.join(self.caps or ['none'])))
-        return self.caps
-
-    def lock(self):
-        raise error.Abort(_('operation not supported over http'))
+        self._caps = set(self._call('capabilities').split())
 
     def _callstream(self, cmd, _compressible=False, **args):
         if cmd == 'pushkey':
@@ -148,18 +208,20 @@ class httppeer(wireproto.wirepeer):
         # Important: don't use self.capable() here or else you end up
         # with infinite recursion when trying to look up capabilities
         # for the first time.
-        postargsok = self.caps is not None and 'httppostargs' in self.caps
-        # TODO: support for httppostargs when data is a file-like
-        # object rather than a basestring
-        canmungedata = not data or isinstance(data, basestring)
-        if postargsok and canmungedata:
+        postargsok = self._caps is not None and 'httppostargs' in self._caps
+        if postargsok and args:
             strargs = urlreq.urlencode(sorted(args.items()))
-            if strargs:
-                if not data:
-                    data = strargs
-                elif isinstance(data, basestring):
-                    data = strargs + data
-                headers['X-HgArgs-Post'] = len(strargs)
+            if not data:
+                data = strargs
+            else:
+                if isinstance(data, basestring):
+                    i = io.BytesIO(data)
+                    i.length = len(data)
+                    data = i
+                argsio = io.BytesIO(strargs)
+                argsio.length = len(strargs)
+                data = _multifile(argsio, data)
+            headers['X-HgArgs-Post'] = len(strargs)
         else:
             if len(args) > 0:
                 httpheader = self.capable('httpheader')
@@ -193,7 +255,7 @@ class httppeer(wireproto.wirepeer):
         protoparams = []
 
         mediatypes = set()
-        if self.caps is not None:
+        if self._caps is not None:
             mt = self.capable('httpmediatype')
             if mt:
                 protoparams.append('0.1')
@@ -221,13 +283,13 @@ class httppeer(wireproto.wirepeer):
         if varyheaders:
             headers['Vary'] = ','.join(varyheaders)
 
-        req = self.requestbuilder(cu, data, headers)
+        req = self._requestbuilder(cu, data, headers)
 
         if data is not None:
             self.ui.debug("sending %s bytes\n" % size)
             req.add_unredirected_header('Content-Length', '%d' % size)
         try:
-            resp = self.urlopener.open(req)
+            resp = self._urlopener.open(req)
         except urlerr.httperror as inst:
             if inst.code == 401:
                 raise error.Abort(_('authorization failed'))

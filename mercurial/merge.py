@@ -495,12 +495,14 @@ class mergestate(object):
                 f.close()
             else:
                 wctx[dfile].remove(ignoremissing=True)
-            complete, r, deleted = filemerge.premerge(self._repo, self._local,
-                                                      lfile, fcd, fco, fca,
+            complete, r, deleted = filemerge.premerge(self._repo, wctx,
+                                                      self._local, lfile, fcd,
+                                                      fco, fca,
                                                       labels=self._labels)
         else:
-            complete, r, deleted = filemerge.filemerge(self._repo, self._local,
-                                                       lfile, fcd, fco, fca,
+            complete, r, deleted = filemerge.filemerge(self._repo, wctx,
+                                                       self._local, lfile, fcd,
+                                                       fco, fca,
                                                        labels=self._labels)
         if r is None:
             # no real conflict
@@ -753,7 +755,7 @@ def _checkcollision(repo, wmf, actions):
 
     # check case-folding collision in provisional merged manifest
     foldmap = {}
-    for f in sorted(pmmf):
+    for f in pmmf:
         fold = util.normcase(f)
         if fold in foldmap:
             raise error.Abort(_("case-folding collision between %s and %s")
@@ -1082,18 +1084,21 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force,
 
     return prunedactions, diverge, renamedelete
 
+def _getcwd():
+    try:
+        return pycompat.getcwd()
+    except OSError as err:
+        if err.errno == errno.ENOENT:
+            return None
+        raise
+
 def batchremove(repo, wctx, actions):
     """apply removes to the working directory
 
     yields tuples for progress updates
     """
     verbose = repo.ui.verbose
-    try:
-        cwd = pycompat.getcwd()
-    except OSError as err:
-        if err.errno != errno.ENOENT:
-            raise
-        cwd = None
+    cwd = _getcwd()
     i = 0
     for f, args, msg in actions:
         repo.ui.debug(" %s: %s -> r\n" % (f, msg))
@@ -1111,18 +1116,16 @@ def batchremove(repo, wctx, actions):
         i += 1
     if i > 0:
         yield i, f
-    if cwd:
-        # cwd was present before we started to remove files
-        # let's check if it is present after we removed them
-        try:
-            pycompat.getcwd()
-        except OSError as err:
-            if err.errno != errno.ENOENT:
-                raise
-            # Print a warning if cwd was deleted
-            repo.ui.warn(_("current directory was removed\n"
-                           "(consider changing to repo root: %s)\n") %
-                         repo.root)
+
+    if cwd and not _getcwd():
+        # cwd was removed in the course of removing files; print a helpful
+        # warning.
+        repo.ui.warn(_("current directory was removed\n"
+                       "(consider changing to repo root: %s)\n") % repo.root)
+
+    # It's necessary to flush here in case we're inside a worker fork and will
+    # quit after this function.
+    wctx.flushall()
 
 def batchget(repo, mctx, wctx, actions):
     """apply gets to the working directory
@@ -1150,9 +1153,7 @@ def batchget(repo, mctx, wctx, actions):
                 except OSError as e:
                     if e.errno != errno.ENOENT:
                         raise
-
-            if repo.wvfs.isdir(f) and not repo.wvfs.islink(f):
-                repo.wvfs.removedirs(f)
+            wctx[f].clearunknown()
             wctx[f].write(fctx(f).data(), flags, backgroundclose=True)
             if i == 100:
                 yield i, f
@@ -1160,6 +1161,10 @@ def batchget(repo, mctx, wctx, actions):
             i += 1
     if i > 0:
         yield i, f
+
+    # It's necessary to flush here in case we're inside a worker fork and will
+    # quit after this function.
+    wctx.flushall()
 
 def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
     """apply the merge action list to the working directory
@@ -1228,6 +1233,10 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
         z += i
         progress(_updating, z, item=item, total=numupdates, unit=_files)
     removed = len(actions['r'])
+
+    # We should flush before forking into worker processes, since those workers
+    # flush when they complete, and we don't want to duplicate work.
+    wctx.flushall()
 
     # get in parallel
     prog = worker.worker(repo.ui, 0.001, batchget, (repo, mctx, wctx),
@@ -1700,6 +1709,7 @@ def update(repo, node, branchmerge, force, ancestor=None,
             repo.vfs.write('updatestate', p2.hex())
 
         stats = applyupdates(repo, actions, wc, p2, overwrite, labels=labels)
+        wc.flushall()
 
         if not partial:
             with repo.dirstate.parentchange():

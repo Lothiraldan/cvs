@@ -264,14 +264,14 @@ G onto F - rebase onto an ancestor:
 F onto G - rebase onto a descendant:
 
   $ hg rebase -s 5 -d 6
-  abort: source is ancestor of destination
+  abort: source and destination form a cycle
   [255]
 
 G onto B - merge revision with both parents not in ancestors of target:
 
   $ hg rebase -s 6 -d 1
   rebasing 6:eea13746799a "G"
-  abort: cannot use revision 6 as base, result would have 3 parents
+  abort: cannot rebase 6:eea13746799a without moving at least one of its parents
   [255]
   $ hg rebase --abort
   rebase aborted
@@ -966,7 +966,7 @@ Testing rebase being called inside another transaction
   > [extensions]
   > wraprebase=$TESTTMP/wraprebase.py
   > [experimental]
-  > evolution=all
+  > stabilization=all
   > EOF
 
   $ hg debugdrawdag <<'EOS'

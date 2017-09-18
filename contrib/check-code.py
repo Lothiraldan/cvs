@@ -119,7 +119,9 @@ testpats = [
     (r'\[[^\]]+==', '[ foo == bar ] is a bashism, use [ foo = bar ] instead'),
     (r'(^|\|\s*)grep (-\w\s+)*[^|]*[(|]\w',
      "use egrep for extended grep syntax"),
-    (r'/bin/', "don't use explicit paths for tools"),
+    (r'(^|\|\s*)e?grep .*\\S', "don't use \\S in regular expression"),
+    (r'(?<!!)/bin/', "don't use explicit paths for tools"),
+    (r'#!.*/bash', "don't use bash in shebang, use sh"),
     (r'[^\n]\Z', "no trailing newline"),
     (r'export .*=', "don't export and assign at once"),
     (r'^source\b', "don't use 'source', use '.'"),
@@ -159,7 +161,7 @@ testpats = [
 ]
 
 testfilters = [
-    (r"( *)(#([^\n]*\S)?)", repcomment),
+    (r"( *)(#([^!][^\n]*\S)?)", repcomment),
     (r"<<(\S+)((.|\n)*?\n\1)", rephere),
 ]
 
@@ -232,7 +234,7 @@ for i in [0, 1]:
 
 utestfilters = [
     (r"<<(\S+)((.|\n)*?\n  > \1)", rephere),
-    (r"( +)(#([^\n]*\S)?)", repcomment),
+    (r"( +)(#([^!][^\n]*\S)?)", repcomment),
 ]
 
 pypats = [
@@ -260,7 +262,7 @@ pypats = [
     (r'(\S[ \t]+|^[ \t]+)\n', "trailing whitespace"),
 #    (r'^\s+[^_ \n][^_. \n]+_[^_\n]+\s*=',
 #     "don't use underbars in identifiers"),
-    (r'^\s+(self\.)?[A-za-z][a-z0-9]+[A-Z]\w* = ',
+    (r'^\s+(self\.)?[A-Za-z][a-z0-9]+[A-Z]\w* = ',
      "don't use camelcase in identifiers"),
     (r'^\s*(if|while|def|class|except|try)\s[^[\n]*:\s*[^\\n]#\s]+',
      "linebreak after :"),

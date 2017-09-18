@@ -211,10 +211,10 @@
   summary:     b
   
   $ hg debugbundle .hg/strip-backup/*
-  Stream params: sortdict([('Compression', 'BZ')])
-  changegroup -- "sortdict([('version', '02'), ('nbchanges', '1')])"
+  Stream params: {Compression: BZ}
+  changegroup -- {nbchanges: 1, version: 02}
       264128213d290d868c54642d13aeaa3675551a78
-  phase-heads -- 'sortdict()'
+  phase-heads -- {}
       264128213d290d868c54642d13aeaa3675551a78 draft
   $ hg pull .hg/strip-backup/*
   pulling from .hg/strip-backup/264128213d29-0b39d6bf-backup.hg
@@ -961,7 +961,8 @@ Use delayedstrip to strip inside a transaction
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ echo 3 >> I
   $ cat > $TESTTMP/delayedstrip.py <<EOF
-  > from mercurial import repair, commands
+  > from __future__ import absolute_import
+  > from mercurial import commands, repair
   > def reposetup(ui, repo):
   >     def getnodes(expr):
   >         return [repo.changelog.node(r) for r in repo.revs(expr)]
@@ -1063,8 +1064,8 @@ we have reusable code here
   $ cd $TESTTMP/scmutilcleanup.obsstore
   $ cat >> .hg/hgrc <<EOF
   > [experimental]
-  > evolution=all
-  > evolution.track-operation=1
+  > stabilization=all
+  > stabilization.track-operation=1
   > EOF
 
   $ hg log -r . -T '\n' --config extensions.t=$TESTTMP/scmutilcleanup.py

@@ -13,6 +13,7 @@ process simpler by automating it.
 
 from __future__ import absolute_import
 
+import difflib
 import errno
 import re
 import sys
@@ -46,6 +47,7 @@ DEFAULT_SECTIONS = [
 ]
 
 RE_DIRECTIVE = re.compile('^\.\. ([a-zA-Z0-9_]+)::\s*([^$]+)?$')
+RE_ISSUE = r'\bissue ?[0-9]{4,6}(?![0-9])\b'
 
 BULLET_SECTION = _('Other Changes')
 
@@ -92,6 +94,8 @@ class parsedreleasenotes(object):
         This is used to combine multiple sources of release notes together.
         """
         for section in other:
+            existingnotes = converttitled(self.titledforsection(section)) + \
+                convertnontitled(self.nontitledforsection(section))
             for title, paragraphs in other.titledforsection(section):
                 if self.hastitledinsection(section, title):
                     # TODO prompt for resolution if different and running in
@@ -100,16 +104,32 @@ class parsedreleasenotes(object):
                              (title, section))
                     continue
 
-                # TODO perform similarity comparison and try to match against
-                # existing.
+                incoming_str = converttitled([(title, paragraphs)])[0]
+                if section == 'fix':
+                    issue = getissuenum(incoming_str)
+                    if issue:
+                        if findissue(ui, existingnotes, issue):
+                            continue
+
+                if similar(ui, existingnotes, incoming_str):
+                    continue
+
                 self.addtitleditem(section, title, paragraphs)
 
             for paragraphs in other.nontitledforsection(section):
                 if paragraphs in self.nontitledforsection(section):
                     continue
 
-                # TODO perform similarily comparison and try to match against
-                # existing.
+                incoming_str = convertnontitled([paragraphs])[0]
+                if section == 'fix':
+                    issue = getissuenum(incoming_str)
+                    if issue:
+                        if findissue(ui, existingnotes, issue):
+                            continue
+
+                if similar(ui, existingnotes, incoming_str):
+                    continue
+
                 self.addnontitleditem(section, paragraphs)
 
 class releasenotessections(object):
@@ -136,6 +156,77 @@ class releasenotessections(object):
 
         return None
 
+def converttitled(titledparagraphs):
+    """
+    Convert titled paragraphs to strings
+    """
+    string_list = []
+    for title, paragraphs in titledparagraphs:
+        lines = []
+        for para in paragraphs:
+            lines.extend(para)
+        string_list.append(' '.join(lines))
+    return string_list
+
+def convertnontitled(nontitledparagraphs):
+    """
+    Convert non-titled bullets to strings
+    """
+    string_list = []
+    for paragraphs in nontitledparagraphs:
+        lines = []
+        for para in paragraphs:
+            lines.extend(para)
+        string_list.append(' '.join(lines))
+    return string_list
+
+def getissuenum(incoming_str):
+    """
+    Returns issue number from the incoming string if it exists
+    """
+    issue = re.search(RE_ISSUE, incoming_str, re.IGNORECASE)
+    if issue:
+        issue = issue.group()
+    return issue
+
+def findissue(ui, existing, issue):
+    """
+    Returns true if issue number already exists in notes.
+    """
+    if any(issue in s for s in existing):
+        ui.write(_('"%s" already exists in notes; ignoring\n') % issue)
+        return True
+    else:
+        return False
+
+def similar(ui, existing, incoming_str):
+    """
+    Returns true if similar note found in existing notes.
+    """
+    if len(incoming_str.split()) > 10:
+        merge = similaritycheck(incoming_str, existing)
+        if not merge:
+            ui.write(_('"%s" already exists in notes file; ignoring\n')
+                     % incoming_str)
+            return True
+        else:
+            return False
+    else:
+        return False
+
+def similaritycheck(incoming_str, existingnotes):
+    """
+    Returns true when note fragment can be merged to existing notes.
+    """
+    import fuzzywuzzy.fuzz as fuzz
+    merge = True
+    for bullet in existingnotes:
+        score = fuzz.token_set_ratio(incoming_str, bullet)
+        if score > 75:
+            merge = False
+            break
+    return merge
+
 def getcustomadmonitions(repo):
     ctx = repo['.']
     p = config.config()
@@ -151,6 +242,42 @@ def getcustomadmonitions(repo):
     if '.hgreleasenotes' in ctx:
         read('.hgreleasenotes')
     return p['sections']
+
+def checkadmonitions(ui, repo, directives, revs):
+    """
+    Checks the commit messages for admonitions and their validity.
+
+    .. abcd::
+
+       First paragraph under this admonition
+
+    For this commit message, using `hg releasenotes -r . --check`
+    returns: Invalid admonition 'abcd' present in changeset 3ea92981e103
+
+    As admonition 'abcd' is neither present in default nor custom admonitions
+    """
+    for rev in revs:
+        ctx = repo[rev]
+        admonition = re.search(RE_DIRECTIVE, ctx.description())
+        if admonition:
+            if admonition.group(1) in directives:
+                continue
+            else:
+                ui.write(_("Invalid admonition '%s' present in changeset %s"
+                           "\n") % (admonition.group(1), ctx.hex()[:12]))
+                sim = lambda x: difflib.SequenceMatcher(None,
+                    admonition.group(1), x).ratio()
+
+                similar = [s for s in directives if sim(s) > 0.6]
+                if len(similar) == 1:
+                    ui.write(_("(did you mean %s?)\n") % similar[0])
+                elif similar:
+                    ss = ", ".join(sorted(similar))
+                    ui.write(_("(did you mean one of %s?)\n") % ss)
+
+def _getadmonitionlist(ui, sections):
+    for section in sections:
+        ui.write("%s: %s\n" % (section[0], section[1]))
 
 def parsenotesfromrevisions(repo, directives, revs):
     notes = parsedreleasenotes()
@@ -336,15 +463,19 @@ def serializenotes(sections, notes):
 
             lines.append('')
 
-    if lines[-1]:
+    if lines and lines[-1]:
         lines.append('')
 
     return '\n'.join(lines)
 
 @command('releasenotes',
-    [('r', 'rev', '', _('revisions to process for release notes'), _('REV'))],
-    _('[-r REV] FILE'))
-def releasenotes(ui, repo, file_, rev=None):
+    [('r', 'rev', '', _('revisions to process for release notes'), _('REV')),
+    ('c', 'check', False, _('checks for validity of admonitions (if any)'),
+        _('REV')),
+    ('l', 'list', False, _('list the available admonitions with their title'),
+        None)],
+    _('hg releasenotes [-r REV] [-c] FILE'))
+def releasenotes(ui, repo, file_=None, **opts):
     """parse release notes from commit messages into an output file
 
     Given an output file and set of revisions, this command will parse commit
@@ -421,8 +552,14 @@ def releasenotes(ui, repo, file_, rev=None):
     release note after it has been added to the release notes file.
     """
     sections = releasenotessections(ui, repo)
+    if opts.get('list'):
+        return _getadmonitionlist(ui, sections)
 
+    rev = opts.get('rev')
     revs = scmutil.revrange(repo, [rev or 'not public()'])
+    if opts.get('check'):
+        return checkadmonitions(ui, repo, sections.names(), revs)
+
     incoming = parsenotesfromrevisions(repo, sections.names(), revs)
 
     try:

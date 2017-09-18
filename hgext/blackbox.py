@@ -73,21 +73,6 @@ configitem('blackbox', 'logsource',
 
 lastui = None
 
-filehandles = {}
-
-def _openlog(vfs):
-    path = vfs.join('blackbox.log')
-    if path in filehandles:
-        return filehandles[path]
-    filehandles[path] = fp = vfs('blackbox.log', 'a')
-    return fp
-
-def _closelog(vfs):
-    path = vfs.join('blackbox.log')
-    fp = filehandles[path]
-    del filehandles[path]
-    fp.close()
-
 def wrapui(ui):
     class blackboxui(ui.__class__):
         def __init__(self, src=None):
@@ -95,22 +80,24 @@ def wrapui(ui):
             if src is None:
                 self._partialinit()
             else:
-                self._bbfp = getattr(src, '_bbfp', None)
                 self._bbinlog = False
                 self._bbrepo = getattr(src, '_bbrepo', None)
-                self._bbvfs = getattr(src, '_bbvfs', None)
 
         def _partialinit(self):
-            if util.safehasattr(self, '_bbvfs'):
+            if self._bbvfs:
                 return
-            self._bbfp = None
             self._bbinlog = False
             self._bbrepo = None
-            self._bbvfs = None
 
         def copy(self):
             self._partialinit()
             return self.__class__(self)
+
+        @property
+        def _bbvfs(self):
+            repo = getattr(self, '_bbrepo', None)
+            if repo:
+                return repo.vfs
 
         @util.propertycache
         def track(self):
@@ -132,25 +119,23 @@ def wrapui(ui):
                         self.debug("warning: cannot rename '%s' to '%s': %s\n" %
                                    (newpath, oldpath, err.strerror))
 
-            fp = _openlog(self._bbvfs)
             maxsize = self.configbytes('blackbox', 'maxsize')
+            name = 'blackbox.log'
             if maxsize > 0:
-                st = self._bbvfs.fstat(fp)
-                if st.st_size >= maxsize:
-                    path = fp.name
-                    _closelog(self._bbvfs)
-                    maxfiles = self.configint('blackbox', 'maxfiles', 7)
-                    for i in xrange(maxfiles - 1, 1, -1):
-                        rotate(oldpath='%s.%d' % (path, i - 1),
-                               newpath='%s.%d' % (path, i))
-                    rotate(oldpath=path,
-                           newpath=maxfiles > 0 and path + '.1')
-                    fp = _openlog(self._bbvfs)
-            return fp
-
-        def _bbwrite(self, fmt, *args):
-            self._bbfp.write(fmt % args)
-            self._bbfp.flush()
+                try:
+                    st = self._bbvfs.stat(name)
+                except OSError:
+                    pass
+                else:
+                    if st.st_size >= maxsize:
+                        path = self._bbvfs.join(name)
+                        maxfiles = self.configint('blackbox', 'maxfiles', 7)
+                        for i in xrange(maxfiles - 1, 1, -1):
+                            rotate(oldpath='%s.%d' % (path, i - 1),
+                                   newpath='%s.%d' % (path, i))
+                        rotate(oldpath=path,
+                               newpath=maxfiles > 0 and path + '.1')
+            return self._bbvfs(name, 'a')
 
         def log(self, event, *msg, **opts):
             global lastui
@@ -160,16 +145,7 @@ def wrapui(ui):
             if not '*' in self.track and not event in self.track:
                 return
 
-            if self._bbfp:
-                ui = self
-            elif self._bbvfs:
-                try:
-                    self._bbfp = self._openlogfile()
-                except (IOError, OSError) as err:
-                    self.debug('warning: cannot write to blackbox.log: %s\n' %
-                               err.strerror)
-                    del self._bbvfs
-                    self._bbfp = None
+            if self._bbvfs:
                 ui = self
             else:
                 # certain ui instances exist outside the context of
@@ -177,12 +153,12 @@ def wrapui(ui):
                 # was seen.
                 ui = lastui
 
-            if not ui or not ui._bbfp:
+            if not ui:
                 return
             if not lastui or ui._bbrepo:
                 lastui = ui
             if ui._bbinlog:
-                # recursion guard
+                # recursion and failure guard
                 return
             try:
                 ui._bbinlog = True
@@ -205,19 +181,23 @@ def wrapui(ui):
                 else:
                     src = ''
                 try:
-                    ui._bbwrite('%s %s @%s%s (%s)%s> %s',
-                        date, user, rev, changed, pid, src, formattedmsg)
-                except IOError as err:
+                    fmt = '%s %s @%s%s (%s)%s> %s'
+                    args = (date, user, rev, changed, pid, src, formattedmsg)
+                    with ui._openlogfile() as fp:
+                        fp.write(fmt % args)
+                except (IOError, OSError) as err:
                     self.debug('warning: cannot write to blackbox.log: %s\n' %
                                err.strerror)
+                    # do not restore _bbinlog intentionally to avoid failed
+                    # logging again
+                else:
+                    ui._bbinlog = False
             finally:
-                ui._bbinlog = False
+                pass
 
         def setrepo(self, repo):
-            self._bbfp = None
             self._bbinlog = False
             self._bbrepo = repo
-            self._bbvfs = repo.vfs
 
     ui.__class__ = blackboxui
     uimod.ui = blackboxui

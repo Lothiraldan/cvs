@@ -1,3 +1,9 @@
+  $ cat > $TESTTMP/filter.py <<EOF
+  > from __future__ import absolute_import, print_function
+  > import re
+  > import sys
+  > print(re.sub("\n[ \t]", " ", sys.stdin.read()), end="")
+  > EOF
 
   $ cat <<EOF >> $HGRCPATH
   > [extensions]
@@ -175,8 +181,7 @@ the python call below wraps continuation lines, which appear on Mac OS X 10.5 be
 of the very long subject line
 pull (minimal config)
 
-  $ hg --traceback --cwd b pull ../a | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n[\t ]", " ", sys.stdin.read()),'
+  $ hg --traceback --cwd b pull ../a | $PYTHON $TESTTMP/filter.py
   pulling from ../a
   searching for changes
   adding changesets
@@ -205,6 +210,7 @@ pull (minimal config)
   @@ -1,1 +1,2 @@ a
   +a
   (run 'hg update' to get a working copy)
+
   $ cat <<EOF >> $HGRCPATH
   > [notify]
   > config = `pwd`/.notify.conf
@@ -228,8 +234,7 @@ pull
 
   $ hg --cwd b rollback
   repository tip rolled back to revision 0 (undo pull)
-  $ hg --traceback --cwd b pull ../a  | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --traceback --cwd b pull ../a  | $PYTHON $TESTTMP/filter.py
   pulling from ../a
   searching for changes
   adding changesets
@@ -254,8 +259,7 @@ pull
   diff -r cb9a9f314b8b -r 0647d048b600 a
   --- a/a	Thu Jan 01 00:00:00 1970 +0000
   +++ b/a	Thu Jan 01 00:00:01 1970 +0000
-  @@ -1,1 +1,2 @@
-   a
+  @@ -1,1 +1,2 @@ a
   +a
   (run 'hg update' to get a working copy)
 
@@ -272,8 +276,7 @@ pull
 
   $ hg --cwd b rollback
   repository tip rolled back to revision 0 (undo pull)
-  $ hg --traceback --cwd b pull ../a | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --traceback --cwd b pull ../a | $PYTHON $TESTTMP/filter.py
   pulling from ../a
   searching for changes
   adding changesets
@@ -294,17 +297,14 @@ pull
   changeset 0647d048b600 in b
   description: b
   diffstat:
-  
-   a |  1 +
-   1 files changed, 1 insertions(+), 0 deletions(-)
+   a |  1 + 1 files changed, 1 insertions(+), 0 deletions(-)
   
   diffs (6 lines):
   
   diff -r cb9a9f314b8b -r 0647d048b600 a
   --- a/a	Thu Jan 01 00:00:00 1970 +0000
   +++ b/a	Thu Jan 01 00:00:01 1970 +0000
-  @@ -1,1 +1,2 @@
-   a
+  @@ -1,1 +1,2 @@ a
   +a
   (run 'hg update' to get a working copy)
 
@@ -321,8 +321,7 @@ test merge
   (branch merge, don't forget to commit)
   $ hg ci -m merge -d '3 0'
   $ cd ..
-  $ hg --traceback --cwd b pull ../a | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --traceback --cwd b pull ../a | $PYTHON $TESTTMP/filter.py
   pulling from ../a
   searching for changes
   adding changesets
@@ -343,17 +342,14 @@ test merge
   changeset 0a184ce6067f in b
   description: adda2
   diffstat:
-  
-   a |  1 +
-   1 files changed, 1 insertions(+), 0 deletions(-)
+   a |  1 + 1 files changed, 1 insertions(+), 0 deletions(-)
   
   diffs (6 lines):
   
   diff -r cb9a9f314b8b -r 0a184ce6067f a
   --- a/a	Thu Jan 01 00:00:00 1970 +0000
   +++ b/a	Thu Jan 01 00:00:02 1970 +0000
-  @@ -1,1 +1,2 @@
-   a
+  @@ -1,1 +1,2 @@ a
   +a
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
@@ -380,7 +376,7 @@ non-ascii content and truncation of multi-byte subject
   $ hg --cwd a --encoding utf-8 commit -A -d '0 0' \
   >   -m `$PYTHON -c 'print "\xc3\xa0\xc3\xa1\xc3\xa2\xc3\xa3\xc3\xa4"'`
   $ hg --traceback --cwd b --encoding utf-8 pull ../a | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  >   $PYTHON $TESTTMP/filter.py
   pulling from ../a
   searching for changes
   adding changesets
@@ -401,18 +397,14 @@ non-ascii content and truncation of multi-byte subject
   changeset 7ea05ad269dc in b
   description: \xc3\xa0\xc3\xa1\xc3\xa2\xc3\xa3\xc3\xa4 (esc)
   diffstat:
-  
-   a |  1 +
-   1 files changed, 1 insertions(+), 0 deletions(-)
+   a |  1 + 1 files changed, 1 insertions(+), 0 deletions(-)
   
   diffs (7 lines):
   
   diff -r 6a0cf76b2701 -r 7ea05ad269dc a
   --- a/a	Thu Jan 01 00:00:03 1970 +0000
   +++ b/a	Thu Jan 01 00:00:00 1970 +0000
-  @@ -1,2 +1,3 @@
-   a
-   a
+  @@ -1,2 +1,3 @@ a a
   +a
   (run 'hg update' to get a working copy)
 
@@ -435,7 +427,7 @@ long lines
   added 1 changesets with 1 changes to 1 files
   notify: sending 2 subscribers 1 changes
   (run 'hg update' to get a working copy)
-  $ $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", file("b/mbox").read()),'
+  $ $PYTHON $TESTTMP/filter.py < b/mbox
   From test@test.com ... ... .. ..:..:.. .... (re)
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
@@ -451,19 +443,14 @@ long lines
   changeset e0be44cf638b in b
   description: long line
   diffstat:
-  
-   a |  1 +
-   1 files changed, 1 insertions(+), 0 deletions(-)
+   a |  1 + 1 files changed, 1 insertions(+), 0 deletions(-)
   
   diffs (8 lines):
   
   diff -r 7ea05ad269dc -r e0be44cf638b a
   --- a/a	Thu Jan 01 00:00:00 1970 +0000
   +++ b/a	Thu Jan 01 00:00:00 1970 +0000
-  @@ -1,3 +1,4 @@
-   a
-   a
-   a
+  @@ -1,3 +1,4 @@ a a a
   +nonononononononononononononononononononononononononononononononononononono=
   nononononononononononononononononononononononononononononononononononononon=
   ononononononononononononononononononononononononononononononononononononono=
@@ -500,8 +487,7 @@ long lines
   (branches are permanent and global, did you want a bookmark?)
   $ echo a >> a/a
   $ hg --cwd a ci -m test -d '1 0'
-  $ hg --traceback --cwd b pull ../a | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --traceback --cwd b pull ../a | $PYTHON $TESTTMP/filter.py
   pulling from ../a
   searching for changes
   adding changesets
@@ -530,8 +516,7 @@ from different branch
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ echo a >> a/a
   $ hg --cwd a ci -m test -d '1 0'
-  $ hg --traceback --cwd b pull ../a | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --traceback --cwd b pull ../a | $PYTHON $TESTTMP/filter.py
   pulling from ../a
   searching for changes
   adding changesets
@@ -559,8 +544,7 @@ default template:
   $ mv "$HGRCPATH.new" $HGRCPATH
   $ echo a >> a/a
   $ hg --cwd a commit -m 'default template'
-  $ hg --cwd b pull ../a -q | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --cwd b pull ../a -q | $PYTHON $TESTTMP/filter.py
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -589,8 +573,7 @@ with style:
   > EOF
   $ echo a >> a/a
   $ hg --cwd a commit -m 'with style'
-  $ hg --cwd b pull ../a -q | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --cwd b pull ../a -q | $PYTHON $TESTTMP/filter.py
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -613,8 +596,7 @@ with template (overrides style):
   > EOF
   $ echo a >> a/a
   $ hg --cwd a commit -m 'with template'
-  $ hg --cwd b pull ../a -q | \
-  >   $PYTHON -c 'import sys,re; print re.sub("\n\t", " ", sys.stdin.read()),'
+  $ hg --cwd b pull ../a -q | $PYTHON $TESTTMP/filter.py
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit

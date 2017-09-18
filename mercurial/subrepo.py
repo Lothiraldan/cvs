@@ -134,7 +134,7 @@ def state(ctx, ui):
             # However, we still want to allow back references to go
             # through unharmed, so we turn r'\\1' into r'\1'. Again,
             # extra escapes are needed because re.sub string decodes.
-            repl = re.sub(r'\\\\([0-9]+)', r'\\\1', repl)
+            repl = re.sub(br'\\\\([0-9]+)', br'\\\1', repl)
             try:
                 src = re.sub(pattern, repl, src, 1)
             except re.error as e:
@@ -1154,7 +1154,7 @@ class svnsubrepo(abstractsubrepo):
     @propertycache
     def _svnversion(self):
         output, err = self._svncommand(['--version', '--quiet'], filename=None)
-        m = re.search(r'^(\d+)\.(\d+)', output)
+        m = re.search(br'^(\d+)\.(\d+)', output)
         if not m:
             raise error.Abort(_('cannot retrieve svn tool version'))
         return (int(m.group(1)), int(m.group(2)))
@@ -1346,7 +1346,8 @@ class gitsubrepo(abstractsubrepo):
             genericerror = _("error executing git for subrepo '%s': %s")
             notfoundhint = _("check git is installed and in your PATH")
             if e.errno != errno.ENOENT:
-                raise error.Abort(genericerror % (self._path, e.strerror))
+                raise error.Abort(genericerror % (
+                    self._path, encoding.strtolocal(e.strerror)))
             elif pycompat.osname == 'nt':
                 try:
                     self._gitexecutable = 'git.cmd'
@@ -1358,7 +1359,7 @@ class gitsubrepo(abstractsubrepo):
                             hint=notfoundhint)
                     else:
                         raise error.Abort(genericerror % (self._path,
-                            e2.strerror))
+                            encoding.strtolocal(e2.strerror)))
             else:
                 raise error.Abort(_("couldn't find git for subrepo '%s'")
                     % self._path, hint=notfoundhint)
@@ -1372,11 +1373,11 @@ class gitsubrepo(abstractsubrepo):
 
     @staticmethod
     def _gitversion(out):
-        m = re.search(r'^git version (\d+)\.(\d+)\.(\d+)', out)
+        m = re.search(br'^git version (\d+)\.(\d+)\.(\d+)', out)
         if m:
             return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
-        m = re.search(r'^git version (\d+)\.(\d+)', out)
+        m = re.search(br'^git version (\d+)\.(\d+)', out)
         if m:
             return (int(m.group(1)), int(m.group(2)), 0)
 
@@ -1387,23 +1388,23 @@ class gitsubrepo(abstractsubrepo):
         '''ensure git version is new enough
 
         >>> _checkversion = gitsubrepo._checkversion
-        >>> _checkversion('git version 1.6.0')
+        >>> _checkversion(b'git version 1.6.0')
         'ok'
-        >>> _checkversion('git version 1.8.5')
+        >>> _checkversion(b'git version 1.8.5')
         'ok'
-        >>> _checkversion('git version 1.4.0')
+        >>> _checkversion(b'git version 1.4.0')
         'abort'
-        >>> _checkversion('git version 1.5.0')
+        >>> _checkversion(b'git version 1.5.0')
         'warning'
-        >>> _checkversion('git version 1.9-rc0')
+        >>> _checkversion(b'git version 1.9-rc0')
         'ok'
-        >>> _checkversion('git version 1.9.0.265.g81cdec2')
+        >>> _checkversion(b'git version 1.9.0.265.g81cdec2')
         'ok'
-        >>> _checkversion('git version 1.9.0.GIT')
+        >>> _checkversion(b'git version 1.9.0.GIT')
         'ok'
-        >>> _checkversion('git version 12345')
+        >>> _checkversion(b'git version 12345')
         'unknown'
-        >>> _checkversion('no')
+        >>> _checkversion(b'no')
         'unknown'
         '''
         version = gitsubrepo._gitversion(out)

@@ -8,7 +8,6 @@
 from __future__ import absolute_import
 
 import hashlib
-import itertools
 import os
 import tempfile
 
@@ -22,12 +21,14 @@ from .node import (
 from . import (
     bundle2,
     changegroup as changegroupmod,
+    discovery,
     encoding,
     error,
     exchange,
     peer,
     pushkey as pushkeymod,
     pycompat,
+    repository,
     streamclone,
     util,
 )
@@ -80,49 +81,19 @@ class abstractserverproto(object):
     #    """
     #    raise NotImplementedError()
 
-class remotebatch(peer.batcher):
-    '''batches the queued calls; uses as few roundtrips as possible'''
-    def __init__(self, remote):
-        '''remote must support _submitbatch(encbatch) and
-        _submitone(op, encargs)'''
-        peer.batcher.__init__(self)
-        self.remote = remote
-    def submit(self):
-        req, rsp = [], []
-        for name, args, opts, resref in self.calls:
-            mtd = getattr(self.remote, name)
-            batchablefn = getattr(mtd, 'batchable', None)
-            if batchablefn is not None:
-                batchable = batchablefn(mtd.im_self, *args, **opts)
-                encargsorres, encresref = next(batchable)
-                if encresref:
-                    req.append((name, encargsorres,))
-                    rsp.append((batchable, encresref, resref,))
-                else:
-                    resref.set(encargsorres)
-            else:
-                if req:
-                    self._submitreq(req, rsp)
-                    req, rsp = [], []
-                resref.set(mtd(*args, **opts))
-        if req:
-            self._submitreq(req, rsp)
-    def _submitreq(self, req, rsp):
-        encresults = self.remote._submitbatch(req)
-        for encres, r in zip(encresults, rsp):
-            batchable, encresref, resref = r
-            encresref.set(encres)
-            resref.set(next(batchable))
-
 class remoteiterbatcher(peer.iterbatcher):
     def __init__(self, remote):
         super(remoteiterbatcher, self).__init__()
         self._remote = remote
 
     def __getattr__(self, name):
-        if not getattr(self._remote, name, False):
-            raise AttributeError(
-                'Attempted to iterbatch non-batchable call to %r' % name)
+        # Validate this method is batchable, since submit() only supports
+        # batchable methods.
+        fn = getattr(self._remote, name)
+        if not getattr(fn, 'batchable', None):
+            raise error.ProgrammingError('Attempted to batch a non-batchable '
+                                         'call to %r' % name)
+
         return super(remoteiterbatcher, self).__getattr__(name)
 
     def submit(self):
@@ -131,23 +102,47 @@ class remoteiterbatcher(peer.iterbatcher):
         This is mostly valuable over http where request sizes can be
         limited, but can be used in other places as well.
         """
-        req, rsp = [], []
-        for name, args, opts, resref in self.calls:
-            mtd = getattr(self._remote, name)
+        # 2-tuple of (command, arguments) that represents what will be
+        # sent over the wire.
+        requests = []
+
+        # 4-tuple of (command, final future, @batchable generator, remote
+        # future).
+        results = []
+
+        for command, args, opts, finalfuture in self.calls:
+            mtd = getattr(self._remote, command)
             batchable = mtd.batchable(mtd.im_self, *args, **opts)
-            encargsorres, encresref = next(batchable)
-            assert encresref
-            req.append((name, encargsorres))
-            rsp.append((batchable, encresref))
-        if req:
-            self._resultiter = self._remote._submitbatch(req)
-        self._rsp = rsp
+
+            commandargs, fremote = next(batchable)
+            assert fremote
+            requests.append((command, commandargs))
+            results.append((command, finalfuture, batchable, fremote))
+
+        if requests:
+            self._resultiter = self._remote._submitbatch(requests)
+
+        self._results = results
 
     def results(self):
-        for (batchable, encresref), encres in itertools.izip(
-                self._rsp, self._resultiter):
-            encresref.set(encres)
-            yield next(batchable)
+        for command, finalfuture, batchable, remotefuture in self._results:
+            # Get the raw result, set it in the remote future, feed it
+            # back into the @batchable generator so it can be decoded, and
+            # set the result on the final future to this value.
+            remoteresult = next(self._resultiter)
+            remotefuture.set(remoteresult)
+            finalfuture.set(next(batchable))
+
+            # Verify our @batchable generators only emit 2 values.
+            try:
+                next(batchable)
+            except StopIteration:
+                pass
+            else:
+                raise error.ProgrammingError('%s @batchable generator emitted '
+                                             'unexpected value count' % command)
+
+            yield finalfuture.value
 
 # Forward a couple of names from peer to make wireproto interactions
 # slightly more sensible.
@@ -219,7 +214,7 @@ gboptsmap = {'heads':  'nodes',
 
 # client side
 
-class wirepeer(peer.peerrepository):
+class wirepeer(repository.legacypeer):
     """Client-side interface for communicating with a peer repository.
 
     Methods commonly call wire protocol commands of the same name.
@@ -227,33 +222,7 @@ class wirepeer(peer.peerrepository):
     See also httppeer.py and sshpeer.py for protocol-specific
     implementations of this interface.
     """
-    def batch(self):
-        if self.capable('batch'):
-            return remotebatch(self)
-        else:
-            return peer.localbatch(self)
-    def _submitbatch(self, req):
-        """run batch request <req> on the server
-
-        Returns an iterator of the raw responses from the server.
-        """
-        rsp = self._callstream("batch", cmds=encodebatchcmds(req))
-        chunk = rsp.read(1024)
-        work = [chunk]
-        while chunk:
-            while ';' not in chunk and chunk:
-                chunk = rsp.read(1024)
-                work.append(chunk)
-            merged = ''.join(work)
-            while ';' in merged:
-                one, merged = merged.split(';', 1)
-                yield unescapearg(one)
-            chunk = rsp.read(1024)
-            work = [merged, chunk]
-        yield unescapearg(''.join(work))
-
-    def _submitone(self, op, args):
-        return self._call(op, **args)
+    # Begin of basewirepeer interface.
 
     def iterbatch(self):
         return remoteiterbatcher(self)
@@ -267,7 +236,8 @@ class wirepeer(peer.peerrepository):
         success, data = d[:-1].split(" ", 1)
         if int(success):
             yield bin(data)
-        self._abort(error.RepoError(data))
+        else:
+            self._abort(error.RepoError(data))
 
     @batchable
     def heads(self):
@@ -305,26 +275,17 @@ class wirepeer(peer.peerrepository):
         except TypeError:
             self._abort(error.ResponseError(_("unexpected response:"), d))
 
-    def branches(self, nodes):
-        n = encodelist(nodes)
-        d = self._call("branches", nodes=n)
-        try:
-            br = [tuple(decodelist(b)) for b in d.splitlines()]
-            return br
-        except ValueError:
-            self._abort(error.ResponseError(_("unexpected response:"), d))
-
-    def between(self, pairs):
-        batch = 8 # avoid giant requests
-        r = []
-        for i in xrange(0, len(pairs), batch):
-            n = " ".join([encodelist(p, '-') for p in pairs[i:i + batch]])
-            d = self._call("between", pairs=n)
-            try:
-                r.extend(l and decodelist(l) or [] for l in d.splitlines())
-            except ValueError:
-                self._abort(error.ResponseError(_("unexpected response:"), d))
-        return r
+    @batchable
+    def listkeys(self, namespace):
+        if not self.capable('pushkey'):
+            yield {}, None
+        f = future()
+        self.ui.debug('preparing listkeys for "%s"\n' % namespace)
+        yield {'namespace': encoding.fromlocal(namespace)}, f
+        d = f.value
+        self.ui.debug('received listkey for "%s": %i bytes\n'
+                      % (namespace, len(d)))
+        yield pushkeymod.decodekeys(d)
 
     @batchable
     def pushkey(self, namespace, key, old, new):
@@ -347,33 +308,8 @@ class wirepeer(peer.peerrepository):
             self.ui.status(_('remote: '), l)
         yield d
 
-    @batchable
-    def listkeys(self, namespace):
-        if not self.capable('pushkey'):
-            yield {}, None
-        f = future()
-        self.ui.debug('preparing listkeys for "%s"\n' % namespace)
-        yield {'namespace': encoding.fromlocal(namespace)}, f
-        d = f.value
-        self.ui.debug('received listkey for "%s": %i bytes\n'
-                      % (namespace, len(d)))
-        yield pushkeymod.decodekeys(d)
-
     def stream_out(self):
         return self._callstream('stream_out')
-
-    def changegroup(self, nodes, kind):
-        n = encodelist(nodes)
-        f = self._callcompressable("changegroup", roots=n)
-        return changegroupmod.cg1unpacker(f, 'UN')
-
-    def changegroupsubset(self, bases, heads, kind):
-        self.requirecap('changegroupsubset', _('look up remote changes'))
-        bases = encodelist(bases)
-        heads = encodelist(heads)
-        f = self._callcompressable("changegroupsubset",
-                                   bases=bases, heads=heads)
-        return changegroupmod.cg1unpacker(f, 'UN')
 
     def getbundle(self, source, **kwargs):
         self.requirecap('getbundle', _('look up remote changes'))
@@ -444,6 +380,69 @@ class wirepeer(peer.peerrepository):
             stream = self._calltwowaystream('unbundle', cg, heads=heads)
             ret = bundle2.getunbundler(self.ui, stream)
         return ret
+
+    # End of basewirepeer interface.
+
+    # Begin of baselegacywirepeer interface.
+
+    def branches(self, nodes):
+        n = encodelist(nodes)
+        d = self._call("branches", nodes=n)
+        try:
+            br = [tuple(decodelist(b)) for b in d.splitlines()]
+            return br
+        except ValueError:
+            self._abort(error.ResponseError(_("unexpected response:"), d))
+
+    def between(self, pairs):
+        batch = 8 # avoid giant requests
+        r = []
+        for i in xrange(0, len(pairs), batch):
+            n = " ".join([encodelist(p, '-') for p in pairs[i:i + batch]])
+            d = self._call("between", pairs=n)
+            try:
+                r.extend(l and decodelist(l) or [] for l in d.splitlines())
+            except ValueError:
+                self._abort(error.ResponseError(_("unexpected response:"), d))
+        return r
+
+    def changegroup(self, nodes, kind):
+        n = encodelist(nodes)
+        f = self._callcompressable("changegroup", roots=n)
+        return changegroupmod.cg1unpacker(f, 'UN')
+
+    def changegroupsubset(self, bases, heads, kind):
+        self.requirecap('changegroupsubset', _('look up remote changes'))
+        bases = encodelist(bases)
+        heads = encodelist(heads)
+        f = self._callcompressable("changegroupsubset",
+                                   bases=bases, heads=heads)
+        return changegroupmod.cg1unpacker(f, 'UN')
+
+    # End of baselegacywirepeer interface.
+
+    def _submitbatch(self, req):
+        """run batch request <req> on the server
+
+        Returns an iterator of the raw responses from the server.
+        """
+        rsp = self._callstream("batch", cmds=encodebatchcmds(req))
+        chunk = rsp.read(1024)
+        work = [chunk]
+        while chunk:
+            while ';' not in chunk and chunk:
+                chunk = rsp.read(1024)
+                work.append(chunk)
+            merged = ''.join(work)
+            while ';' in merged:
+                one, merged = merged.split(';', 1)
+                yield unescapearg(one)
+            chunk = rsp.read(1024)
+            work = [merged, chunk]
+        yield unescapearg(''.join(work))
+
+    def _submitone(self, op, args):
+        return self._call(op, **args)
 
     def debugwireargs(self, one, two, three=None, four=None, five=None):
         # don't pass optional arguments left at their default value
@@ -796,14 +795,18 @@ def capabilities(repo, proto):
 @wireprotocommand('changegroup', 'roots')
 def changegroup(repo, proto, roots):
     nodes = decodelist(roots)
-    cg = changegroupmod.changegroup(repo, nodes, 'serve')
+    outgoing = discovery.outgoing(repo, missingroots=nodes,
+                                  missingheads=repo.heads())
+    cg = changegroupmod.makechangegroup(repo, outgoing, '01', 'serve')
     return streamres(reader=cg, v1compressible=True)
 
 @wireprotocommand('changegroupsubset', 'bases heads')
 def changegroupsubset(repo, proto, bases, heads):
     bases = decodelist(bases)
     heads = decodelist(heads)
-    cg = changegroupmod.changegroupsubset(repo, bases, heads, 'serve')
+    outgoing = discovery.outgoing(repo, missingroots=bases,
+                                  missingheads=heads)
+    cg = changegroupmod.makechangegroup(repo, outgoing, '01', 'serve')
     return streamres(reader=cg, v1compressible=True)
 
 @wireprotocommand('debugwireargs', 'one two *')

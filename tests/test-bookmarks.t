@@ -191,6 +191,48 @@ force rename to existent bookmark
 
   $ hg bookmark -f -m X Y
 
+rename bookmark using .
+
+  $ hg book rename-me
+  $ hg book -m . renamed
+  $ hg bookmark
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         0:f7b1eb17ad24
+   * renamed                   2:db815d6d32e6
+  $ hg up -q Y
+  $ hg book -d renamed
+
+rename bookmark using . with no active bookmark
+
+  $ hg book rename-me
+  $ hg book -i rename-me
+  $ hg book -m . renamed
+  abort: no active bookmark
+  [255]
+  $ hg up -q Y
+  $ hg book -d rename-me
+
+delete bookmark using .
+
+  $ hg book delete-me
+  $ hg book -d .
+  $ hg bookmark
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         0:f7b1eb17ad24
+  $ hg up -q Y
+
+delete bookmark using . with no active bookmark
+
+  $ hg book delete-me
+  $ hg book -i delete-me
+  $ hg book -d .
+  abort: no active bookmark
+  [255]
+  $ hg up -q Y
+  $ hg book -d delete-me
+
 list bookmarks
 
   $ hg bookmark
@@ -906,8 +948,10 @@ ensure changelog is written before bookmarks
   $ echo a > a
 
   $ cat > $TESTTMP/pausefinalize.py <<EOF
+  > from __future__ import absolute_import
+  > import os
+  > import time
   > from mercurial import extensions, localrepo
-  > import os, time
   > def transaction(orig, self, desc, report=None):
   >    tr = orig(self, desc, report)
   >    def sleep(*args, **kwargs):

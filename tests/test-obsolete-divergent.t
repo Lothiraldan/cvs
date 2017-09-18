@@ -9,7 +9,7 @@ Enable obsolete
   > [ui]
   > logtemplate = {rev}:{node|short} {desc}\n
   > [experimental]
-  > evolution=createmarkers
+  > stabilization=createmarkers
   > [extensions]
   > drawdag=$TESTDIR/drawdag.py
   > [alias]
@@ -80,7 +80,7 @@ A_1 have two direct and divergent successors A_1 and A_1
       82623d38b9ba
   392fd25390da
       392fd25390da
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
   2:82623d38b9ba A_1
   3:392fd25390da A_2
   $ hg debugsuccessorssets 'all()' --closest
@@ -107,7 +107,7 @@ check that mercurial refuse to push
   $ hg push ../other
   pushing to ../other
   searching for changes
-  abort: push includes divergent changeset: 392fd25390da!
+  abort: push includes content-divergent changeset: 392fd25390da!
   [255]
 
   $ cd ..
@@ -147,7 +147,7 @@ indirect divergence with known changeset
       01f36c5a8fda
   01f36c5a8fda
       01f36c5a8fda
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
   2:82623d38b9ba A_1
   4:01f36c5a8fda A_3
   $ hg debugsuccessorssets 'all()' --closest
@@ -199,7 +199,7 @@ indirect divergence with known changeset
       82623d38b9ba
   392fd25390da
       392fd25390da
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
   2:82623d38b9ba A_1
   3:392fd25390da A_2
   $ hg debugsuccessorssets 'all()' --closest
@@ -278,7 +278,7 @@ divergence that converge again is not divergence anymore
       01f36c5a8fda
   01f36c5a8fda
       01f36c5a8fda
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
   $ hg debugsuccessorssets 'all()' --closest
   d20a80d4def3
       d20a80d4def3
@@ -322,7 +322,7 @@ split is not divergences
       82623d38b9ba
   392fd25390da
       392fd25390da
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
   $ hg debugsuccessorssets 'all()' --closest
   d20a80d4def3
       d20a80d4def3
@@ -410,7 +410,7 @@ Even when subsequent rewriting happen
       e442cfc57690
   e442cfc57690
       e442cfc57690
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
 
 Check more complex obsolescence graft (with divergence)
 
@@ -515,7 +515,7 @@ Check more complex obsolescence graft (with divergence)
       14608b260df8
   bed64f5d2f5a
       bed64f5d2f5a
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
   4:01f36c5a8fda A_3
   8:7ae126973a96 A_7
   9:14608b260df8 A_8
@@ -614,7 +614,7 @@ fix the divergence
       a139f71be9da
   a139f71be9da
       a139f71be9da
-  $ hg log -r 'divergent()'
+  $ hg log -r 'contentdivergent()'
 
   $ cd ..
 
@@ -670,10 +670,10 @@ Use scmutil.cleanupnodes API to create divergence
 
   $ rm .hg/localtags
   $ hg cleanup --config extensions.t=$TESTTMP/scmutilcleanup.py
-  $ hg log -G -T '{rev}:{node|short} {desc} {troubles}' -r 'sort(all(), topo)'
-  @  5:1a2a9b5b0030 B2 divergent
+  $ hg log -G -T '{rev}:{node|short} {desc} {instabilities}' -r 'sort(all(), topo)'
+  @  5:1a2a9b5b0030 B2 content-divergent
   |
-  | o  4:70d5a63ca112 B4 divergent
+  | o  4:70d5a63ca112 B4 content-divergent
   | |
   | o  1:48b9aae0607f Z
   |

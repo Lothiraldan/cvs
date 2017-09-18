@@ -163,7 +163,8 @@ def callcatch(ui, func):
             ui.warn(_("(lock might be very busy)\n"))
     except error.LockUnavailable as inst:
         ui.warn(_("abort: could not lock %s: %s\n") %
-               (inst.desc or inst.filename, inst.strerror))
+               (inst.desc or inst.filename,
+                encoding.strtolocal(inst.strerror)))
     except error.OutOfBandError as inst:
         if inst.args:
             msg = _("abort: remote error:\n")
@@ -226,16 +227,18 @@ def callcatch(ui, func):
             pass
         elif getattr(inst, "strerror", None):
             if getattr(inst, "filename", None):
-                ui.warn(_("abort: %s: %s\n") % (inst.strerror, inst.filename))
+                ui.warn(_("abort: %s: %s\n") % (
+                    encoding.strtolocal(inst.strerror), inst.filename))
             else:
-                ui.warn(_("abort: %s\n") % inst.strerror)
+                ui.warn(_("abort: %s\n") % encoding.strtolocal(inst.strerror))
         else:
             raise
     except OSError as inst:
         if getattr(inst, "filename", None) is not None:
-            ui.warn(_("abort: %s: '%s'\n") % (inst.strerror, inst.filename))
+            ui.warn(_("abort: %s: '%s'\n") % (
+                encoding.strtolocal(inst.strerror), inst.filename))
         else:
-            ui.warn(_("abort: %s\n") % inst.strerror)
+            ui.warn(_("abort: %s\n") % encoding.strtolocal(inst.strerror))
     except MemoryError:
         ui.warn(_("abort: out of memory\n"))
     except SystemExit as inst:
@@ -273,7 +276,7 @@ def checkportable(ui, f):
     if abort or warn:
         msg = util.checkwinfilename(f)
         if msg:
-            msg = "%s: %r" % (msg, f)
+            msg = "%s: %s" % (msg, util.shellquote(f))
             if abort:
                 raise error.Abort(msg)
             ui.warn(_("warning: %s\n") % msg)
@@ -402,11 +405,11 @@ def intrev(ctx):
         return wdirrev
     return rev
 
-def revsingle(repo, revspec, default='.'):
+def revsingle(repo, revspec, default='.', localalias=None):
     if not revspec and revspec != 0:
         return repo[default]
 
-    l = revrange(repo, [revspec])
+    l = revrange(repo, [revspec], localalias=localalias)
     if not l:
         raise error.Abort(_('empty revision set'))
     return repo[l.last()]
@@ -445,7 +448,7 @@ def revpair(repo, revs):
 
     return repo.lookup(first), repo.lookup(second)
 
-def revrange(repo, specs):
+def revrange(repo, specs, localalias=None):
     """Execute 1 to many revsets and return the union.
 
     This is the preferred mechanism for executing revsets using user-specified
@@ -471,7 +474,7 @@ def revrange(repo, specs):
         if isinstance(spec, int):
             spec = revsetlang.formatspec('rev(%d)', spec)
         allspecs.append(spec)
-    return repo.anyrevs(allspecs, user=True)
+    return repo.anyrevs(allspecs, user=True, localalias=localalias)
 
 def meaningfulparents(repo, ctx):
     """Return list of meaningful (or all if debug) parentrevs for rev.
@@ -550,7 +553,7 @@ def origpath(ui, repo, filepath):
     '''customize where .orig files are created
 
     Fetch user defined path from config file: [ui] origbackuppath = <path>
-    Fall back to default (filepath) if not specified
+    Fall back to default (filepath with .orig suffix) if not specified
     '''
     origbackuppath = ui.config('ui', 'origbackuppath')
     if origbackuppath is None:
@@ -564,7 +567,7 @@ def origpath(ui, repo, filepath):
         ui.note(_('creating directory: %s\n') % origbackupdir)
         util.makedirs(origbackupdir)
 
-    return fullorigpath + ".orig"
+    return fullorigpath
 
 class _containsnode(object):
     """proxy __contains__(node) to container.__contains__ which accepts revs"""

@@ -719,8 +719,11 @@ def summary(web, req, tmpl):
     start = max(0, count - web.maxchanges)
     end = min(count, start + web.maxchanges)
 
+    desc = web.config("web", "description")
+    if not desc:
+        desc = 'unknown'
     return tmpl("summary",
-                desc=web.config("web", "description", "unknown"),
+                desc=desc,
                 owner=get_contact(web.config) or "unknown",
                 lastchange=tip.date(),
                 tags=tagentries,
@@ -759,7 +762,7 @@ def filediff(web, req, tmpl):
         ctx = fctx.changectx()
     basectx = ctx.p1()
 
-    style = web.config('web', 'style', 'paper')
+    style = web.config('web', 'style')
     if 'style' in req.form:
         style = req.form['style'][0]
 
@@ -996,7 +999,7 @@ def filelog(web, req, tmpl):
     revs = fctx.filelog().revs(start, end - 1)
     entries = []
 
-    diffstyle = web.config('web', 'style', 'paper')
+    diffstyle = web.config('web', 'style')
     if 'style' in req.form:
         diffstyle = req.form['style'][0]
 
@@ -1111,13 +1114,13 @@ def archive(web, req, tmpl):
 
     ctx = webutil.changectx(web.repo, req)
     pats = []
-    matchfn = scmutil.match(ctx, [])
+    match = scmutil.match(ctx, [])
     file = req.form.get('file', None)
     if file:
         pats = ['path:' + file[0]]
-        matchfn = scmutil.match(ctx, pats, default='path')
+        match = scmutil.match(ctx, pats, default='path')
         if pats:
-            files = [f for f in ctx.manifest().keys() if matchfn(f)]
+            files = [f for f in ctx.manifest().keys() if match(f)]
             if not files:
                 raise ErrorResponse(HTTP_NOT_FOUND,
                     'file(s) not found: %s' % file[0])
@@ -1132,7 +1135,7 @@ def archive(web, req, tmpl):
     req.respond(HTTP_OK, mimetype)
 
     archival.archive(web.repo, req, cnode, artype, prefix=name,
-                     matchfn=matchfn,
+                     matchfn=match,
                      subrepos=web.configbool("web", "archivesubrepos"))
     return []
 

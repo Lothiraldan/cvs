@@ -277,13 +277,13 @@ class MercurialHTTPServer(_mixin, httpservermod.httpserver, object):
 
         handler.preparehttpserver(self, ui)
 
-        prefix = ui.config('web', 'prefix', '')
+        prefix = ui.config('web', 'prefix')
         if prefix:
             prefix = '/' + prefix.strip('/')
         self.prefix = prefix
 
-        alog = openlog(ui.config('web', 'accesslog', '-'), ui.fout)
-        elog = openlog(ui.config('web', 'errorlog', '-'), ui.ferr)
+        alog = openlog(ui.config('web', 'accesslog'), ui.fout)
+        elog = openlog(ui.config('web', 'errorlog'), ui.ferr)
         self.accesslog = alog
         self.errorlog = elog
 
@@ -326,8 +326,8 @@ def create_server(ui, app):
         mimetypes.init()
         sys.setdefaultencoding(oldenc)
 
-    address = ui.config('web', 'address', '')
-    port = util.getport(ui.config('web', 'port', 8000))
+    address = ui.config('web', 'address')
+    port = util.getport(ui.config('web', 'port'))
     try:
         return cls(ui, app, (address, port), handler)
     except socket.error as inst:

@@ -1128,6 +1128,44 @@ class revlog(object):
 
         raise LookupError(id, self.indexfile, _('no match found'))
 
+    def shortest(self, hexnode, minlength=1):
+        """Find the shortest unambiguous prefix that matches hexnode."""
+        def isvalid(test):
+            try:
+                if self._partialmatch(test) is None:
+                    return False
+
+                try:
+                    i = int(test)
+                    # if we are a pure int, then starting with zero will not be
+                    # confused as a rev; or, obviously, if the int is larger
+                    # than the value of the tip rev
+                    if test[0] == '0' or i > len(self):
+                        return True
+                    return False
+                except ValueError:
+                    return True
+            except error.RevlogError:
+                return False
+            except error.WdirUnsupported:
+                # single 'ff...' match
+                return True
+
+        shortest = hexnode
+        startlength = max(6, minlength)
+        length = startlength
+        while True:
+            test = hexnode[:length]
+            if isvalid(test):
+                shortest = test
+                if length == minlength or length > startlength:
+                    return shortest
+                length -= 1
+            else:
+                length += 1
+                if len(shortest) <= length:
+                    return shortest
+
     def cmp(self, node, text):
         """compare text with a given file revision
 
@@ -1473,7 +1511,7 @@ class revlog(object):
             if revornode is None:
                 revornode = templatefilters.short(hex(node))
             raise RevlogError(_("integrity check failed on %s:%s")
-                % (self.indexfile, revornode))
+                % (self.indexfile, pycompat.bytestr(revornode)))
 
     def checkinlinesize(self, tr, fp=None):
         """Check if the revlog is too big for inline and convert if so.
@@ -1694,6 +1732,13 @@ class revlog(object):
         - rawtext is optional (can be None); if not set, cachedelta must be set.
           if both are set, they must correspond to each other.
         """
+        if node == nullid:
+            raise RevlogError(_("%s: attempt to add null revision") %
+                              (self.indexfile))
+        if node == wdirid:
+            raise RevlogError(_("%s: attempt to add wdir revision") %
+                              (self.indexfile))
+
         btext = [rawtext]
         def buildtext():
             if btext[0] is not None:
@@ -1865,7 +1910,7 @@ class revlog(object):
             ifh.write(data[1])
             self.checkinlinesize(transaction, ifh)
 
-    def addgroup(self, cg, linkmapper, transaction, addrevisioncb=None):
+    def addgroup(self, deltas, transaction, addrevisioncb=None):
         """
         add a delta group
 
@@ -1898,22 +1943,14 @@ class revlog(object):
             ifh.flush()
         try:
             # loop through our set of deltas
-            chain = None
-            for chunkdata in iter(lambda: cg.deltachunk(chain), {}):
-                node = chunkdata['node']
-                p1 = chunkdata['p1']
-                p2 = chunkdata['p2']
-                cs = chunkdata['cs']
-                deltabase = chunkdata['deltabase']
-                delta = chunkdata['delta']
-                flags = chunkdata['flags'] or REVIDX_DEFAULT_FLAGS
+            for data in deltas:
+                node, p1, p2, link, deltabase, delta, flags = data
+                flags = flags or REVIDX_DEFAULT_FLAGS
 
                 nodes.append(node)
 
-                link = linkmapper(cs)
                 if node in self.nodemap:
                     # this can happen if two branches make the same change
-                    chain = node
                     continue
 
                 for p in (p1, p2):
@@ -1947,13 +1984,13 @@ class revlog(object):
                 # We're only using addgroup() in the context of changegroup
                 # generation so the revision data can always be handled as raw
                 # by the flagprocessor.
-                chain = self._addrevision(node, None, transaction, link,
-                                          p1, p2, flags, (baserev, delta),
-                                          ifh, dfh,
-                                          alwayscache=bool(addrevisioncb))
+                self._addrevision(node, None, transaction, link,
+                                  p1, p2, flags, (baserev, delta),
+                                  ifh, dfh,
+                                  alwayscache=bool(addrevisioncb))
 
                 if addrevisioncb:
-                    addrevisioncb(self, chain)
+                    addrevisioncb(self, node)
 
                 if not dfh and not self._inline:
                     # addrevision switched from inline to conventional

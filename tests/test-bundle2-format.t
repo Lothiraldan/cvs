@@ -12,8 +12,9 @@ Create an extension to test bundle2 API
   > This extension allows detailed testing of the various bundle2 API and
   > behaviors.
   > """
-  > 
-  > import sys, os, gc
+  > import gc
+  > import os
+  > import sys
   > from mercurial import util
   > from mercurial import bundle2
   > from mercurial import scmutil
@@ -89,7 +90,7 @@ Create an extension to test bundle2 API
   >         p = p.split('=', 1)
   >         try:
   >             bundler.addparam(*p)
-  >         except ValueError, exc:
+  >         except ValueError as exc:
   >             raise error.Abort('%s' % exc)
   > 
   >     if opts['compress']:
@@ -113,7 +114,8 @@ Create an extension to test bundle2 API
   >             headmissing = [c.node() for c in repo.set('heads(%ld)', revs)]
   >             headcommon  = [c.node() for c in repo.set('parents(%ld) - %ld', revs, revs)]
   >             outgoing = discovery.outgoing(repo, headcommon, headmissing)
-  >             cg = changegroup.getchangegroup(repo, 'test:bundle2', outgoing, None)
+  >             cg = changegroup.makechangegroup(repo, outgoing, '01',
+  >                                              'test:bundle2')
   >             bundler.newpart('changegroup', data=cg.getchunks(),
   >                             mandatory=False)
   > 
@@ -164,7 +166,7 @@ Create an extension to test bundle2 API
   >     try:
   >         for chunk in bundler.getchunks():
   >             file.write(chunk)
-  >     except RuntimeError, exc:
+  >     except RuntimeError as exc:
   >         raise error.Abort(exc)
   >     finally:
   >         file.flush()
@@ -180,9 +182,9 @@ Create an extension to test bundle2 API
   >             unbundler = bundle2.getunbundler(ui, sys.stdin)
   >             op = bundle2.processbundle(repo, unbundler, lambda: tr)
   >             tr.close()
-  >         except error.BundleValueError, exc:
+  >         except error.BundleValueError as exc:
   >             raise error.Abort('missing support for %s' % exc)
-  >         except error.PushRaced, exc:
+  >         except error.PushRaced as exc:
   >             raise error.Abort('push race: %s' % exc)
   >     finally:
   >         if tr is not None:
@@ -206,7 +208,7 @@ Create an extension to test bundle2 API
   >     unbundler = bundle2.getunbundler(ui, sys.stdin)
   >     try:
   >         params = unbundler.params
-  >     except error.BundleValueError, exc:
+  >     except error.BundleValueError as exc:
   >        raise error.Abort('unknown parameters: %s' % exc)
   >     ui.write('options count: %i\n' % len(params))
   >     for key in sorted(params):
@@ -227,7 +229,7 @@ Create an extension to test bundle2 API
   > [extensions]
   > bundle2=$TESTTMP/bundle2.py
   > [experimental]
-  > evolution=createmarkers
+  > stabilization=createmarkers
   > [ui]
   > ssh=$PYTHON "$TESTDIR/dummyssh"
   > logtemplate={rev}:{node|short} {phase} {author} {bookmarks} {desc|firstline}
@@ -989,7 +991,7 @@ Support for changegroup
 
   $ hg debugbundle ../rev.hg2
   Stream params: {}
-  changegroup -- 'sortdict()'
+  changegroup -- {}
       32af7686d403cf45b5d95f2d70cebea587ac806a
       9520eea781bcca16c1e15acc0ba14335a0e8e5ba
       eea13746799a9e0bfd88f29d3c2e9dc9389f524f
@@ -1117,8 +1119,8 @@ Simple case where it just work: GZ
   0360: db fb 6a 33 df c1 7d 99 cf ef d4 d5 6d da 77 7c |..j3..}.....m.w||
   0370: 3b 19 fd af c5 3f f1 60 c3 17                   |;....?.`..|
   $ hg debugbundle ../rev.hg2.bz
-  Stream params: sortdict([('Compression', 'GZ')])
-  changegroup -- 'sortdict()'
+  Stream params: {Compression: GZ}
+  changegroup -- {}
       32af7686d403cf45b5d95f2d70cebea587ac806a
       9520eea781bcca16c1e15acc0ba14335a0e8e5ba
       eea13746799a9e0bfd88f29d3c2e9dc9389f524f
@@ -1204,8 +1206,8 @@ Simple case where it just work: BZ
   0420: 8b 43 88 57 9c 01 f5 61 b5 e1 27 41 7e af 83 fe |.C.W...a..'A~...|
   0430: 2e e4 8a 70 a1 21 46 96 30 7a                   |...p.!F.0z|
   $ hg debugbundle ../rev.hg2.bz
-  Stream params: sortdict([('Compression', 'BZ')])
-  changegroup -- 'sortdict()'
+  Stream params: {Compression: BZ}
+  changegroup -- {}
       32af7686d403cf45b5d95f2d70cebea587ac806a
       9520eea781bcca16c1e15acc0ba14335a0e8e5ba
       eea13746799a9e0bfd88f29d3c2e9dc9389f524f

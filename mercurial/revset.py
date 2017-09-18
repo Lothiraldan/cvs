@@ -40,22 +40,59 @@ getrange = revsetlang.getrange
 getargs = revsetlang.getargs
 getargsdict = revsetlang.getargsdict
 
-# constants used as an argument of match() and matchany()
-anyorder = revsetlang.anyorder
-defineorder = revsetlang.defineorder
-followorder = revsetlang.followorder
-
 baseset = smartset.baseset
 generatorset = smartset.generatorset
 spanset = smartset.spanset
 fullreposet = smartset.fullreposet
 
+# Constants for ordering requirement, used in getset():
+#
+# If 'define', any nested functions and operations MAY change the ordering of
+# the entries in the set (but if changes the ordering, it MUST ALWAYS change
+# it). If 'follow', any nested functions and operations MUST take the ordering
+# specified by the first operand to the '&' operator.
+#
+# For instance,
+#
+#   X & (Y | Z)
+#   ^   ^^^^^^^
+#   |   follow
+#   define
+#
+# will be evaluated as 'or(y(x()), z(x()))', where 'x()' can change the order
+# of the entries in the set, but 'y()', 'z()' and 'or()' shouldn't.
+#
+# 'any' means the order doesn't matter. For instance,
+#
+#   (X & !Y) | ancestors(Z)
+#         ^              ^
+#         any            any
+#
+# For 'X & !Y', 'X' decides the order and 'Y' is subtracted from 'X', so the
+# order of 'Y' does not matter. For 'ancestors(Z)', Z's order does not matter
+# since 'ancestors' does not care about the order of its argument.
+#
+# Currently, most revsets do not care about the order, so 'define' is
+# equivalent to 'follow' for them, and the resulting order is based on the
+# 'subset' parameter passed down to them:
+#
+#   m = revset.match(...)
+#   m(repo, subset, order=defineorder)
+#           ^^^^^^
+#      For most revsets, 'define' means using the order this subset provides
+#
+# There are a few revsets that always redefine the order if 'define' is
+# specified: 'sort(X)', 'reverse(X)', 'x:y'.
+anyorder = 'any'        # don't care the order, could be even random-shuffled
+defineorder = 'define'  # ALWAYS redefine, or ALWAYS follow the current order
+followorder = 'follow'  # MUST follow the current order
+
 # helpers
 
-def getset(repo, subset, x):
+def getset(repo, subset, x, order=defineorder):
     if not x:
         raise error.ParseError(_("missing argument"))
-    return methods[x[0]](repo, subset, *x[1:])
+    return methods[x[0]](repo, subset, *x[1:], order=order)
 
 def _getrevsource(repo, r):
     extra = repo[r].extra()
@@ -69,7 +106,7 @@ def _getrevsource(repo, r):
 
 # operator methods
 
-def stringset(repo, subset, x):
+def stringset(repo, subset, x, order):
     x = scmutil.intrev(repo[x])
     if (x in subset
         or x == node.nullrev and isinstance(subset, fullreposet)):
@@ -126,30 +163,42 @@ def dagrange(repo, subset, x, y, order):
     return subset & xs
 
 def andset(repo, subset, x, y, order):
-    return getset(repo, getset(repo, subset, x), y)
+    if order == anyorder:
+        yorder = anyorder
+    else:
+        yorder = followorder
+    return getset(repo, getset(repo, subset, x, order), y, yorder)
+
+def andsmallyset(repo, subset, x, y, order):
+    # 'andsmally(x, y)' is equivalent to 'and(x, y)', but faster when y is small
+    if order == anyorder:
+        yorder = anyorder
+    else:
+        yorder = followorder
+    return getset(repo, getset(repo, subset, y, yorder), x, order)
 
 def differenceset(repo, subset, x, y, order):
-    return getset(repo, subset, x) - getset(repo, subset, y)
+    return getset(repo, subset, x, order) - getset(repo, subset, y, anyorder)
 
-def _orsetlist(repo, subset, xs):
+def _orsetlist(repo, subset, xs, order):
     assert xs
     if len(xs) == 1:
-        return getset(repo, subset, xs[0])
+        return getset(repo, subset, xs[0], order)
     p = len(xs) // 2
-    a = _orsetlist(repo, subset, xs[:p])
-    b = _orsetlist(repo, subset, xs[p:])
+    a = _orsetlist(repo, subset, xs[:p], order)
+    b = _orsetlist(repo, subset, xs[p:], order)
     return a + b
 
 def orset(repo, subset, x, order):
     xs = getlist(x)
     if order == followorder:
         # slow path to take the subset order
-        return subset & _orsetlist(repo, fullreposet(repo), xs)
+        return subset & _orsetlist(repo, fullreposet(repo), xs, anyorder)
     else:
-        return _orsetlist(repo, subset, xs)
+        return _orsetlist(repo, subset, xs, order)
 
 def notset(repo, subset, x, order):
-    return subset - getset(repo, subset, x)
+    return subset - getset(repo, subset, x, anyorder)
 
 def relationset(repo, subset, x, y, order):
     raise error.ParseError(_("can't use a relation in this context"))
@@ -176,11 +225,11 @@ def relsubscriptset(repo, subset, x, y, z, order):
 def subscriptset(repo, subset, x, y, order):
     raise error.ParseError(_("can't use a subscript in this context"))
 
-def listset(repo, subset, *xs):
+def listset(repo, subset, *xs, **opts):
     raise error.ParseError(_("can't use a list in this context"),
                            hint=_('see hg help "revsets.x or y"'))
 
-def keyvaluepair(repo, subset, k, v):
+def keyvaluepair(repo, subset, k, v, order):
     raise error.ParseError(_("can't use a key-value pair in this context"))
 
 def func(repo, subset, a, b, order):
@@ -459,14 +508,23 @@ def branch(repo, subset, x):
 
 @predicate('bumped()', safe=True)
 def bumped(repo, subset, x):
+    msg = ("'bumped()' is deprecated, "
+           "use 'phasedivergent()'")
+    repo.ui.deprecwarn(msg, '4.4')
+
+    return phasedivergent(repo, subset, x)
+
+@predicate('phasedivergent()', safe=True)
+def phasedivergent(repo, subset, x):
     """Mutable changesets marked as successors of public changesets.
 
-    Only non-public and non-obsolete changesets can be `bumped`.
+    Only non-public and non-obsolete changesets can be `phasedivergent`.
+    (EXPERIMENTAL)
     """
-    # i18n: "bumped" is a keyword
-    getargs(x, 0, 0, _("bumped takes no arguments"))
-    bumped = obsmod.getrevs(repo, 'bumped')
-    return subset & bumped
+    # i18n: "phasedivergent" is a keyword
+    getargs(x, 0, 0, _("phasedivergent takes no arguments"))
+    phasedivergent = obsmod.getrevs(repo, 'phasedivergent')
+    return subset & phasedivergent
 
 @predicate('bundle()', safe=True)
 def bundle(repo, subset, x):
@@ -711,13 +769,22 @@ def destination(repo, subset, x):
 
 @predicate('divergent()', safe=True)
 def divergent(repo, subset, x):
+    msg = ("'divergent()' is deprecated, "
+           "use 'contentdivergent()'")
+    repo.ui.deprecwarn(msg, '4.4')
+
+    return contentdivergent(repo, subset, x)
+
+@predicate('contentdivergent()', safe=True)
+def contentdivergent(repo, subset, x):
     """
-    Final successors of changesets with an alternative set of final successors.
+    Final successors of changesets with an alternative set of final
+    successors. (EXPERIMENTAL)
     """
-    # i18n: "divergent" is a keyword
-    getargs(x, 0, 0, _("divergent takes no arguments"))
-    divergent = obsmod.getrevs(repo, 'divergent')
-    return subset & divergent
+    # i18n: "contentdivergent" is a keyword
+    getargs(x, 0, 0, _("contentdivergent takes no arguments"))
+    contentdivergent = obsmod.getrevs(repo, 'contentdivergent')
+    return subset & contentdivergent
 
 @predicate('extinct()', safe=True)
 def extinct(repo, subset, x):
@@ -1490,8 +1557,8 @@ def parentspec(repo, subset, x, n, order):
                     ps.add(parents[1].rev())
     return subset & ps
 
-@predicate('present(set)', safe=True)
-def present(repo, subset, x):
+@predicate('present(set)', safe=True, takeorder=True)
+def present(repo, subset, x, order):
     """An empty set, if any revision in set isn't found; otherwise,
     all revisions in set.
 
@@ -1500,7 +1567,7 @@ def present(repo, subset, x):
     to continue even in such cases.
     """
     try:
-        return getset(repo, subset, x)
+        return getset(repo, subset, x, order)
     except error.RepoLookupError:
         return baseset()
 
@@ -1509,6 +1576,37 @@ def present(repo, subset, x):
 def _notpublic(repo, subset, x):
     getargs(x, 0, 0, "_notpublic takes no arguments")
     return _phase(repo, subset, phases.draft, phases.secret)
+
+# for internal use
+@predicate('_phaseandancestors(phasename, set)', safe=True)
+def _phaseandancestors(repo, subset, x):
+    # equivalent to (phasename() & ancestors(set)) but more efficient
+    # phasename could be one of 'draft', 'secret', or '_notpublic'
+    args = getargs(x, 2, 2, "_phaseandancestors requires two arguments")
+    phasename = getsymbol(args[0])
+    s = getset(repo, fullreposet(repo), args[1])
+
+    draft = phases.draft
+    secret = phases.secret
+    phasenamemap = {
+        '_notpublic': draft,
+        'draft': draft, # follow secret's ancestors
+        'secret': secret,
+    }
+    if phasename not in phasenamemap:
+        raise error.ParseError('%r is not a valid phasename' % phasename)
+
+    minimalphase = phasenamemap[phasename]
+    getphase = repo._phasecache.phase
+
+    def cutfunc(rev):
+        return getphase(repo, rev) < minimalphase
+
+    revs = dagop.revancestors(repo, s, cutfunc=cutfunc)
+
+    if phasename == 'draft': # need to remove secret changesets
+        revs = revs.filter(lambda r: getphase(repo, r) == draft)
+    return subset & revs
 
 @predicate('public()', safe=True)
 def public(repo, subset, x):
@@ -1700,7 +1798,7 @@ def matching(repo, subset, x):
 def reverse(repo, subset, x, order):
     """Reverse order of set.
     """
-    l = getset(repo, subset, x)
+    l = getset(repo, subset, x, order)
     if order == defineorder:
         l.reverse()
     return l
@@ -1784,7 +1882,7 @@ def sort(repo, subset, x, order):
 
     """
     s, keyflags, opts = _getsortargs(x)
-    revs = getset(repo, subset, s)
+    revs = getset(repo, subset, s, order)
 
     if not keyflags or order != defineorder:
         return revs
@@ -1919,12 +2017,20 @@ def tagged(repo, subset, x):
 
 @predicate('unstable()', safe=True)
 def unstable(repo, subset, x):
-    """Non-obsolete changesets with obsolete ancestors.
+    msg = ("'unstable()' is deprecated, "
+           "use 'orphan()'")
+    repo.ui.deprecwarn(msg, '4.4')
+
+    return orphan(repo, subset, x)
+
+@predicate('orphan()', safe=True)
+def orphan(repo, subset, x):
+    """Non-obsolete changesets with obsolete ancestors. (EXPERIMENTAL)
     """
-    # i18n: "unstable" is a keyword
-    getargs(x, 0, 0, _("unstable takes no arguments"))
-    unstables = obsmod.getrevs(repo, 'unstable')
-    return subset & unstables
+    # i18n: "orphan" is a keyword
+    getargs(x, 0, 0, _("orphan takes no arguments"))
+    orphan = obsmod.getrevs(repo, 'orphan')
+    return subset & orphan
 
 
 @predicate('user(string)', safe=True)
@@ -1962,7 +2068,7 @@ def _orderedlist(repo, subset, x):
                 raise ValueError
             revs = [r]
         except ValueError:
-            revs = stringset(repo, subset, t)
+            revs = stringset(repo, subset, t, defineorder)
 
         for r in revs:
             if r in seen:
@@ -2026,6 +2132,7 @@ methods = {
     "string": stringset,
     "symbol": stringset,
     "and": andset,
+    "andsmally": andsmallyset,
     "or": orset,
     "not": notset,
     "difference": differenceset,
@@ -2044,20 +2151,13 @@ def posttreebuilthook(tree, repo):
     # hook for extensions to execute code on the optimized tree
     pass
 
-def match(ui, spec, repo=None, order=defineorder):
-    """Create a matcher for a single revision spec
+def match(ui, spec, repo=None):
+    """Create a matcher for a single revision spec"""
+    return matchany(ui, [spec], repo=repo)
 
-    If order=followorder, a matcher takes the ordering specified by the input
-    set.
-    """
-    return matchany(ui, [spec], repo=repo, order=order)
-
-def matchany(ui, specs, repo=None, order=defineorder, localalias=None):
+def matchany(ui, specs, repo=None, localalias=None):
     """Create a matcher that will include any revisions matching one of the
     given specs
-
-    If order=followorder, a matcher takes the ordering specified by the input
-    set.
 
     If localalias is not None, it is a dict {name: definitionstring}. It takes
     precedence over [revsetalias] config section.
@@ -2087,17 +2187,22 @@ def matchany(ui, specs, repo=None, order=defineorder, localalias=None):
     if aliases:
         tree = revsetlang.expandaliases(tree, aliases, warn=warn)
     tree = revsetlang.foldconcat(tree)
-    tree = revsetlang.analyze(tree, order)
+    tree = revsetlang.analyze(tree)
     tree = revsetlang.optimize(tree)
     posttreebuilthook(tree, repo)
     return makematcher(tree)
 
 def makematcher(tree):
     """Create a matcher from an evaluatable tree"""
-    def mfunc(repo, subset=None):
+    def mfunc(repo, subset=None, order=None):
+        if order is None:
+            if subset is None:
+                order = defineorder  # 'x'
+            else:
+                order = followorder  # 'subset & x'
         if subset is None:
             subset = fullreposet(repo)
-        return getset(repo, subset, tree)
+        return getset(repo, subset, tree, order)
     return mfunc
 
 def loadpredicate(ui, extname, registrarobj):

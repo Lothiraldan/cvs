@@ -10,6 +10,7 @@ from __future__ import absolute_import
 import functools
 
 from . import (
+    encoding,
     error,
 )
 
@@ -97,6 +98,12 @@ coreconfigitem('color', 'pagermode',
 coreconfigitem('commands', 'status.relative',
     default=False,
 )
+coreconfigitem('commands', 'status.skipstates',
+    default=[],
+)
+coreconfigitem('commands', 'status.verbose',
+    default=False,
+)
 coreconfigitem('commands', 'update.requiredest',
     default=False,
 )
@@ -166,23 +173,26 @@ coreconfigitem('experimental', 'changegroup3',
 coreconfigitem('experimental', 'clientcompressionengines',
     default=list,
 )
+coreconfigitem('experimental', 'copytrace',
+    default='on',
+)
 coreconfigitem('experimental', 'crecordtest',
     default=None,
-)
-coreconfigitem('experimental', 'disablecopytrace',
-    default=False,
 )
 coreconfigitem('experimental', 'editortmpinhg',
     default=False,
 )
-coreconfigitem('experimental', 'evolution',
+coreconfigitem('experimental', 'stabilization',
     default=list,
+    alias=[('experimental', 'evolution')],
 )
-coreconfigitem('experimental', 'evolution.bundle-obsmarker',
+coreconfigitem('experimental', 'stabilization.bundle-obsmarker',
     default=False,
+    alias=[('experimental', 'evolution.bundle-obsmarker')],
 )
-coreconfigitem('experimental', 'evolution.track-operation',
+coreconfigitem('experimental', 'stabilization.track-operation',
     default=False,
+    alias=[('experimental', 'evolution.track-operation')]
 )
 coreconfigitem('experimental', 'exportableenviron',
     default=list,
@@ -212,6 +222,9 @@ coreconfigitem('experimental', 'mergedriver',
     default=None,
 )
 coreconfigitem('experimental', 'obsmarkers-exchange-debug',
+    default=False,
+)
+coreconfigitem('experimental', 'rebase.multidest',
     default=False,
 )
 coreconfigitem('experimental', 'revertalternateinteractivemode',
@@ -351,6 +364,9 @@ coreconfigitem('progress', 'refresh',
 )
 coreconfigitem('progress', 'width',
     default=dynamicdefault,
+)
+coreconfigitem('push', 'pushvars.server',
+    default=False,
 )
 coreconfigitem('server', 'bundle1',
     default=True,
@@ -565,6 +581,69 @@ coreconfigitem('ui', 'verbose',
     default=False,
 )
 coreconfigitem('verify', 'skipflags',
+    default=None,
+)
+coreconfigitem('web', 'accesslog',
+    default='-',
+)
+coreconfigitem('web', 'address',
+    default='',
+)
+coreconfigitem('web', 'allow_archive',
+    default=list,
+)
+coreconfigitem('web', 'allow_read',
+    default=list,
+)
+coreconfigitem('web', 'baseurl',
+    default=None,
+)
+coreconfigitem('web', 'cacerts',
+    default=None,
+)
+coreconfigitem('web', 'certificate',
+    default=None,
+)
+coreconfigitem('web', 'collapse',
+    default=False,
+)
+coreconfigitem('web', 'csp',
+    default=None,
+)
+coreconfigitem('web', 'deny_read',
+    default=list,
+)
+coreconfigitem('web', 'descend',
+    default=True,
+)
+coreconfigitem('web', 'description',
+    default="",
+)
+coreconfigitem('web', 'encoding',
+    default=lambda: encoding.encoding,
+)
+coreconfigitem('web', 'errorlog',
+    default='-',
+)
+coreconfigitem('web', 'ipv6',
+    default=False,
+)
+coreconfigitem('web', 'port',
+    default=8000,
+)
+coreconfigitem('web', 'prefix',
+    default='',
+)
+coreconfigitem('web', 'refreshinterval',
+    default=20,
+)
+coreconfigitem('web', 'stripes',
+    default=1,
+)
+coreconfigitem('web', 'style',
+    default='paper',
+)
+coreconfigitem('web', 'templates',
     default=None,
 )
 coreconfigitem('worker', 'backgroundclose',

@@ -13,8 +13,10 @@ typical client does not want echo-back messages, so test without it:
   $ hg init repo
   $ cd repo
 
-  >>> from __future__ import print_function
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from __future__ import absolute_import, print_function
+  >>> import os
+  >>> import sys
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def hellomessage(server):
   ...     ch, data = readchannel(server)
@@ -32,7 +34,7 @@ typical client does not want echo-back messages, so test without it:
   ...     server.stdin.write('unknowncommand\n')
   abort: unknown command unknowncommand
 
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def checkruncommand(server):
   ...     # hello block
@@ -91,7 +93,7 @@ typical client does not want echo-back messages, so test without it:
   abort: unknown revision 'unknown'!
    [255]
 
-  >>> from hgclient import readchannel, check
+  >>> from hgclient import check, readchannel
   >>> @check
   ... def inputeof(server):
   ...     readchannel(server)
@@ -103,7 +105,7 @@ typical client does not want echo-back messages, so test without it:
   ...     print('server exit code =', server.wait())
   server exit code = 1
 
-  >>> from hgclient import readchannel, runcommand, check, stringio
+  >>> from hgclient import check, readchannel, runcommand, stringio
   >>> @check
   ... def serverinput(server):
   ...     readchannel(server)
@@ -138,7 +140,7 @@ typical client does not want echo-back messages, so test without it:
 check that "histedit --commands=-" can read rules from the input channel:
 
   >>> import cStringIO
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def serverinput(server):
   ...     readchannel(server)
@@ -152,7 +154,7 @@ check that --cwd doesn't persist between requests:
 
   $ mkdir foo
   $ touch foo/bar
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def cwd(server):
   ...     readchannel(server)
@@ -173,7 +175,7 @@ check that local configs for the cached repo aren't inherited when -R is used:
   > foo = bar
   > EOF
 
-  >>> from hgclient import readchannel, sep, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand, sep
   >>> @check
   ... def localhgrc(server):
   ...     readchannel(server)
@@ -223,7 +225,7 @@ check that local configs for the cached repo aren't inherited when -R is used:
   >     print('now try to read something: %r' % sys.stdin.read())
   > EOF
 
-  >>> from hgclient import readchannel, runcommand, check, stringio
+  >>> from hgclient import check, readchannel, runcommand, stringio
   >>> @check
   ... def hookoutput(server):
   ...     readchannel(server)
@@ -240,7 +242,7 @@ Clean hook cached version
 
   $ echo a >> a
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def outsidechanges(server):
   ...     readchannel(server)
@@ -260,7 +262,7 @@ Clean hook cached version
   *** runcommand status
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def bookmarks(server):
   ...     readchannel(server)
@@ -281,6 +283,7 @@ Clean hook cached version
   ...     f.close()
   ...     runcommand(server, ['commit', '-Amm'])
   ...     runcommand(server, ['bookmarks'])
+  ...     print('')
   *** runcommand bookmarks
   no bookmarks set
   *** runcommand bookmarks
@@ -295,9 +298,10 @@ Clean hook cached version
      bm1                       1:d3a0a68be6de
      bm2                       1:d3a0a68be6de
    * bm3                       2:aef17e88f5f0
+  
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def tagscache(server):
   ...     readchannel(server)
@@ -310,7 +314,7 @@ Clean hook cached version
   foo
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def setphase(server):
   ...     readchannel(server)
@@ -323,7 +327,7 @@ Clean hook cached version
   3: public
 
   $ echo a >> a
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def rollback(server):
   ...     readchannel(server)
@@ -331,6 +335,7 @@ Clean hook cached version
   ...     runcommand(server, ['commit', '-Am.'])
   ...     runcommand(server, ['rollback'])
   ...     runcommand(server, ['phase', '-r', '.'])
+  ...     print('')
   *** runcommand phase -r . -p
   no phases changed
   *** runcommand commit -Am.
@@ -339,9 +344,10 @@ Clean hook cached version
   working directory now based on revision 3
   *** runcommand phase -r .
   3: public
+  
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def branch(server):
   ...     readchannel(server)
@@ -360,7 +366,7 @@ Clean hook cached version
 
   $ touch .hgignore
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def hgignore(server):
   ...     readchannel(server)
@@ -372,16 +378,18 @@ Clean hook cached version
   ...     f.write('ignored-file')
   ...     f.close()
   ...     runcommand(server, ['status', '-i', '-u'])
+  ...     print('')
   *** runcommand commit -Am.
   adding .hgignore
   *** runcommand status -i -u
   I ignored-file
+  
 
 cache of non-public revisions should be invalidated on repository change
 (issue4855):
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def phasesetscacheaftercommit(server):
   ...     readchannel(server)
@@ -396,15 +404,17 @@ cache of non-public revisions should be invalidated on repository change
   ...         os.system('hg commit -Aqm%d' % i)
   ...     # new commits should be listed as draft revisions
   ...     runcommand(server, ['log', '-qr', 'draft()'])
+  ...     print('')
   *** runcommand log -qr draft()
   4:7966c8e3734d
   *** runcommand log -qr draft()
   4:7966c8e3734d
   5:41f6602d1c4f
   6:10501e202c35
+  
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def phasesetscacheafterstrip(server):
   ...     readchannel(server)
@@ -414,17 +424,19 @@ cache of non-public revisions should be invalidated on repository change
   ...     os.system('hg --config extensions.strip= strip -q 5')
   ...     # shouldn't abort by "unknown revision '6'"
   ...     runcommand(server, ['log', '-qr', 'draft()'])
+  ...     print('')
   *** runcommand log -qr draft()
   4:7966c8e3734d
   5:41f6602d1c4f
   6:10501e202c35
   *** runcommand log -qr draft()
   4:7966c8e3734d
+  
 
 cache of phase roots should be invalidated on strip (issue3827):
 
   >>> import os
-  >>> from hgclient import readchannel, sep, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand, sep
   >>> @check
   ... def phasecacheafterstrip(server):
   ...     readchannel(server)
@@ -475,7 +487,7 @@ in-memory cache must be reloaded if transaction is aborted. otherwise
 changelog and manifest would have invalid node:
 
   $ echo a >> a
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def txabort(server):
   ...     readchannel(server)
@@ -497,11 +509,11 @@ changelog and manifest would have invalid node:
 
   $ cat >> .hg/hgrc << EOF
   > [experimental]
-  > evolution=createmarkers
+  > stabilization=createmarkers
   > EOF
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def obsolete(server):
   ...     readchannel(server)
@@ -550,7 +562,7 @@ changelog and manifest would have invalid node:
   > EOF
 
   >>> import os
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def mqoutsidechanges(server):
   ...     readchannel(server)
@@ -575,7 +587,8 @@ changelog and manifest would have invalid node:
   foo
 
   $ cat <<EOF > dbgui.py
-  > import os, sys
+  > import os
+  > import sys
   > from mercurial import commands, registrar
   > cmdtable = {}
   > command = registrar.command(cmdtable)
@@ -599,7 +612,7 @@ changelog and manifest would have invalid node:
   > dbgui = dbgui.py
   > EOF
 
-  >>> from hgclient import readchannel, runcommand, check, stringio
+  >>> from hgclient import check, readchannel, runcommand, stringio
   >>> @check
   ... def getpass(server):
   ...     readchannel(server)
@@ -634,7 +647,7 @@ changelog and manifest would have invalid node:
 run commandserver in commandserver, which is silly but should work:
 
   >>> from __future__ import print_function
-  >>> from hgclient import readchannel, runcommand, check, stringio
+  >>> from hgclient import check, readchannel, runcommand, stringio
   >>> @check
   ... def nested(server):
   ...     print('%c, %r' % readchannel(server))
@@ -657,7 +670,7 @@ start without repository:
   $ cd ..
 
   >>> from __future__ import print_function
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def hellomessage(server):
   ...     ch, data = readchannel(server)
@@ -670,7 +683,7 @@ start without repository:
   abort: there is no Mercurial repository here (.hg not found)
    [255]
 
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def startwithoutrepo(server):
   ...     readchannel(server)
@@ -698,7 +711,7 @@ unix domain socket:
 #if unix-socket unix-permissions
 
   >>> from __future__ import print_function
-  >>> from hgclient import unixserver, readchannel, runcommand, check, stringio
+  >>> from hgclient import check, readchannel, runcommand, stringio, unixserver
   >>> server = unixserver('.hg/server.sock', '.hg/server.log')
   >>> def hellomessage(conn):
   ...     ch, data = readchannel(conn)
@@ -750,7 +763,7 @@ unix domain socket:
   > log = inexistent/path.log
   > EOF
   >>> from __future__ import print_function
-  >>> from hgclient import unixserver, readchannel, check
+  >>> from hgclient import check, readchannel, unixserver
   >>> server = unixserver('.hg/server.sock', '.hg/server.log')
   >>> def earlycrash(conn):
   ...     while True:
@@ -827,7 +840,7 @@ cases.
 
 (failure before finalization)
 
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def abort(server):
   ...     readchannel(server)
@@ -846,7 +859,7 @@ cases.
 
 (failure after finalization)
 
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def abort(server):
   ...     readchannel(server)
@@ -871,7 +884,7 @@ cases.
 
 (failure before finalization)
 
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def abort(server):
   ...     readchannel(server)
@@ -891,7 +904,7 @@ cases.
 
 (failure after finalization)
 
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def abort(server):
   ...     readchannel(server)
@@ -941,7 +954,7 @@ try trivial merge after update: cache of audited paths should be discarded,
 and the merge should fail (issue5628)
 
   $ hg up -q null
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def merge(server):
   ...     readchannel(server)
@@ -962,7 +975,7 @@ symlinks:
 
   $ hg up -qC 0
   $ touch ../merge-symlink-out/poisoned
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import check, readchannel, runcommand
   >>> @check
   ... def files(server):
   ...     readchannel(server)

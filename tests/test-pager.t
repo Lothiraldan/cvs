@@ -340,9 +340,25 @@ Put annotate in the ignore list for pager:
    9: a 9
   10: a 10
 
+During pushbuffer, pager should not start:
+  $ cat > $TESTTMP/pushbufferpager.py <<EOF
+  > def uisetup(ui):
+  >     ui.pushbuffer()
+  >     ui.pager('mycmd')
+  >     ui.write('content\n')
+  >     ui.write(ui.popbuffer())
+  > EOF
+
+  $ echo append >> a
+  $ hg --config extensions.pushbuffer=$TESTTMP/pushbufferpager.py status --color=off
+  content
+  paged! 'M a\n'
+
 Environment variables like LESS and LV are set automatically:
   $ cat > $TESTTMP/printlesslv.py <<EOF
-  > import os, sys
+  > from __future__ import absolute_import
+  > import os
+  > import sys
   > sys.stdin.read()
   > for name in ['LESS', 'LV']:
   >     sys.stdout.write(('%s=%s\n') % (name, os.environ.get(name, '-')))

@@ -477,9 +477,9 @@ def archive(ui, repo, dest, **opts):
             prefix = os.path.basename(repo.root) + '-%h'
 
     prefix = cmdutil.makefilename(repo, prefix, node)
-    matchfn = scmutil.match(ctx, [], opts)
+    match = scmutil.match(ctx, [], opts)
     archival.archive(repo, dest, node, kind, not opts.get('no_decode'),
-                     matchfn, prefix, subrepos=opts.get('subrepos'))
+                     match, prefix, subrepos=opts.get('subrepos'))
 
 @command('backout',
     [('', 'merge', None, _('merge with old dirstate parent after backout')),
@@ -917,6 +917,9 @@ def bookmark(ui, repo, *names, **opts):
     diverged, a new 'divergent bookmark' of the form 'name@path' will
     be created. Using :hg:`merge` will resolve the divergence.
 
+    Specifying bookmark as '.' to -m or -d options is equivalent to specifying
+    the active bookmark's name.
+
     A bookmark named '@' has the special property that :hg:`clone` will
     check it out by default if it exists.
 
@@ -962,12 +965,14 @@ def bookmark(ui, repo, *names, **opts):
     if delete or rename or names or inactive:
         with repo.wlock(), repo.lock(), repo.transaction('bookmark') as tr:
             if delete:
+                names = pycompat.maplist(repo._bookmarks.expandname, names)
                 bookmarks.delete(repo, tr, names)
             elif rename:
                 if not names:
                     raise error.Abort(_("new bookmark name required"))
                 elif len(names) > 1:
                     raise error.Abort(_("only one new bookmark name allowed"))
+                rename = repo._bookmarks.expandname(rename)
                 bookmarks.rename(repo, tr, rename, names[0], force, inactive)
             elif names:
                 bookmarks.addbookmarks(repo, tr, names, rev, force, inactive)
@@ -1072,7 +1077,10 @@ def branches(ui, repo, active=False, closed=False, **opts):
     allheads = set(repo.heads())
     branches = []
     for tag, heads, tip, isclosed in repo.branchmap().iterbranches():
-        isactive = not isclosed and bool(set(heads) & allheads)
+        isactive = False
+        if not isclosed:
+            openheads = set(repo.branchmap().iteropen(heads))
+            isactive = bool(openheads & allheads)
         branches.append((tag, repo[tip], isactive, not isclosed))
     branches.sort(key=lambda i: (i[2], i[1].rev(), i[0], i[3]),
                   reverse=True)
@@ -1227,7 +1235,7 @@ def bundle(ui, repo, fname, dest=None, **opts):
 
 
     contentopts = {'cg.version': cgversion}
-    if repo.ui.configbool('experimental', 'evolution.bundle-obsmarker'):
+    if repo.ui.configbool('experimental', 'stabilization.bundle-obsmarker'):
         contentopts['obsolescence'] = True
     if repo.ui.configbool('experimental', 'bundle-phases'):
         contentopts['phases'] = True
@@ -1542,15 +1550,7 @@ def _docommit(ui, repo, *pats, **opts):
         if not obsolete.isenabled(repo, obsolete.createmarkersopt):
             cmdutil.checkunfinished(repo)
 
-        # commitfunc is used only for temporary amend commit by cmdutil.amend
-        def commitfunc(ui, repo, message, match, opts):
-            return repo.commit(message,
-                               opts.get('user') or old.user(),
-                               opts.get('date') or old.date(),
-                               match,
-                               extra=extra)
-
-        node = cmdutil.amend(ui, repo, commitfunc, old, extra, pats, opts)
+        node = cmdutil.amend(ui, repo, old, extra, pats, opts)
         if node == old.node():
             ui.status(_("nothing changed\n"))
             return 1
@@ -1644,8 +1644,8 @@ def config(ui, repo, *values, **opts):
                 samplehgrc = uimod.samplehgrcs['user']
 
             f = paths[0]
-            fp = open(f, "w")
-            fp.write(samplehgrc)
+            fp = open(f, "wb")
+            fp.write(util.tonativeeol(samplehgrc))
             fp.close()
 
         editor = ui.geteditor()
@@ -2481,7 +2481,7 @@ def grep(ui, repo, pattern, *pats, **opts):
 
     skip = {}
     revfiles = {}
-    matchfn = scmutil.match(repo[None], pats, opts)
+    match = scmutil.match(repo[None], pats, opts)
     found = False
     follow = opts.get('follow')
 
@@ -2522,7 +2522,7 @@ def grep(ui, repo, pattern, *pats, **opts):
 
     ui.pager('grep')
     fm = ui.formatter('grep', opts)
-    for ctx in cmdutil.walkchangerevs(repo, matchfn, opts, prep):
+    for ctx in cmdutil.walkchangerevs(repo, match, opts, prep):
         rev = ctx.rev()
         parent = ctx.p1().rev()
         for fn in sorted(revfiles.get(rev, [])):
@@ -3844,7 +3844,7 @@ def postincoming(ui, repo, modheads, optupdate, checkout, brev):
                         "merge)\n"))
         else:
             ui.status(_("(run 'hg heads' to see heads)\n"))
-    else:
+    elif not ui.configbool('commands', 'update.requiredest'):
         ui.status(_("(run 'hg update' to get a working copy)\n"))
 
 @command('^pull',
@@ -3972,6 +3972,7 @@ def pull(ui, repo, source="default", **opts):
     ('b', 'branch', [],
      _('a specific branch you would like to push'), _('BRANCH')),
     ('', 'new-branch', False, _('allow pushing a new branch')),
+    ('', 'pushvars', [], _('variables that can be sent to server (ADVANCED)')),
     ] + remoteopts,
     _('[-f] [-r REV]... [-e CMD] [--remotecmd CMD] [DEST]'))
 def push(ui, repo, dest=None, **opts):
@@ -4008,6 +4009,25 @@ def push(ui, repo, dest=None, **opts):
 
     Please see :hg:`help urls` for important details about ``ssh://``
     URLs. If DESTINATION is omitted, a default path will be used.
+
+    .. container:: verbose
+
+        The --pushvars option sends strings to the server that become
+        environment variables prepended with ``HG_USERVAR_``. For example,
+        ``--pushvars ENABLE_FEATURE=true``, provides the server side hooks with
+        ``HG_USERVAR_ENABLE_FEATURE=true`` as part of their environment.
+
+        pushvars can provide for user-overridable hooks as well as set debug
+        levels. One example is having a hook that blocks commits containing
+        conflict markers, but enables the user to override the hook if the file
+        is using conflict markers for testing purposes or the file format has
+        strings that look like conflict markers.
+
+        By default, servers will ignore `--pushvars`. To enable it add the
+        following to your configuration file::
+
+            [push]
+            pushvars.server = true
 
     Returns 0 if push was successful, 1 if nothing to push.
     """
@@ -4061,10 +4081,14 @@ def push(ui, repo, dest=None, **opts):
                 return not result
     finally:
         del repo._subtoppath
+
+    opargs = dict(opts.get('opargs', {})) # copy opargs since we may mutate it
+    opargs.setdefault('pushvars', []).extend(opts.get('pushvars', []))
+
     pushop = exchange.push(repo, other, opts.get('force'), revs=revs,
                            newbranch=opts.get('new_branch'),
                            bookmarks=opts.get('bookmark', ()),
-                           opargs=opts.get('opargs'))
+                           opargs=opargs)
 
     result = not pushop.cgresult
 
@@ -4675,6 +4699,19 @@ def status(ui, repo, *pats, **opts):
       files are not considered while tersing until 'i' is there in --terse value
       or the --ignored option is used.
 
+      --verbose option shows more context about the state of the repo
+      like the repository is in unfinised merge, shelve, rebase state etc.
+      You can have this behaviour turned on by default by following config:
+
+      [commands]
+      status.verbose = true
+
+      You can also skip some states like bisect by adding following in
+      configuration file.
+
+      [commands]
+      status.skipstates = bisect
+
       Examples:
 
       - show changes in the working directory relative to a
@@ -4764,6 +4801,10 @@ def status(ui, repo, *pats, **opts):
                 if f in copy:
                     fm.write("copy", '  %s' + end, repo.pathto(copy[f], cwd),
                              label='status.copied')
+
+    if ((ui.verbose or ui.configbool('commands', 'status.verbose'))
+        and not ui.plain()):
+        cmdutil.morestatus(repo, fm)
     fm.end()
 
 @command('^summary|sum',
@@ -4814,10 +4855,11 @@ def summary(ui, repo, **opts):
                 ui.write(_(' (no revision checked out)'))
         if p.obsolete():
             ui.write(_(' (obsolete)'))
-        if p.troubled():
+        if p.isunstable():
+            instabilities = (ui.label(instability, 'trouble.%s' % instability)
+                             for instability in p.instabilities())
             ui.write(' ('
-                     + ', '.join(ui.label(trouble, 'trouble.%s' % trouble)
-                                 for trouble in p.troubles())
+                     + ', '.join(instabilities)
                      + ')')
         ui.write('\n')
         if p.description():
@@ -4939,13 +4981,13 @@ def summary(ui, repo, **opts):
         ui.status(_('phases: %s\n') % ', '.join(t))
 
     if obsolete.isenabled(repo, obsolete.createmarkersopt):
-        for trouble in ("unstable", "divergent", "bumped"):
+        for trouble in ("orphan", "contentdivergent", "phasedivergent"):
             numtrouble = len(repo.revs(trouble + "()"))
             # We write all the possibilities to ease translation
             troublemsg = {
-               "unstable": _("unstable: %d changesets"),
-               "divergent": _("divergent: %d changesets"),
-               "bumped": _("bumped: %d changesets"),
+               "orphan": _("orphan: %d changesets"),
+               "contentdivergent": _("content-divergent: %d changesets"),
+               "phasedivergent": _("phase-divergent: %d changesets"),
             }
             if numtrouble > 0:
                 ui.status(troublemsg[trouble] % numtrouble + "\n")

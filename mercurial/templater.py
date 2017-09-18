@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import os
 import re
@@ -18,6 +18,7 @@ from . import (
     encoding,
     error,
     minirst,
+    obsutil,
     parser,
     pycompat,
     registrar,
@@ -146,15 +147,15 @@ def tokenize(program, start, end, term=None):
 
 def _parsetemplate(tmpl, start, stop, quote=''):
     r"""
-    >>> _parsetemplate('foo{bar}"baz', 0, 12)
+    >>> _parsetemplate(b'foo{bar}"baz', 0, 12)
     ([('string', 'foo'), ('symbol', 'bar'), ('string', '"baz')], 12)
-    >>> _parsetemplate('foo{bar}"baz', 0, 12, quote='"')
+    >>> _parsetemplate(b'foo{bar}"baz', 0, 12, quote=b'"')
     ([('string', 'foo'), ('symbol', 'bar')], 9)
-    >>> _parsetemplate('foo"{bar}', 0, 9, quote='"')
+    >>> _parsetemplate(b'foo"{bar}', 0, 9, quote=b'"')
     ([('string', 'foo')], 4)
-    >>> _parsetemplate(r'foo\"bar"baz', 0, 12, quote='"')
+    >>> _parsetemplate(br'foo\"bar"baz', 0, 12, quote=b'"')
     ([('string', 'foo"'), ('string', 'bar')], 9)
-    >>> _parsetemplate(r'foo\\"bar', 0, 10, quote='"')
+    >>> _parsetemplate(br'foo\\"bar', 0, 10, quote=b'"')
     ([('string', 'foo\\')], 6)
     """
     parsed = []
@@ -168,7 +169,7 @@ def _parsetemplate(tmpl, start, stop, quote=''):
             parsed.append(('string', parser.unescapestr(tmpl[pos:stop])))
             pos = stop
             break
-        c = tmpl[n]
+        c = tmpl[n:n + 1]
         bs = (n - pos) - len(tmpl[pos:n].rstrip('\\'))
         if bs % 2 == 1:
             # escaped (e.g. '\{', '\\\{', but not '\\{')
@@ -191,20 +192,20 @@ def _unnesttemplatelist(tree):
     """Expand list of templates to node tuple
 
     >>> def f(tree):
-    ...     print prettyformat(_unnesttemplatelist(tree))
-    >>> f(('template', []))
-    ('string', '')
-    >>> f(('template', [('string', 'foo')]))
-    ('string', 'foo')
-    >>> f(('template', [('string', 'foo'), ('symbol', 'rev')]))
+    ...     print(pycompat.sysstr(prettyformat(_unnesttemplatelist(tree))))
+    >>> f((b'template', []))
+    (string '')
+    >>> f((b'template', [(b'string', b'foo')]))
+    (string 'foo')
+    >>> f((b'template', [(b'string', b'foo'), (b'symbol', b'rev')]))
     (template
-      ('string', 'foo')
-      ('symbol', 'rev'))
-    >>> f(('template', [('symbol', 'rev')]))  # template(rev) -> str
+      (string 'foo')
+      (symbol 'rev'))
+    >>> f((b'template', [(b'symbol', b'rev')]))  # template(rev) -> str
     (template
-      ('symbol', 'rev'))
-    >>> f(('template', [('template', [('string', 'foo')])]))
-    ('string', 'foo')
+      (symbol 'rev'))
+    >>> f((b'template', [(b'template', [(b'string', b'foo')])]))
+    (string 'foo')
     """
     if not isinstance(tree, tuple):
         return tree
@@ -230,15 +231,15 @@ def parse(tmpl):
 def _parseexpr(expr):
     """Parse a template expression into tree
 
-    >>> _parseexpr('"foo"')
+    >>> _parseexpr(b'"foo"')
     ('string', 'foo')
-    >>> _parseexpr('foo(bar)')
+    >>> _parseexpr(b'foo(bar)')
     ('func', ('symbol', 'foo'), ('symbol', 'bar'))
-    >>> _parseexpr('foo(')
+    >>> _parseexpr(b'foo(')
     Traceback (most recent call last):
       ...
     ParseError: ('not a prefix: end', 4)
-    >>> _parseexpr('"foo" "bar"')
+    >>> _parseexpr(b'"foo" "bar"')
     Traceback (most recent call last):
       ...
     ParseError: ('invalid token', 7)
@@ -488,10 +489,10 @@ def _buildfuncargs(exp, context, curmethods, funcname, argspec):
     ...     x = _parseexpr(expr)
     ...     n = getsymbol(x[1])
     ...     return _buildfuncargs(x[2], context, exprmethods, n, argspec)
-    >>> fargs('a(l=1, k=2)', 'k l m').keys()
+    >>> list(fargs(b'a(l=1, k=2)', b'k l m').keys())
     ['l', 'k']
-    >>> args = fargs('a(opts=1, k=2)', '**opts')
-    >>> args.keys(), args['opts'].keys()
+    >>> args = fargs(b'a(opts=1, k=2)', b'**opts')
+    >>> list(args.keys()), list(args[b'opts'].keys())
     (['opts'], ['opts', 'k'])
     """
     def compiledict(xs):
@@ -839,6 +840,34 @@ def localdate(context, mapping, args):
         tzoffset = util.makedate()[1]
     return (date[0], tzoffset)
 
+@templatefunc('max(iterable)')
+def max_(context, mapping, args, **kwargs):
+    """Return the max of an iterable"""
+    if len(args) != 1:
+        # i18n: "max" is a keyword
+        raise error.ParseError(_("max expects one arguments"))
+
+    iterable = evalfuncarg(context, mapping, args[0])
+    try:
+        return max(iterable)
+    except (TypeError, ValueError):
+        # i18n: "max" is a keyword
+        raise error.ParseError(_("max first argument should be an iterable"))
+
+@templatefunc('min(iterable)')
+def min_(context, mapping, args, **kwargs):
+    """Return the min of an iterable"""
+    if len(args) != 1:
+        # i18n: "min" is a keyword
+        raise error.ParseError(_("min expects one arguments"))
+
+    iterable = evalfuncarg(context, mapping, args[0])
+    try:
+        return min(iterable)
+    except (TypeError, ValueError):
+        # i18n: "min" is a keyword
+        raise error.ParseError(_("min first argument should be an iterable"))
+
 @templatefunc('mod(a, b)')
 def mod(context, mapping, args):
     """Calculate a mod b such that a / b + a mod b == a"""
@@ -848,6 +877,57 @@ def mod(context, mapping, args):
 
     func = lambda a, b: a % b
     return runarithmetic(context, mapping, (func, args[0], args[1]))
+
+@templatefunc('obsfatedate(markers)')
+def obsfatedate(context, mapping, args):
+    """Compute obsfate related information based on markers (EXPERIMENTAL)"""
+    if len(args) != 1:
+        # i18n: "obsfatedate" is a keyword
+        raise error.ParseError(_("obsfatedate expects one arguments"))
+
+    markers = evalfuncarg(context, mapping, args[0])
+
+    try:
+        data = obsutil.markersdates(markers)
+        return templatekw.hybridlist(data, name='date', fmt='%d %d')
+    except (TypeError, KeyError):
+        # i18n: "obsfatedate" is a keyword
+        errmsg = _("obsfatedate first argument should be an iterable")
+        raise error.ParseError(errmsg)
+
+@templatefunc('obsfateusers(markers)')
+def obsfateusers(context, mapping, args):
+    """Compute obsfate related information based on markers (EXPERIMENTAL)"""
+    if len(args) != 1:
+        # i18n: "obsfateusers" is a keyword
+        raise error.ParseError(_("obsfateusers expects one arguments"))
+
+    markers = evalfuncarg(context, mapping, args[0])
+
+    try:
+        data = obsutil.markersusers(markers)
+        return templatekw.hybridlist(data, name='user')
+    except (TypeError, KeyError, ValueError):
+        # i18n: "obsfateusers" is a keyword
+        msg = _("obsfateusers first argument should be an iterable of "
+                "obsmakers")
+        raise error.ParseError(msg)
+
+@templatefunc('obsfateverb(successors)')
+def obsfateverb(context, mapping, args):
+    """Compute obsfate related information based on successors (EXPERIMENTAL)"""
+    if len(args) != 1:
+        # i18n: "obsfateverb" is a keyword
+        raise error.ParseError(_("obsfateverb expects one arguments"))
+
+    successors = evalfuncarg(context, mapping, args[0])
+
+    try:
+        return obsutil.successorsetverb(successors)
+    except TypeError:
+        # i18n: "obsfateverb" is a keyword
+        errmsg = _("obsfateverb first argument should be countable")
+        raise error.ParseError(errmsg)
 
 @templatefunc('relpath(path)')
 def relpath(context, mapping, args):
@@ -943,41 +1023,7 @@ def shortest(context, mapping, args):
     # which would be unacceptably slow. so we look for hash collision in
     # unfiltered space, which means some hashes may be slightly longer.
     cl = mapping['ctx']._repo.unfiltered().changelog
-    def isvalid(test):
-        try:
-            if cl._partialmatch(test) is None:
-                return False
-
-            try:
-                i = int(test)
-                # if we are a pure int, then starting with zero will not be
-                # confused as a rev; or, obviously, if the int is larger than
-                # the value of the tip rev
-                if test[0] == '0' or i > len(cl):
-                    return True
-                return False
-            except ValueError:
-                return True
-        except error.RevlogError:
-            return False
-        except error.WdirUnsupported:
-            # single 'ff...' match
-            return True
-
-    shortest = node
-    startlength = max(6, minlength)
-    length = startlength
-    while True:
-        test = node[:length]
-        if isvalid(test):
-            shortest = test
-            if length == minlength or length > startlength:
-                return shortest
-            length -= 1
-        else:
-            length += 1
-            if len(shortest) <= length:
-                return shortest
+    return cl.shortest(node, minlength)
 
 @templatefunc('strip(text[, chars])')
 def strip(context, mapping, args):

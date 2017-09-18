@@ -9,6 +9,7 @@ from __future__ import absolute_import
 
 from . import (
     phases,
+    util
 )
 
 class marker(object):
@@ -29,7 +30,13 @@ class marker(object):
         return self._data == other._data
 
     def precnode(self):
-        """Precursor changeset node identifier"""
+        msg = ("'marker.precnode' is deprecated, "
+               "use 'marker.prednode'")
+        util.nouideprecwarn(msg, '4.4')
+        return self.prednode()
+
+    def prednode(self):
+        """Predecessor changeset node identifier"""
         return self._data[0]
 
     def succnodes(self):
@@ -37,7 +44,7 @@ class marker(object):
         return self._data[1]
 
     def parentnodes(self):
-        """Parents of the precursors (None if not recorded)"""
+        """Parents of the predecessors (None if not recorded)"""
         return self._data[5]
 
     def metadata(self):
@@ -74,7 +81,7 @@ def closestpredecessors(repo, nodeid):
     considered missing.
     """
 
-    precursors = repo.obsstore.precursors
+    precursors = repo.obsstore.predecessors
     stack = [nodeid]
     seen = set(stack)
 
@@ -95,7 +102,16 @@ def closestpredecessors(repo, nodeid):
             else:
                 stack.append(precnodeid)
 
-def allprecursors(obsstore, nodes, ignoreflags=0):
+def allprecursors(*args, **kwargs):
+    """ (DEPRECATED)
+    """
+    msg = ("'obsutil.allprecursors' is deprecated, "
+           "use 'obsutil.allpredecessors'")
+    util.nouideprecwarn(msg, '4.4')
+
+    return allpredecessors(*args, **kwargs)
+
+def allpredecessors(obsstore, nodes, ignoreflags=0):
     """Yield node for every precursors of <nodes>.
 
     Some precursors may be unknown locally.
@@ -108,7 +124,7 @@ def allprecursors(obsstore, nodes, ignoreflags=0):
     while remaining:
         current = remaining.pop()
         yield current
-        for mark in obsstore.precursors.get(current, ()):
+        for mark in obsstore.predecessors.get(current, ()):
             # ignore marker flagged with specified flag
             if mark[2] & ignoreflags:
                 continue
@@ -200,7 +216,7 @@ def exclusivemarkers(repo, nodes):
 
     # shortcut to various useful item
     nm = unfi.changelog.nodemap
-    precursorsmarkers = unfi.obsstore.precursors
+    precursorsmarkers = unfi.obsstore.predecessors
     successormarkers = unfi.obsstore.successors
     childrenmarkers = unfi.obsstore.children
 
@@ -307,9 +323,29 @@ def getobsoleted(repo, tr):
         seenrevs.add(rev)
         if phase(repo, rev) == public:
             continue
-        if set(succsmarkers(node)).issubset(addedmarkers):
+        if set(succsmarkers(node) or []).issubset(addedmarkers):
             obsoleted.add(rev)
     return obsoleted
+
+class _succs(list):
+    """small class to represent a successors with some metadata about it"""
+
+    def __init__(self, *args, **kwargs):
+        super(_succs, self).__init__(*args, **kwargs)
+        self.markers = set()
+
+    def copy(self):
+        new = _succs(self)
+        new.markers = self.markers.copy()
+        return new
+
+    @util.propertycache
+    def _set(self):
+        # immutable
+        return set(self)
+
+    def canmerge(self, other):
+        return self._set.issubset(other._set)
 
 def successorssets(repo, initialnode, closest=False, cache=None):
     """Return set of all latest successors of initial nodes
@@ -429,7 +465,7 @@ def successorssets(repo, initialnode, closest=False, cache=None):
             # case (2): end of walk.
             if current in repo:
                 # We have a valid successors.
-                cache[current] = [(current,)]
+                cache[current] = [_succs((current,))]
             else:
                 # Final obsolete version is unknown locally.
                 # Do not count that as a valid successors
@@ -505,13 +541,16 @@ def successorssets(repo, initialnode, closest=False, cache=None):
                 succssets = []
                 for mark in sorted(succmarkers[current]):
                     # successors sets contributed by this marker
-                    markss = [[]]
+                    base = _succs()
+                    base.markers.add(mark)
+                    markss = [base]
                     for suc in mark[1]:
                         # cardinal product with previous successors
                         productresult = []
                         for prefix in markss:
                             for suffix in cache[suc]:
-                                newss = list(prefix)
+                                newss = prefix.copy()
+                                newss.markers.update(suffix.markers)
                                 for part in suffix:
                                     # do not duplicated entry in successors set
                                     # first entry wins.
@@ -523,15 +562,87 @@ def successorssets(repo, initialnode, closest=False, cache=None):
                 # remove duplicated and subset
                 seen = []
                 final = []
-                candidate = sorted(((set(s), s) for s in succssets if s),
-                                   key=lambda x: len(x[1]), reverse=True)
-                for setversion, listversion in candidate:
-                    for seenset in seen:
-                        if setversion.issubset(seenset):
+                candidates = sorted((s for s in succssets if s),
+                                    key=len, reverse=True)
+                for cand in candidates:
+                    for seensuccs in seen:
+                        if cand.canmerge(seensuccs):
+                            seensuccs.markers.update(cand.markers)
                             break
                     else:
-                        final.append(listversion)
-                        seen.append(setversion)
+                        final.append(cand)
+                        seen.append(cand)
                 final.reverse() # put small successors set first
                 cache[current] = final
     return cache[initialnode]
+
+def successorsandmarkers(repo, ctx):
+    """compute the raw data needed for computing obsfate
+    Returns a list of dict, one dict per successors set
+    """
+    if not ctx.obsolete():
+        return None
+
+    ssets = successorssets(repo, ctx.node(), closest=True)
+
+    # closestsuccessors returns an empty list for pruned revisions, remap it
+    # into a list containing an empty list for future processing
+    if ssets == []:
+        ssets = [[]]
+
+    # Try to recover pruned markers
+    succsmap = repo.obsstore.successors
+    fullsuccessorsets = [] # successor set + markers
+    for sset in ssets:
+        if sset:
+            fullsuccessorsets.append(sset)
+        else:
+            # successorsset return an empty set() when ctx or one of its
+            # successors is pruned.
+            # In this case, walk the obs-markers tree again starting with ctx
+            # and find the relevant pruning obs-makers, the ones without
+            # successors.
+            # Having these markers allow us to compute some information about
+            # its fate, like who pruned this changeset and when.
+
+            # XXX we do not catch all prune markers (eg rewritten then pruned)
+            # (fix me later)
+            foundany = False
+            for mark in succsmap.get(ctx.node(), ()):
+                if not mark[1]:
+                    foundany = True
+                    sset = _succs()
+                    sset.markers.add(mark)
+                    fullsuccessorsets.append(sset)
+            if not foundany:
+                fullsuccessorsets.append(_succs())
+
+    values = []
+    for sset in fullsuccessorsets:
+        values.append({'successors': sset, 'markers': sset.markers})
+
+    return values
+
+def successorsetverb(successorset):
+    """ Return the verb summarizing the successorset
+    """
+    if not successorset:
+        verb = 'pruned'
+    elif len(successorset) == 1:
+        verb = 'rewritten'
+    else:
+        verb = 'split'
+    return verb
+
+def markersdates(markers):
+    """returns the list of dates for a list of markers
+    """
+    return [m[4] for m in markers]
+
+def markersusers(markers):
+    """ Returns a sorted list of markers users without duplicates
+    """
+    markersmeta = [dict(m[3]) for m in markers]
+    users = set(meta.get('user') for meta in markersmeta if meta.get('user'))
+
+    return sorted(users)

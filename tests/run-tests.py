@@ -94,20 +94,61 @@ if os.name != 'nt':
     try: # is pygments installed
         import pygments
         import pygments.lexers as lexers
+        import pygments.lexer as lexer
         import pygments.formatters as formatters
+        import pygments.token as token
+        import pygments.style as style
         pygmentspresent = True
         difflexer = lexers.DiffLexer()
         terminal256formatter = formatters.Terminal256Formatter()
     except ImportError:
         pass
 
+if pygmentspresent:
+    class TestRunnerStyle(style.Style):
+        default_style = ""
+        skipped = token.string_to_tokentype("Token.Generic.Skipped")
+        failed = token.string_to_tokentype("Token.Generic.Failed")
+        skippedname = token.string_to_tokentype("Token.Generic.SName")
+        failedname = token.string_to_tokentype("Token.Generic.FName")
+        styles = {
+            skipped:         '#e5e5e5',
+            skippedname:     '#00ffff',
+            failed:          '#7f0000',
+            failedname:      '#ff0000',
+        }
+
+    class TestRunnerLexer(lexer.RegexLexer):
+        tokens = {
+            'root': [
+                (r'^Skipped', token.Generic.Skipped, 'skipped'),
+                (r'^Failed ', token.Generic.Failed, 'failed'),
+                (r'^ERROR: ', token.Generic.Failed, 'failed'),
+            ],
+            'skipped': [
+                (r'[\w-]+\.(t|py)', token.Generic.SName),
+                (r':.*', token.Generic.Skipped),
+            ],
+            'failed': [
+                (r'[\w-]+\.(t|py)', token.Generic.FName),
+                (r'(:| ).*', token.Generic.Failed),
+            ]
+        }
+
+    runnerformatter = formatters.Terminal256Formatter(style=TestRunnerStyle)
+    runnerlexer = TestRunnerLexer()
+
 if sys.version_info > (3, 5, 0):
     PYTHON3 = True
     xrange = range # we use xrange in one place, and we'd rather not use range
     def _bytespath(p):
+        if p is None:
+            return p
         return p.encode('utf-8')
 
     def _strpath(p):
+        if p is None:
+            return p
         return p.decode('utf-8')
 
 elif sys.version_info >= (3, 0, 0):
@@ -365,6 +406,10 @@ def getparser():
                       metavar="known_good_rev",
                       help=("Automatically bisect any failures using this "
                             "revision as a known-good revision."))
+    parser.add_option('--bisect-repo', type="string",
+                      metavar='bisect_repo',
+                      help=("Path of a repo to bisect. Use together with "
+                            "--known-good-rev"))
 
     for option, (envvar, default) in defaults.items():
         defaults[option] = type(default)(os.environ.get(envvar, default))
@@ -416,6 +461,9 @@ def parseargs(args, parser):
     if options.color == 'always' and not pygmentspresent:
         sys.stderr.write('warning: --color=always ignored because '
                          'pygments is not installed\n')
+
+    if options.bisect_repo and not options.known_good_rev:
+        parser.error("--bisect-repo cannot be used without --known-good-rev")
 
     global useipv6
     if options.ipv6:
@@ -569,6 +617,19 @@ def log(*msg):
             print(m, end=' ')
         print()
         sys.stdout.flush()
+
+def highlightdiff(line, color):
+    if not color:
+        return line
+    assert pygmentspresent
+    return pygments.highlight(line.decode('latin1'), difflexer,
+                              terminal256formatter).encode('latin1')
+
+def highlightmsg(msg, color):
+    if not color:
+        return msg
+    assert pygmentspresent
+    return pygments.highlight(msg, runnerlexer, runnerformatter)
 
 def terminate(proc):
     """Terminate subprocess"""
@@ -1359,7 +1420,7 @@ class TTest(Test):
                 while i < len(els):
                     el = els[i]
 
-                    r = TTest.linematch(el, lout)
+                    r = self.linematch(el, lout)
                     if isinstance(r, str):
                         if r == '+glob':
                             lout = el[:-1] + ' (glob)\n'
@@ -1383,11 +1444,10 @@ class TTest(Test):
                         else:
                             m = optline.match(el)
                             if m:
-                                conditions = [c for c in m.group(2).split(' ')]
+                                conditions = [
+                                    c for c in m.group(2).split(b' ')]
 
-                                if self._hghave(conditions)[0]:
-                                    lout = el
-                                else:
+                                if not self._iftest(conditions):
                                     optional.append(i)
 
                     i += 1
@@ -1416,9 +1476,16 @@ class TTest(Test):
                 while expected.get(pos, None):
                     el = expected[pos].pop(0)
                     if el:
-                        if (not optline.match(el)
-                            and not el.endswith(b" (?)\n")):
-                            break
+                        if not el.endswith(b" (?)\n"):
+                            m = optline.match(el)
+                            if m:
+                                conditions = [c for c in m.group(2).split(b' ')]
+
+                                if self._iftest(conditions):
+                                    # Don't append as optional line
+                                    continue
+                            else:
+                                continue
                     postout.append(b'  ' + el)
 
             if lcmd:
@@ -1481,8 +1548,7 @@ class TTest(Test):
                 res += re.escape(c)
         return TTest.rematch(res, l)
 
-    @staticmethod
-    def linematch(el, l):
+    def linematch(self, el, l):
         retry = False
         if el == l: # perfect match (fast)
             return True
@@ -1493,8 +1559,11 @@ class TTest(Test):
             else:
                 m = optline.match(el)
                 if m:
+                    conditions = [c for c in m.group(2).split(b' ')]
+
                     el = m.group(1) + b"\n"
-                    retry = "retry"
+                    if not self._iftest(conditions):
+                        retry = "retry"    # Not required by listed features
 
             if el.endswith(b" (esc)\n"):
                 if PYTHON3:
@@ -1586,7 +1655,8 @@ class TestResult(unittest._TextTestResult):
                     self.stream.write('t')
                 else:
                     if not self._options.nodiff:
-                        self.stream.write('\nERROR: %s output changed\n' % test)
+                        formatted = '\nERROR: %s output changed\n' % test
+                        self.stream.write(highlightmsg(formatted, self.color))
                     self.stream.write('!')
 
                 self.stream.flush()
@@ -1652,10 +1722,7 @@ class TestResult(unittest._TextTestResult):
                 else:
                     self.stream.write('\n')
                     for line in lines:
-                        if self.color:
-                            line = pygments.highlight(line,
-                                                      difflexer,
-                                                      terminal256formatter)
+                        line = highlightdiff(line, self.color)
                         if PYTHON3:
                             self.stream.flush()
                             self.stream.buffer.write(line)
@@ -1988,9 +2055,11 @@ class TextTestRunner(unittest.TextTestRunner):
 
             if not self._runner.options.noskips:
                 for test, msg in result.skipped:
-                    self.stream.writeln('Skipped %s: %s' % (test.name, msg))
+                    formatted = 'Skipped %s: %s\n' % (test.name, msg)
+                    self.stream.write(highlightmsg(formatted, result.color))
             for test, msg in result.failures:
-                self.stream.writeln('Failed %s: %s' % (test.name, msg))
+                formatted = 'Failed %s: %s\n' % (test.name, msg)
+                self.stream.write(highlightmsg(formatted, result.color))
             for test, msg in result.errors:
                 self.stream.writeln('Errored %s: %s' % (test.name, msg))
 
@@ -2008,20 +2077,29 @@ class TextTestRunner(unittest.TextTestRunner):
             savetimes(self._runner._outputdir, result)
 
             if failed and self._runner.options.known_good_rev:
+                bisectcmd = ['hg', 'bisect']
+                bisectrepo = self._runner.options.bisect_repo
+                if bisectrepo:
+                    bisectcmd.extend(['-R', os.path.abspath(bisectrepo)])
                 def nooutput(args):
                     p = subprocess.Popen(args, stderr=subprocess.STDOUT,
                                          stdout=subprocess.PIPE)
                     p.stdout.read()
                     p.wait()
                 for test, msg in result.failures:
-                    nooutput(['hg', 'bisect', '--reset']),
-                    nooutput(['hg', 'bisect', '--bad', '.'])
-                    nooutput(['hg', 'bisect', '--good',
+                    nooutput(bisectcmd + ['--reset']),
+                    nooutput(bisectcmd + ['--bad', '.'])
+                    nooutput(bisectcmd + ['--good',
                               self._runner.options.known_good_rev])
-                    # TODO: we probably need to forward some options
+                    # TODO: we probably need to forward more options
                     # that alter hg's behavior inside the tests.
-                    rtc = '%s %s %s' % (sys.executable, sys.argv[0], test)
-                    sub = subprocess.Popen(['hg', 'bisect', '--command', rtc],
+                    opts = ''
+                    withhg = self._runner.options.with_hg
+                    if withhg:
+                        opts += ' --with-hg=%s ' % shellquote(withhg)
+                    rtc = '%s %s %s %s' % (sys.executable, sys.argv[0], opts,
+                                           test)
+                    sub = subprocess.Popen(bisectcmd + ['--command', rtc],
                                            stderr=subprocess.STDOUT,
                                            stdout=subprocess.PIPE)
                     data = sub.stdout.read()

@@ -88,7 +88,8 @@ def run():
             status = -1
     if util.safehasattr(req.ui, 'ferr'):
         if err is not None and err.errno != errno.EPIPE:
-            req.ui.ferr.write('abort: %s\n' % err.strerror)
+            req.ui.ferr.write('abort: %s\n' %
+                              encoding.strtolocal(err.strerror))
         req.ui.ferr.flush()
     sys.exit(status & 255)
 
@@ -356,7 +357,10 @@ def _callcatch(ui, func):
     return -1
 
 def aliasargs(fn, givenargs):
-    args = getattr(fn, 'args', [])
+    args = []
+    # only care about alias 'args', ignore 'args' set by extensions.wrapfunction
+    if not util.safehasattr(fn, '_origfunc'):
+        args = getattr(fn, 'args', args)
     if args:
         cmd = ' '.join(map(util.shellquote, args))
 
@@ -603,20 +607,20 @@ def _earlygetopt(aliases, args):
     The values are listed in the order they appear in args.
     The options and values are removed from args.
 
-    >>> args = ['x', '--cwd', 'foo', 'y']
-    >>> _earlygetopt(['--cwd'], args), args
+    >>> args = [b'x', b'--cwd', b'foo', b'y']
+    >>> _earlygetopt([b'--cwd'], args), args
     (['foo'], ['x', 'y'])
 
-    >>> args = ['x', '--cwd=bar', 'y']
-    >>> _earlygetopt(['--cwd'], args), args
+    >>> args = [b'x', b'--cwd=bar', b'y']
+    >>> _earlygetopt([b'--cwd'], args), args
     (['bar'], ['x', 'y'])
 
-    >>> args = ['x', '-R', 'foo', 'y']
-    >>> _earlygetopt(['-R'], args), args
+    >>> args = [b'x', b'-R', b'foo', b'y']
+    >>> _earlygetopt([b'-R'], args), args
     (['foo'], ['x', 'y'])
 
-    >>> args = ['x', '-Rbar', 'y']
-    >>> _earlygetopt(['-R'], args), args
+    >>> args = [b'x', b'-Rbar', b'y']
+    >>> _earlygetopt([b'-R'], args), args
     (['bar'], ['x', 'y'])
     """
     try:
@@ -676,7 +680,7 @@ def _getlocal(ui, rpath, wd=None):
             wd = pycompat.getcwd()
         except OSError as e:
             raise error.Abort(_("error getting current working directory: %s") %
-                              e.strerror)
+                              encoding.strtolocal(e.strerror))
     path = cmdutil.findrepo(wd) or ""
     if not path:
         lui = ui

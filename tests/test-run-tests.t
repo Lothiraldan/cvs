@@ -131,10 +131,9 @@ test diff colorisation
   \x1b[38;5;34m+  bar*baz (glob)\x1b[39m (esc)
      bar*bad (glob)
   \x1b[38;5;124m-  bar*baz (glob)\x1b[39m (esc)
-  
-  ERROR: test-failure.t output changed
+  \x1b[38;5;88mERROR: \x1b[39m\x1b[38;5;9mtest-failure.t\x1b[39m\x1b[38;5;88m output changed\x1b[39m (esc)
   !
-  Failed test-failure.t: output changed
+  \x1b[38;5;88mFailed \x1b[39m\x1b[38;5;9mtest-failure.t\x1b[39m\x1b[38;5;88m: output changed\x1b[39m (esc)
   # Ran 1 tests, 0 skipped, 1 failed.
   python hash seed: * (glob)
   [1]
@@ -157,6 +156,73 @@ test diff colorisation
   # Ran 1 tests, 0 skipped, 1 failed.
   python hash seed: * (glob)
 #endif
+
+  $ cat > test-failure.t << EOF
+  >   $ true
+  >   should go away (true !)
+  >   $ true
+  >   should stay (false !)
+  > 
+  > Should remove first line, not second or third
+  >   $ echo 'testing'
+  >   baz*foo (glob) (true !)
+  >   foobar*foo (glob) (false !)
+  >   te*ting (glob) (true !)
+  > 
+  > Should keep first two lines, remove third and last
+  >   $ echo 'testing'
+  >   test.ng (re) (true !)
+  >   foo.ar (re) (false !)
+  >   b.r (re) (true !)
+  >   missing (?)
+  >   awol (true !)
+  > 
+  > The "missing" line should stay, even though awol is dropped
+  >   $ echo 'testing'
+  >   test.ng (re) (true !)
+  >   foo.ar (?)
+  >   awol
+  >   missing (?)
+  > EOF
+  $ rt test-failure.t
+  
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,11 +1,9 @@
+     $ true
+  -  should go away (true !)
+     $ true
+     should stay (false !)
+   
+   Should remove first line, not second or third
+     $ echo 'testing'
+  -  baz*foo (glob) (true !)
+     foobar*foo (glob) (false !)
+     te*ting (glob) (true !)
+   
+     foo.ar (re) (false !)
+     missing (?)
+  @@ -13,13 +11,10 @@
+     $ echo 'testing'
+     test.ng (re) (true !)
+     foo.ar (re) (false !)
+  -  b.r (re) (true !)
+     missing (?)
+  -  awol (true !)
+   
+   The "missing" line should stay, even though awol is dropped
+     $ echo 'testing'
+     test.ng (re) (true !)
+     foo.ar (?)
+  -  awol
+     missing (?)
+  
+  ERROR: test-failure.t output changed
+  !
+  Failed test-failure.t: output changed
+  # Ran 1 tests, 0 skipped, 1 failed.
+  python hash seed: * (glob)
+  [1]
 
 basic failing test
   $ cat > test-failure.t << EOF
@@ -757,6 +823,20 @@ When "#testcases" is used in .t files
     2
   #endif
 
+  $ cat >> test-cases.t <<'EOF'
+  > #if a
+  >   $ NAME=A
+  > #else
+  >   $ NAME=B
+  > #endif
+  >   $ echo $NAME
+  >   A (a !)
+  >   B (b !)
+  > EOF
+  $ rt test-cases.t
+  ..
+  # Ran 2 tests, 0 skipped, 0 failed.
+
   $ rm test-cases.t
 
 (reinstall)
@@ -1199,6 +1279,58 @@ support for bisecting failed tests automatically
   !
   Failed test-bisect.t: output changed
   test-bisect.t broken by 72cbf122d116 (bad)
+  # Ran 1 tests, 0 skipped, 1 failed.
+  python hash seed: * (glob)
+  [1]
+
+  $ cd ..
+
+support bisecting a separate repo
+
+  $ hg init bisect-dependent
+  $ cd bisect-dependent
+  $ cat > test-bisect-dependent.t <<EOF
+  >   $ tail -1 \$TESTDIR/../bisect/test-bisect.t
+  >     pass
+  > EOF
+  $ hg commit -Am dependent test-bisect-dependent.t
+
+  $ rt --known-good-rev=0 test-bisect-dependent.t
+  
+  --- $TESTTMP/anothertests/bisect-dependent/test-bisect-dependent.t
+  +++ $TESTTMP/anothertests/bisect-dependent/test-bisect-dependent.t.err
+  @@ -1,2 +1,2 @@
+     $ tail -1 $TESTDIR/../bisect/test-bisect.t
+  -    pass
+  +    fail
+  
+  ERROR: test-bisect-dependent.t output changed
+  !
+  Failed test-bisect-dependent.t: output changed
+  Failed to identify failure point for test-bisect-dependent.t
+  # Ran 1 tests, 0 skipped, 1 failed.
+  python hash seed: * (glob)
+  [1]
+
+  $ rt --bisect-repo=../test-bisect test-bisect-dependent.t
+  Usage: run-tests.py [options] [tests]
+  
+  run-tests.py: error: --bisect-repo cannot be used without --known-good-rev
+  [2]
+
+  $ rt --known-good-rev=0 --bisect-repo=../bisect test-bisect-dependent.t
+  
+  --- $TESTTMP/anothertests/bisect-dependent/test-bisect-dependent.t
+  +++ $TESTTMP/anothertests/bisect-dependent/test-bisect-dependent.t.err
+  @@ -1,2 +1,2 @@
+     $ tail -1 $TESTDIR/../bisect/test-bisect.t
+  -    pass
+  +    fail
+  
+  ERROR: test-bisect-dependent.t output changed
+  !
+  Failed test-bisect-dependent.t: output changed
+  test-bisect-dependent.t broken by 72cbf122d116 (bad)
   # Ran 1 tests, 0 skipped, 1 failed.
   python hash seed: * (glob)
   [1]

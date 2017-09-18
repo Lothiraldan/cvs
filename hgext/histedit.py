@@ -1370,7 +1370,7 @@ def ruleeditor(repo, ui, actions, editcomment=""):
     rules += '\n\n'
     rules += editcomment
     rules = ui.edit(rules, ui.username(), {'prefix': 'histedit'},
-                    repopath=repo.path)
+                    repopath=repo.path, action='histedit')
 
     # Save edit rules in .hg/histedit-last-edit.txt in case
     # the user needs to ask for help after something
@@ -1417,6 +1417,11 @@ def verifyactions(actions, state, ctxs):
     expected = set(c.node() for c in ctxs)
     seen = set()
     prev = None
+
+    if actions and actions[0].verb in ['roll', 'fold']:
+        raise error.ParseError(_('first changeset cannot use verb "%s"') %
+                               actions[0].verb)
+
     for action in actions:
         action.verify(prev, expected, seen)
         prev = action

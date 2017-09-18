@@ -32,9 +32,9 @@ def decodefilename(filename):
     """Perforce escapes special characters @, #, *, or %
     with %40, %23, %2A, or %25 respectively
 
-    >>> decodefilename('portable-net45%252Bnetcore45%252Bwp8%252BMonoAndroid')
+    >>> decodefilename(b'portable-net45%252Bnetcore45%252Bwp8%252BMonoAndroid')
     'portable-net45%2Bnetcore45%2Bwp8%2BMonoAndroid'
-    >>> decodefilename('//Depot/Directory/%2525/%2523/%23%40.%2A')
+    >>> decodefilename(b'//Depot/Directory/%2525/%2523/%23%40.%2A')
     '//Depot/Directory/%25/%23/#@.*'
     """
     replacements = [('%2A', '*'), ('%23', '#'), ('%40', '@'), ('%25', '%')]
@@ -138,7 +138,7 @@ class p4_source(common.converter_source):
         vieworder.sort(key=len, reverse=True)
 
         # handle revision limiting
-        startrev = self.ui.config('convert', 'p4.startrev', default=0)
+        startrev = self.ui.config('convert', 'p4.startrev')
 
         # now read the full changelists to get the list of file revisions
         ui.status(_('collecting p4 changelists\n'))

@@ -13,8 +13,9 @@ This contains helper routines that are independent of the SCM core and
 hide platform-specific details from the core.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
+import abc
 import bz2
 import calendar
 import codecs
@@ -171,6 +172,14 @@ os.stat_float_times(False)
 def safehasattr(thing, attr):
     return getattr(thing, attr, _notset) is not _notset
 
+def bytesinput(fin, fout, *args, **kwargs):
+    sin, sout = sys.stdin, sys.stdout
+    try:
+        sys.stdin, sys.stdout = encoding.strio(fin), encoding.strio(fout)
+        return encoding.strtolocal(pycompat.rawinput(*args, **kwargs))
+    finally:
+        sys.stdin, sys.stdout = sin, sout
+
 def bitsfrom(container):
     bits = 0
     for bit in container:
@@ -218,15 +227,15 @@ class digester(object):
 
     This helper can be used to compute one or more digests given their name.
 
-    >>> d = digester(['md5', 'sha1'])
-    >>> d.update('foo')
+    >>> d = digester([b'md5', b'sha1'])
+    >>> d.update(b'foo')
     >>> [k for k in sorted(d)]
     ['md5', 'sha1']
-    >>> d['md5']
+    >>> d[b'md5']
     'acbd18db4cc2f85cedef654fccc4a4d8'
-    >>> d['sha1']
+    >>> d[b'sha1']
     '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33'
-    >>> digester.preferred(['md5', 'sha1'])
+    >>> digester.preferred([b'md5', b'sha1'])
     'sha1'
     """
 
@@ -439,7 +448,7 @@ def versiontuple(v=None, n=4):
     ``n`` can be 2, 3, or 4. Here is how some version strings map to
     returned values:
 
-    >>> v = '3.6.1+190-df9b73d2d444'
+    >>> v = b'3.6.1+190-df9b73d2d444'
     >>> versiontuple(v, 2)
     (3, 6)
     >>> versiontuple(v, 3)
@@ -447,10 +456,10 @@ def versiontuple(v=None, n=4):
     >>> versiontuple(v, 4)
     (3, 6, 1, '190-df9b73d2d444')
 
-    >>> versiontuple('3.6.1+190-df9b73d2d444+20151118')
+    >>> versiontuple(b'3.6.1+190-df9b73d2d444+20151118')
     (3, 6, 1, '190-df9b73d2d444+20151118')
 
-    >>> v = '3.6'
+    >>> v = b'3.6'
     >>> versiontuple(v, 2)
     (3, 6)
     >>> versiontuple(v, 3)
@@ -458,7 +467,7 @@ def versiontuple(v=None, n=4):
     >>> versiontuple(v, 4)
     (3, 6, None, None)
 
-    >>> v = '3.9-rc'
+    >>> v = b'3.9-rc'
     >>> versiontuple(v, 2)
     (3, 9)
     >>> versiontuple(v, 3)
@@ -466,7 +475,7 @@ def versiontuple(v=None, n=4):
     >>> versiontuple(v, 4)
     (3, 9, None, 'rc')
 
-    >>> v = '3.9-rc+2-02a8fea4289b'
+    >>> v = b'3.9-rc+2-02a8fea4289b'
     >>> versiontuple(v, 2)
     (3, 9)
     >>> versiontuple(v, 3)
@@ -570,12 +579,12 @@ def cachefunc(func):
 class sortdict(collections.OrderedDict):
     '''a simple sorted dictionary
 
-    >>> d1 = sortdict([('a', 0), ('b', 1)])
+    >>> d1 = sortdict([(b'a', 0), (b'b', 1)])
     >>> d2 = d1.copy()
     >>> d2
     sortdict([('a', 0), ('b', 1)])
-    >>> d2.update([('a', 2)])
-    >>> d2.keys() # should still be in last-set order
+    >>> d2.update([(b'a', 2)])
+    >>> list(d2.keys()) # should still be in last-set order
     ['b', 'a']
     '''
 
@@ -591,6 +600,31 @@ class sortdict(collections.OrderedDict):
                 src = src.iteritems()
             for k, v in src:
                 self[k] = v
+
+class transactional(object):
+    """Base class for making a transactional type into a context manager."""
+    __metaclass__ = abc.ABCMeta
+
+    @abc.abstractmethod
+    def close(self):
+        """Successfully closes the transaction."""
+
+    @abc.abstractmethod
+    def release(self):
+        """Marks the end of the transaction.
+
+        If the transaction has not been closed, it will be aborted.
+        """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if exc_type is None:
+                self.close()
+        finally:
+            self.release()
 
 @contextlib.contextmanager
 def acceptintervention(tr=None):
@@ -609,6 +643,10 @@ def acceptintervention(tr=None):
         raise
     finally:
         tr.release()
+
+@contextlib.contextmanager
+def nullcontextmanager():
+    yield
 
 class _lrucachenode(object):
     """A node in a doubly linked list.
@@ -934,10 +972,9 @@ def nogc(func):
     into. As a workaround, disable GC while building complex (huge)
     containers.
 
-    This garbage collector issue have been fixed in 2.7.
+    This garbage collector issue have been fixed in 2.7. But it still affect
+    CPython's performance.
     """
-    if sys.version_info >= (2, 7):
-        return func
     def wrapper(*args, **kwargs):
         gcenabled = gc.isenabled()
         gc.disable()
@@ -947,6 +984,10 @@ def nogc(func):
             if gcenabled:
                 gc.enable()
     return wrapper
+
+if pycompat.ispypy:
+    # PyPy runs slower with gc disabled
+    nogc = lambda x: x
 
 def pathto(root, n1, n2):
     '''return the relative path from one place to another.
@@ -1189,32 +1230,34 @@ def copyfiles(src, dst, hardlink=None, progress=lambda t, pos: None):
 
     return hardlink, num
 
-_winreservednames = b'''con prn aux nul
-    com1 com2 com3 com4 com5 com6 com7 com8 com9
-    lpt1 lpt2 lpt3 lpt4 lpt5 lpt6 lpt7 lpt8 lpt9'''.split()
+_winreservednames = {
+    'con', 'prn', 'aux', 'nul',
+    'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
+    'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
+}
 _winreservedchars = ':*?"<>|'
 def checkwinfilename(path):
     r'''Check that the base-relative path is a valid filename on Windows.
     Returns None if the path is ok, or a UI string describing the problem.
 
-    >>> checkwinfilename("just/a/normal/path")
-    >>> checkwinfilename("foo/bar/con.xml")
+    >>> checkwinfilename(b"just/a/normal/path")
+    >>> checkwinfilename(b"foo/bar/con.xml")
     "filename contains 'con', which is reserved on Windows"
-    >>> checkwinfilename("foo/con.xml/bar")
+    >>> checkwinfilename(b"foo/con.xml/bar")
     "filename contains 'con', which is reserved on Windows"
-    >>> checkwinfilename("foo/bar/xml.con")
-    >>> checkwinfilename("foo/bar/AUX/bla.txt")
+    >>> checkwinfilename(b"foo/bar/xml.con")
+    >>> checkwinfilename(b"foo/bar/AUX/bla.txt")
     "filename contains 'AUX', which is reserved on Windows"
-    >>> checkwinfilename("foo/bar/bla:.txt")
+    >>> checkwinfilename(b"foo/bar/bla:.txt")
     "filename contains ':', which is reserved on Windows"
-    >>> checkwinfilename("foo/bar/b\07la.txt")
+    >>> checkwinfilename(b"foo/bar/b\07la.txt")
     "filename contains '\\x07', which is invalid on Windows"
-    >>> checkwinfilename("foo/bar/bla ")
+    >>> checkwinfilename(b"foo/bar/bla ")
     "filename ends with ' ', which is not allowed on Windows"
-    >>> checkwinfilename("../bar")
-    >>> checkwinfilename("foo\\")
+    >>> checkwinfilename(b"../bar")
+    >>> checkwinfilename(b"foo\\")
     "filename ends with '\\', which is invalid on Windows"
-    >>> checkwinfilename("foo\\/bar")
+    >>> checkwinfilename(b"foo\\/bar")
     "directory name ends with '\\', which is invalid on Windows"
     '''
     if path.endswith('\\'):
@@ -1414,34 +1457,27 @@ def checknlink(testfile):
 
     # testfile may be open, so we need a separate file for checking to
     # work around issue2543 (or testfile may get lost on Samba shares)
-    f1 = testfile + ".hgtmp1"
-    if os.path.lexists(f1):
-        return False
+    f1, f2, fp = None, None, None
     try:
-        posixfile(f1, 'w').close()
-    except IOError:
-        try:
-            os.unlink(f1)
-        except OSError:
-            pass
-        return False
+        fd, f1 = tempfile.mkstemp(prefix='.%s-' % os.path.basename(testfile),
+                                  suffix='1~', dir=os.path.dirname(testfile))
+        os.close(fd)
+        f2 = '%s2~' % f1[:-2]
 
-    f2 = testfile + ".hgtmp2"
-    fd = None
-    try:
         oslink(f1, f2)
         # nlinks() may behave differently for files on Windows shares if
         # the file is open.
-        fd = posixfile(f2)
+        fp = posixfile(f2)
         return nlinks(f2) > 1
     except OSError:
         return False
     finally:
-        if fd is not None:
-            fd.close()
+        if fp is not None:
+            fp.close()
         for f in (f1, f2):
             try:
-                os.unlink(f)
+                if f is not None:
+                    os.unlink(f)
             except OSError:
                 pass
 
@@ -1484,7 +1520,7 @@ def mktempcopy(name, emptyok=False, createmode=None):
     Returns the name of the temporary file.
     """
     d, fn = os.path.split(name)
-    fd, temp = tempfile.mkstemp(prefix='.%s-' % fn, dir=d)
+    fd, temp = tempfile.mkstemp(prefix='.%s-' % fn, suffix='~', dir=d)
     os.close(fd)
     # Temporary files are created with mode 0600, which is usually not
     # what we want.  If the original file already exists, just copy
@@ -1958,15 +1994,15 @@ def parsedate(date, formats=None, bias=None):
     The date may be a "unixtime offset" string or in one of the specified
     formats. If the date already is a (unixtime, offset) tuple, it is returned.
 
-    >>> parsedate(' today ') == parsedate(\
+    >>> parsedate(b' today ') == parsedate(\
                                   datetime.date.today().strftime('%b %d'))
     True
-    >>> parsedate( 'yesterday ') == parsedate((datetime.date.today() -\
+    >>> parsedate(b'yesterday ') == parsedate((datetime.date.today() -\
                                                datetime.timedelta(days=1)\
                                               ).strftime('%b %d'))
     True
     >>> now, tz = makedate()
-    >>> strnow, strtz = parsedate('now')
+    >>> strnow, strtz = parsedate(b'now')
     >>> (strnow - now) < 1
     True
     >>> tz == strtz
@@ -2040,12 +2076,12 @@ def matchdate(date):
 
     '>{date}' on or after a given date
 
-    >>> p1 = parsedate("10:29:59")
-    >>> p2 = parsedate("10:30:00")
-    >>> p3 = parsedate("10:30:59")
-    >>> p4 = parsedate("10:31:00")
-    >>> p5 = parsedate("Sep 15 10:30:00 1999")
-    >>> f = matchdate("10:30")
+    >>> p1 = parsedate(b"10:29:59")
+    >>> p2 = parsedate(b"10:30:00")
+    >>> p3 = parsedate(b"10:30:59")
+    >>> p4 = parsedate(b"10:31:00")
+    >>> p5 = parsedate(b"Sep 15 10:30:00 1999")
+    >>> f = matchdate(b"10:30")
     >>> f(p1[0])
     False
     >>> f(p2[0])
@@ -2120,27 +2156,27 @@ def stringmatcher(pattern, casesensitive=True):
     ...     return (kind, pattern, [bool(matcher(t)) for t in tests])
 
     exact matching (no prefix):
-    >>> test('abcdefg', 'abc', 'def', 'abcdefg')
+    >>> test(b'abcdefg', b'abc', b'def', b'abcdefg')
     ('literal', 'abcdefg', [False, False, True])
 
     regex matching ('re:' prefix)
-    >>> test('re:a.+b', 'nomatch', 'fooadef', 'fooadefbar')
+    >>> test(b're:a.+b', b'nomatch', b'fooadef', b'fooadefbar')
     ('re', 'a.+b', [False, False, True])
 
     force exact matches ('literal:' prefix)
-    >>> test('literal:re:foobar', 'foobar', 're:foobar')
+    >>> test(b'literal:re:foobar', b'foobar', b're:foobar')
     ('literal', 're:foobar', [False, True])
 
     unknown prefixes are ignored and treated as literals
-    >>> test('foo:bar', 'foo', 'bar', 'foo:bar')
+    >>> test(b'foo:bar', b'foo', b'bar', b'foo:bar')
     ('literal', 'foo:bar', [False, False, True])
 
     case insensitive regex matches
-    >>> itest('re:A.+b', 'nomatch', 'fooadef', 'fooadefBar')
+    >>> itest(b're:A.+b', b'nomatch', b'fooadef', b'fooadefBar')
     ('re', 'A.+b', [False, False, True])
 
     case insensitive literal matches
-    >>> itest('ABCDEFG', 'abc', 'def', 'abcdefg')
+    >>> itest(b'ABCDEFG', b'abc', b'def', b'abcdefg')
     ('literal', 'ABCDEFG', [False, False, True])
     """
     if pattern.startswith('re:'):
@@ -2271,6 +2307,15 @@ def escapestr(s):
 
 def unescapestr(s):
     return codecs.escape_decode(s)[0]
+
+def forcebytestr(obj):
+    """Portably format an arbitrary object (e.g. exception) into a byte
+    string."""
+    try:
+        return pycompat.bytestr(obj)
+    except UnicodeEncodeError:
+        # non-ascii string, may be lossy
+        return pycompat.bytestr(encoding.strtolocal(str(obj)))
 
 def uirepr(s):
     # Avoid double backslash in Windows path repr()
@@ -2604,55 +2649,55 @@ class url(object):
 
     Examples:
 
-    >>> url('http://www.ietf.org/rfc/rfc2396.txt')
+    >>> url(b'http://www.ietf.org/rfc/rfc2396.txt')
     <url scheme: 'http', host: 'www.ietf.org', path: 'rfc/rfc2396.txt'>
-    >>> url('ssh://[::1]:2200//home/joe/repo')
+    >>> url(b'ssh://[::1]:2200//home/joe/repo')
     <url scheme: 'ssh', host: '[::1]', port: '2200', path: '/home/joe/repo'>
-    >>> url('file:///home/joe/repo')
+    >>> url(b'file:///home/joe/repo')
     <url scheme: 'file', path: '/home/joe/repo'>
-    >>> url('file:///c:/temp/foo/')
+    >>> url(b'file:///c:/temp/foo/')
     <url scheme: 'file', path: 'c:/temp/foo/'>
-    >>> url('bundle:foo')
+    >>> url(b'bundle:foo')
     <url scheme: 'bundle', path: 'foo'>
-    >>> url('bundle://../foo')
+    >>> url(b'bundle://../foo')
     <url scheme: 'bundle', path: '../foo'>
-    >>> url(r'c:\foo\bar')
+    >>> url(br'c:\foo\bar')
     <url path: 'c:\\foo\\bar'>
-    >>> url(r'\\blah\blah\blah')
+    >>> url(br'\\blah\blah\blah')
     <url path: '\\\\blah\\blah\\blah'>
-    >>> url(r'\\blah\blah\blah#baz')
+    >>> url(br'\\blah\blah\blah#baz')
     <url path: '\\\\blah\\blah\\blah', fragment: 'baz'>
-    >>> url(r'file:///C:\users\me')
+    >>> url(br'file:///C:\users\me')
     <url scheme: 'file', path: 'C:\\users\\me'>
 
     Authentication credentials:
 
-    >>> url('ssh://joe:xyz@x/repo')
+    >>> url(b'ssh://joe:xyz@x/repo')
     <url scheme: 'ssh', user: 'joe', passwd: 'xyz', host: 'x', path: 'repo'>
-    >>> url('ssh://joe@x/repo')
+    >>> url(b'ssh://joe@x/repo')
     <url scheme: 'ssh', user: 'joe', host: 'x', path: 'repo'>
 
     Query strings and fragments:
 
-    >>> url('http://host/a?b#c')
+    >>> url(b'http://host/a?b#c')
     <url scheme: 'http', host: 'host', path: 'a', query: 'b', fragment: 'c'>
-    >>> url('http://host/a?b#c', parsequery=False, parsefragment=False)
+    >>> url(b'http://host/a?b#c', parsequery=False, parsefragment=False)
     <url scheme: 'http', host: 'host', path: 'a?b#c'>
 
     Empty path:
 
-    >>> url('')
+    >>> url(b'')
     <url path: ''>
-    >>> url('#a')
+    >>> url(b'#a')
     <url path: '', fragment: 'a'>
-    >>> url('http://host/')
+    >>> url(b'http://host/')
     <url scheme: 'http', host: 'host', path: ''>
-    >>> url('http://host/#a')
+    >>> url(b'http://host/#a')
     <url scheme: 'http', host: 'host', path: '', fragment: 'a'>
 
     Only scheme:
 
-    >>> url('http:')
+    >>> url(b'http:')
     <url scheme: 'http'>
     """
 
@@ -2752,6 +2797,7 @@ class url(object):
             if v is not None:
                 setattr(self, a, urlreq.unquote(v))
 
+    @encoding.strmethod
     def __repr__(self):
         attrs = []
         for a in ('scheme', 'user', 'passwd', 'host', 'port', 'path',
@@ -2766,33 +2812,33 @@ class url(object):
 
         Examples:
 
-        >>> str(url('http://user:pw@host:80/c:/bob?fo:oo#ba:ar'))
+        >>> bytes(url(b'http://user:pw@host:80/c:/bob?fo:oo#ba:ar'))
         'http://user:pw@host:80/c:/bob?fo:oo#ba:ar'
-        >>> str(url('http://user:pw@host:80/?foo=bar&baz=42'))
+        >>> bytes(url(b'http://user:pw@host:80/?foo=bar&baz=42'))
         'http://user:pw@host:80/?foo=bar&baz=42'
-        >>> str(url('http://user:pw@host:80/?foo=bar%3dbaz'))
+        >>> bytes(url(b'http://user:pw@host:80/?foo=bar%3dbaz'))
         'http://user:pw@host:80/?foo=bar%3dbaz'
-        >>> str(url('ssh://user:pw@[::1]:2200//home/joe#'))
+        >>> bytes(url(b'ssh://user:pw@[::1]:2200//home/joe#'))
         'ssh://user:pw@[::1]:2200//home/joe#'
-        >>> str(url('http://localhost:80//'))
+        >>> bytes(url(b'http://localhost:80//'))
         'http://localhost:80//'
-        >>> str(url('http://localhost:80/'))
+        >>> bytes(url(b'http://localhost:80/'))
         'http://localhost:80/'
-        >>> str(url('http://localhost:80'))
+        >>> bytes(url(b'http://localhost:80'))
         'http://localhost:80/'
-        >>> str(url('bundle:foo'))
+        >>> bytes(url(b'bundle:foo'))
         'bundle:foo'
-        >>> str(url('bundle://../foo'))
+        >>> bytes(url(b'bundle://../foo'))
         'bundle:../foo'
-        >>> str(url('path'))
+        >>> bytes(url(b'path'))
         'path'
-        >>> str(url('file:///tmp/foo/bar'))
+        >>> bytes(url(b'file:///tmp/foo/bar'))
         'file:///tmp/foo/bar'
-        >>> str(url('file:///c:/tmp/foo/bar'))
+        >>> bytes(url(b'file:///c:/tmp/foo/bar'))
         'file:///c:/tmp/foo/bar'
-        >>> print url(r'bundle:foo\bar')
+        >>> print(url(br'bundle:foo\bar'))
         bundle:foo\bar
-        >>> print url(r'file:///D:\data\hg')
+        >>> print(url(br'file:///D:\data\hg'))
         file:///D:\data\hg
         """
         if self._localpath:
@@ -2971,11 +3017,11 @@ _sizeunits = (('m', 2**20), ('k', 2**10), ('g', 2**30),
 def sizetoint(s):
     '''Convert a space specifier to a byte count.
 
-    >>> sizetoint('30')
+    >>> sizetoint(b'30')
     30
-    >>> sizetoint('2.2kb')
+    >>> sizetoint(b'2.2kb')
     2252
-    >>> sizetoint('6M')
+    >>> sizetoint(b'6M')
     6291456
     '''
     t = s.strip().lower()
@@ -3710,10 +3756,14 @@ def bundlecompressiontopics():
 
         value = docobject()
         value.__doc__ = doc
+        value._origdoc = engine.bundletype.__doc__
+        value._origfunc = engine.bundletype
 
         items[bt[0]] = value
 
     return items
+
+i18nfunctions = bundlecompressiontopics().values()
 
 # convenient shortcut
 dst = debugstacktrace

@@ -31,6 +31,7 @@ from . import (
     context,
     dirstate,
     dirstateguard,
+    discovery,
     encoding,
     error,
     exchange,
@@ -49,6 +50,7 @@ from . import (
     phases,
     pushkey,
     pycompat,
+    repository,
     repoview,
     revset,
     revsetlang,
@@ -144,45 +146,52 @@ moderncaps = {'lookup', 'branchmap', 'pushkey', 'known', 'getbundle',
               'unbundle'}
 legacycaps = moderncaps.union({'changegroupsubset'})
 
-class localpeer(peer.peerrepository):
+class localpeer(repository.peer):
     '''peer for a local repo; reflects only the most recent API'''
 
     def __init__(self, repo, caps=None):
+        super(localpeer, self).__init__()
+
         if caps is None:
             caps = moderncaps.copy()
-        peer.peerrepository.__init__(self)
         self._repo = repo.filtered('served')
-        self.ui = repo.ui
+        self._ui = repo.ui
         self._caps = repo._restrictcapabilities(caps)
-        self.requirements = repo.requirements
-        self.supportedformats = repo.supportedformats
 
-    def close(self):
-        self._repo.close()
+    # Begin of _basepeer interface.
 
-    def _capabilities(self):
-        return self._caps
-
-    def local(self):
-        return self._repo
-
-    def canpush(self):
-        return True
+    @util.propertycache
+    def ui(self):
+        return self._ui
 
     def url(self):
         return self._repo.url()
 
-    def lookup(self, key):
-        return self._repo.lookup(key)
+    def local(self):
+        return self._repo
+
+    def peer(self):
+        return self
+
+    def canpush(self):
+        return True
+
+    def close(self):
+        self._repo.close()
+
+    # End of _basepeer interface.
+
+    # Begin of _basewirecommands interface.
 
     def branchmap(self):
         return self._repo.branchmap()
 
-    def heads(self):
-        return self._repo.heads()
+    def capabilities(self):
+        return self._caps
 
-    def known(self, nodes):
-        return self._repo.known(nodes)
+    def debugwireargs(self, one, two, three=None, four=None, five=None):
+        """Used to test argument passing over the wire"""
+        return "%s %s %s %s %s" % (one, two, three, four, five)
 
     def getbundle(self, source, heads=None, common=None, bundlecaps=None,
                   **kwargs):
@@ -199,8 +208,24 @@ class localpeer(peer.peerrepository):
         else:
             return changegroup.getunbundler('01', cb, None)
 
-    # TODO We might want to move the next two calls into legacypeer and add
-    # unbundle instead.
+    def heads(self):
+        return self._repo.heads()
+
+    def known(self, nodes):
+        return self._repo.known(nodes)
+
+    def listkeys(self, namespace):
+        return self._repo.listkeys(namespace)
+
+    def lookup(self, key):
+        return self._repo.lookup(key)
+
+    def pushkey(self, namespace, key, old, new):
+        return self._repo.pushkey(namespace, key, old, new)
+
+    def stream_out(self):
+        raise error.Abort(_('cannot perform stream clone against local '
+                            'peer'))
 
     def unbundle(self, cg, heads, url):
         """apply a bundle on a repo
@@ -237,37 +262,41 @@ class localpeer(peer.peerrepository):
         except error.PushRaced as exc:
             raise error.ResponseError(_('push failed:'), str(exc))
 
-    def lock(self):
-        return self._repo.lock()
+    # End of _basewirecommands interface.
 
-    def pushkey(self, namespace, key, old, new):
-        return self._repo.pushkey(namespace, key, old, new)
+    # Begin of peer interface.
 
-    def listkeys(self, namespace):
-        return self._repo.listkeys(namespace)
+    def iterbatch(self):
+        return peer.localiterbatcher(self)
 
-    def debugwireargs(self, one, two, three=None, four=None, five=None):
-        '''used to test argument passing over the wire'''
-        return "%s %s %s %s %s" % (one, two, three, four, five)
+    # End of peer interface.
 
-class locallegacypeer(localpeer):
+class locallegacypeer(repository.legacypeer, localpeer):
     '''peer extension which implements legacy methods too; used for tests with
     restricted capabilities'''
 
     def __init__(self, repo):
-        localpeer.__init__(self, repo, caps=legacycaps)
+        super(locallegacypeer, self).__init__(repo, caps=legacycaps)
 
-    def branches(self, nodes):
-        return self._repo.branches(nodes)
+    # Begin of baselegacywirecommands interface.
 
     def between(self, pairs):
         return self._repo.between(pairs)
 
+    def branches(self, nodes):
+        return self._repo.branches(nodes)
+
     def changegroup(self, basenodes, source):
-        return changegroup.changegroup(self._repo, basenodes, source)
+        outgoing = discovery.outgoing(self._repo, missingroots=basenodes,
+                                      missingheads=self._repo.heads())
+        return changegroup.makechangegroup(self._repo, outgoing, '01', source)
 
     def changegroupsubset(self, bases, heads, source):
-        return changegroup.changegroupsubset(self._repo, bases, heads, source)
+        outgoing = discovery.outgoing(self._repo, missingroots=bases,
+                                      missingheads=heads)
+        return changegroup.makechangegroup(self._repo, outgoing, '01', source)
+
+    # End of baselegacywirecommands interface.
 
 # Increment the sub-version when the revlog v2 format changes to lock out old
 # clients.
@@ -1466,6 +1495,13 @@ class localrepository(object):
         for k in list(self._filecache.keys()):
             # dirstate is invalidated separately in invalidatedirstate()
             if k == 'dirstate':
+                continue
+            if (k == 'changelog' and
+                self.currenttransaction() and
+                self.changelog._delayed):
+                # The changelog object may store unwritten revisions. We don't
+                # want to lose them.
+                # TODO: Solve the problem instead of working around it.
                 continue
 
             if clearfilecache:

@@ -6,7 +6,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import collections
 import copy
@@ -46,9 +46,7 @@ stringio = util.stringio
 gitre = re.compile(br'diff --git a/(.*) b/(.*)')
 tabsplitter = re.compile(br'(\t+|[^\t]+)')
 
-class PatchError(Exception):
-    pass
-
+PatchError = error.PatchError
 
 # public functions
 
@@ -205,10 +203,11 @@ def extract(ui, fileobj):
 
     # attempt to detect the start of a patch
     # (this heuristic is borrowed from quilt)
-    diffre = re.compile(r'^(?:Index:[ \t]|diff[ \t]|RCS file: |'
-                        r'retrieving revision [0-9]+(\.[0-9]+)*$|'
-                        r'---[ \t].*?^\+\+\+[ \t]|'
-                        r'\*\*\*[ \t].*?^---[ \t])', re.MULTILINE|re.DOTALL)
+    diffre = re.compile(br'^(?:Index:[ \t]|diff[ \t]|RCS file: |'
+                        br'retrieving revision [0-9]+(\.[0-9]+)*$|'
+                        br'---[ \t].*?^\+\+\+[ \t]|'
+                        br'\*\*\*[ \t].*?^---[ \t])',
+                        re.MULTILINE | re.DOTALL)
 
     data = {}
     fd, tmpname = tempfile.mkstemp(prefix='hg-patch-')
@@ -230,7 +229,7 @@ def extract(ui, fileobj):
                 pend = subject.find(']')
                 if pend >= 0:
                     subject = subject[pend + 1:].lstrip()
-            subject = re.sub(r'\n[ \t]+', ' ', subject)
+            subject = re.sub(br'\n[ \t]+', ' ', subject)
             ui.debug('Subject: %s\n' % subject)
         if data['user']:
             ui.debug('From: %s\n' % data['user'])
@@ -961,8 +960,8 @@ class recordhunk(object):
 
     def countchanges(self, hunk):
         """hunk -> (n+,n-)"""
-        add = len([h for h in hunk if h[0] == '+'])
-        rem = len([h for h in hunk if h[0] == '-'])
+        add = len([h for h in hunk if h.startswith('+')])
+        rem = len([h for h in hunk if h.startswith('-')])
         return add, rem
 
     def reversehunk(self):
@@ -973,7 +972,7 @@ class recordhunk(object):
         unchanged.
         """
         m = {'+': '-', '-': '+', '\\': '\\'}
-        hunk = ['%s%s' % (m[l[0]], l[1:]) for l in self.hunk]
+        hunk = ['%s%s' % (m[l[0:1]], l[1:]) for l in self.hunk]
         return recordhunk(self.header, self.toline, self.fromline, self.proc,
                           self.before, hunk, self.after)
 
@@ -996,54 +995,55 @@ class recordhunk(object):
     def __repr__(self):
         return '<hunk %r@%d>' % (self.filename(), self.fromline)
 
+messages = {
+    'multiple': {
+        'discard': _("discard change %d/%d to '%s'?"),
+        'record': _("record change %d/%d to '%s'?"),
+        'revert': _("revert change %d/%d to '%s'?"),
+    },
+    'single': {
+        'discard': _("discard this change to '%s'?"),
+        'record': _("record this change to '%s'?"),
+        'revert': _("revert this change to '%s'?"),
+    },
+    'help': {
+        'discard': _('[Ynesfdaq?]'
+                     '$$ &Yes, discard this change'
+                     '$$ &No, skip this change'
+                     '$$ &Edit this change manually'
+                     '$$ &Skip remaining changes to this file'
+                     '$$ Discard remaining changes to this &file'
+                     '$$ &Done, skip remaining changes and files'
+                     '$$ Discard &all changes to all remaining files'
+                     '$$ &Quit, discarding no changes'
+                     '$$ &? (display help)'),
+        'record': _('[Ynesfdaq?]'
+                    '$$ &Yes, record this change'
+                    '$$ &No, skip this change'
+                    '$$ &Edit this change manually'
+                    '$$ &Skip remaining changes to this file'
+                    '$$ Record remaining changes to this &file'
+                    '$$ &Done, skip remaining changes and files'
+                    '$$ Record &all changes to all remaining files'
+                    '$$ &Quit, recording no changes'
+                    '$$ &? (display help)'),
+        'revert': _('[Ynesfdaq?]'
+                    '$$ &Yes, revert this change'
+                    '$$ &No, skip this change'
+                    '$$ &Edit this change manually'
+                    '$$ &Skip remaining changes to this file'
+                    '$$ Revert remaining changes to this &file'
+                    '$$ &Done, skip remaining changes and files'
+                    '$$ Revert &all changes to all remaining files'
+                    '$$ &Quit, reverting no changes'
+                    '$$ &? (display help)')
+    }
+}
+
 def filterpatch(ui, headers, operation=None):
     """Interactively filter patch chunks into applied-only chunks"""
     if operation is None:
         operation = 'record'
-    messages = {
-        'multiple': {
-            'discard': _("discard change %d/%d to '%s'?"),
-            'record': _("record change %d/%d to '%s'?"),
-            'revert': _("revert change %d/%d to '%s'?"),
-        }[operation],
-        'single': {
-            'discard': _("discard this change to '%s'?"),
-            'record': _("record this change to '%s'?"),
-            'revert': _("revert this change to '%s'?"),
-        }[operation],
-        'help': {
-            'discard': _('[Ynesfdaq?]'
-                         '$$ &Yes, discard this change'
-                         '$$ &No, skip this change'
-                         '$$ &Edit this change manually'
-                         '$$ &Skip remaining changes to this file'
-                         '$$ Discard remaining changes to this &file'
-                         '$$ &Done, skip remaining changes and files'
-                         '$$ Discard &all changes to all remaining files'
-                         '$$ &Quit, discarding no changes'
-                         '$$ &? (display help)'),
-            'record': _('[Ynesfdaq?]'
-                        '$$ &Yes, record this change'
-                        '$$ &No, skip this change'
-                        '$$ &Edit this change manually'
-                        '$$ &Skip remaining changes to this file'
-                        '$$ Record remaining changes to this &file'
-                        '$$ &Done, skip remaining changes and files'
-                        '$$ Record &all changes to all remaining files'
-                        '$$ &Quit, recording no changes'
-                        '$$ &? (display help)'),
-            'revert': _('[Ynesfdaq?]'
-                        '$$ &Yes, revert this change'
-                        '$$ &No, skip this change'
-                        '$$ &Edit this change manually'
-                        '$$ &Skip remaining changes to this file'
-                        '$$ Revert remaining changes to this &file'
-                        '$$ &Done, skip remaining changes and files'
-                        '$$ Revert &all changes to all remaining files'
-                        '$$ &Quit, reverting no changes'
-                        '$$ &? (display help)')
-        }[operation]
-    }
 
     def prompt(skipfile, skipall, query, chunk):
         """prompt query, and process base inputs
@@ -1061,7 +1061,7 @@ def filterpatch(ui, headers, operation=None):
         if skipfile is not None:
             return skipfile, skipfile, skipall, newpatches
         while True:
-            resps = messages['help']
+            resps = messages['help'][operation]
             r = ui.promptchoice("%s %s" % (query, resps))
             ui.write("\n")
             if r == 8: # ?
@@ -1166,10 +1166,11 @@ the hunk is left unchanged.
             if skipfile is None and skipall is None:
                 chunk.pretty(ui)
             if total == 1:
-                msg = messages['single'] % chunk.filename()
+                msg = messages['single'][operation] % chunk.filename()
             else:
                 idx = pos - len(h.hunks) + i
-                msg = messages['multiple'] % (idx, total, chunk.filename())
+                msg = messages['multiple'][operation] % (idx, total,
+                                                         chunk.filename())
             r, skipfile, skipall, newpatches = prompt(skipfile,
                     skipall, msg, chunk)
             if r:
@@ -1476,7 +1477,7 @@ def reversehunks(hunks):
     This function operates on hunks coming out of patch.filterpatch, that is
     a list of the form: [header1, hunk1, hunk2, header2...]. Example usage:
 
-    >>> rawpatch = """diff --git a/folder1/g b/folder1/g
+    >>> rawpatch = b"""diff --git a/folder1/g b/folder1/g
     ... --- a/folder1/g
     ... +++ b/folder1/g
     ... @@ -1,7 +1,7 @@
@@ -1489,7 +1490,7 @@ def reversehunks(hunks):
     ...  5
     ...  d
     ... +lastline"""
-    >>> hunks = parsepatch(rawpatch)
+    >>> hunks = parsepatch([rawpatch])
     >>> hunkscomingfromfilterpatch = []
     >>> for h in hunks:
     ...     hunkscomingfromfilterpatch.append(h)
@@ -1500,9 +1501,9 @@ def reversehunks(hunks):
     >>> fp = util.stringio()
     >>> for c in reversedhunks:
     ...      c.write(fp)
-    >>> fp.seek(0)
+    >>> fp.seek(0) or None
     >>> reversedpatch = fp.read()
-    >>> print reversedpatch
+    >>> print(pycompat.sysstr(reversedpatch))
     diff --git a/folder1/g b/folder1/g
     --- a/folder1/g
     +++ b/folder1/g
@@ -1538,7 +1539,7 @@ def parsepatch(originalchunks, maxcontext=None):
 
     If maxcontext is not None, trim context lines if necessary.
 
-    >>> rawpatch = '''diff --git a/folder1/g b/folder1/g
+    >>> rawpatch = b'''diff --git a/folder1/g b/folder1/g
     ... --- a/folder1/g
     ... +++ b/folder1/g
     ... @@ -1,8 +1,10 @@
@@ -1559,7 +1560,7 @@ def parsepatch(originalchunks, maxcontext=None):
     ...     header.write(out)
     ...     for hunk in header.hunks:
     ...         hunk.write(out)
-    >>> print(out.getvalue())
+    >>> print(pycompat.sysstr(out.getvalue()))
     diff --git a/folder1/g b/folder1/g
     --- a/folder1/g
     +++ b/folder1/g
@@ -1664,17 +1665,17 @@ def pathtransform(path, strip, prefix):
 
     Returns (stripped components, path in repository).
 
-    >>> pathtransform('a/b/c', 0, '')
+    >>> pathtransform(b'a/b/c', 0, b'')
     ('', 'a/b/c')
-    >>> pathtransform('   a/b/c   ', 0, '')
+    >>> pathtransform(b'   a/b/c   ', 0, b'')
     ('', '   a/b/c')
-    >>> pathtransform('   a/b/c   ', 2, '')
+    >>> pathtransform(b'   a/b/c   ', 2, b'')
     ('a/b/', 'c')
-    >>> pathtransform('a/b/c', 0, 'd/e/')
+    >>> pathtransform(b'a/b/c', 0, b'd/e/')
     ('', 'd/e/a/b/c')
-    >>> pathtransform('   a//b/c   ', 2, 'd/e/')
+    >>> pathtransform(b'   a//b/c   ', 2, b'd/e/')
     ('a//b/', 'd/e/c')
-    >>> pathtransform('a/b/c', 3, '')
+    >>> pathtransform(b'a/b/c', 3, b'')
     Traceback (most recent call last):
     PatchError: unable to strip away 1 of 3 dirs from a/b/c
     '''
@@ -1690,7 +1691,7 @@ def pathtransform(path, strip, prefix):
                              (count, strip, path))
         i += 1
         # consume '//' in the path
-        while i < pathlen - 1 and path[i] == '/':
+        while i < pathlen - 1 and path[i:i + 1] == '/':
             i += 1
         count -= 1
     return path[:i].lstrip(), prefix + path[i:].rstrip()
@@ -1758,7 +1759,7 @@ def scanpatch(fp):
     - ('hunk',    [hunk_lines])
     - ('range',   (-start,len, +start,len, proc))
     """
-    lines_re = re.compile(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@\s*(.*)')
+    lines_re = re.compile(br'@@ -(\d+),(\d+) \+(\d+),(\d+) @@\s*(.*)')
     lr = linereader(fp)
 
     def scanwhile(first, p):
@@ -1785,7 +1786,7 @@ def scanpatch(fp):
             else:
                 lr.push(fromfile)
             yield 'file', header
-        elif line[0] == ' ':
+        elif line[0:1] == ' ':
             yield 'context', scanwhile(line, lambda l: l[0] in ' \\')
         elif line[0] in '-+':
             yield 'hunk', scanwhile(line, lambda l: l[0] in '-+\\')
@@ -2282,6 +2283,7 @@ def difffeatureopts(ui, opts=None, untrusted=False, section='diff', git=False,
                                           'ignorewsamount')
         buildopts['ignoreblanklines'] = get('ignore_blank_lines',
                                             'ignoreblanklines')
+        buildopts['ignorewseol'] = get('ignore_space_at_eol', 'ignorewseol')
     if formatchanging:
         buildopts['text'] = opts and opts.get('text')
         binary = None if opts is None else opts.get('binary')
